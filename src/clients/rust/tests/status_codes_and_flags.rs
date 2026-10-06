@@ -161,11 +161,11 @@ fn round_trip_init_status() {
 
 #[test]
 fn round_trip_packet_status() {
-    round_trip_test::<tb::PacketError, u8>(
+    round_trip_test::<tb::Error, u8>(
         "TB_PACKET_STATUS",
-        // Success not represented in tb::PacketError
+        // Success not represented in tb::Error
         &[0],
-        |c_value| tb::PacketError::from(c_value),
+        |c_value| tb::Error::from(c_value),
         |rust_value| u8::from(rust_value),
     );
 }

@@ -26,8 +26,8 @@ impl std::ops::BitOr for AccountFlags {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tb_account_t {
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct Account {
     pub id: u128,
     pub debits_pending: u128,
     pub debits_posted: u128,
@@ -36,7 +36,7 @@ pub struct tb_account_t {
     pub user_data_128: u128,
     pub user_data_64: u64,
     pub user_data_32: u32,
-    pub reserved: u32,
+    pub reserved: Reserved<4>,
     pub ledger: u32,
     pub code: u16,
     pub flags: AccountFlags,
@@ -69,8 +69,8 @@ impl std::ops::BitOr for TransferFlags {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tb_transfer_t {
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct Transfer {
     pub id: u128,
     pub debit_account_id: u128,
     pub credit_account_id: u128,
@@ -430,7 +430,7 @@ impl From<CreateTransferStatus> for u32 {
 pub struct CreateAccountResult {
     pub timestamp: u64,
     pub status: CreateAccountStatus,
-    pub reserved: u32,
+    pub reserved: Reserved<4>,
 }
 
 #[repr(C)]
@@ -438,7 +438,7 @@ pub struct CreateAccountResult {
 pub struct CreateTransferResult {
     pub timestamp: u64,
     pub status: CreateTransferStatus,
-    pub reserved: u32,
+    pub reserved: Reserved<4>,
 }
 
 #[repr(C)]
@@ -476,8 +476,8 @@ impl std::ops::BitOr for AccountFilterFlags {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tb_account_balance_t {
+#[derive(Debug, Copy, Clone, Default)]
+pub struct AccountBalance {
     pub debits_pending: u128,
     pub debits_posted: u128,
     pub credits_pending: u128,
@@ -542,17 +542,110 @@ pub struct tb_packet_t {
     pub opaque: [u8; 64],
 }
 
-pub type TB_OPERATION = u8;
-pub const TB_OPERATION_TB_OPERATION_PULSE: TB_OPERATION = 128;
-pub const TB_OPERATION_TB_OPERATION_GET_CHANGE_EVENTS: TB_OPERATION = 137;
-pub const TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS: TB_OPERATION = 140;
-pub const TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS: TB_OPERATION = 141;
-pub const TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS: TB_OPERATION = 142;
-pub const TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES: TB_OPERATION = 143;
-pub const TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS: TB_OPERATION = 144;
-pub const TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS: TB_OPERATION = 145;
-pub const TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS: TB_OPERATION = 146;
-pub const TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS: TB_OPERATION = 147;
+#[doc(hidden)]
+pub(crate) trait Operation: Send + Sync + 'static {
+    type OpSource: Send + 'static;
+    type OutputItem: Copy + Send + 'static;
+    const OP_CODE: u8;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize);
+}
+
+pub(crate) struct LookupAccounts;
+impl Operation for LookupAccounts {
+    type OpSource = Vec<u128>;
+    type OutputItem = Account;
+    const OP_CODE: u8 = 140;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = source.as_slice();
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct LookupTransfers;
+impl Operation for LookupTransfers {
+    type OpSource = Vec<u128>;
+    type OutputItem = Transfer;
+    const OP_CODE: u8 = 141;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = source.as_slice();
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct GetAccountTransfers;
+impl Operation for GetAccountTransfers {
+    type OpSource = AccountFilter;
+    type OutputItem = Transfer;
+    const OP_CODE: u8 = 142;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = std::slice::from_ref(source);
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct GetAccountBalances;
+impl Operation for GetAccountBalances {
+    type OpSource = AccountFilter;
+    type OutputItem = AccountBalance;
+    const OP_CODE: u8 = 143;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = std::slice::from_ref(source);
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct QueryAccounts;
+impl Operation for QueryAccounts {
+    type OpSource = QueryFilter;
+    type OutputItem = Account;
+    const OP_CODE: u8 = 144;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = std::slice::from_ref(source);
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct QueryTransfers;
+impl Operation for QueryTransfers {
+    type OpSource = QueryFilter;
+    type OutputItem = Transfer;
+    const OP_CODE: u8 = 145;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = std::slice::from_ref(source);
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct CreateAccounts;
+impl Operation for CreateAccounts {
+    type OpSource = Vec<Account>;
+    type OutputItem = CreateAccountResult;
+    const OP_CODE: u8 = 146;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = source.as_slice();
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
+
+pub(crate) struct CreateTransfers;
+impl Operation for CreateTransfers {
+    type OpSource = Vec<Transfer>;
+    type OutputItem = CreateTransferResult;
+    const OP_CODE: u8 = 147;
+
+    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {
+        let events = source.as_slice();
+        (events.as_ptr().cast(), std::mem::size_of_val(events))
+    }
+}
 
 pub type TB_PACKET_STATUS = u8;
 pub const TB_PACKET_STATUS_TB_PACKET_OK: TB_PACKET_STATUS = 0;

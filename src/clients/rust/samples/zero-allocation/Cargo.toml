@@ -1,5 +1,5 @@
 [package]
-name = "tigerbeetle-sample-basic"
+name = "tigerbeetle-sample-zero-allocation"
 version = "0.1.0"
 edition = "2021"
 
