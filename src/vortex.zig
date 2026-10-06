@@ -27,6 +27,7 @@ const CLIArgs = struct {
     replica_count: u8 = 1,
     disable_faults: bool = false,
     log_debug: bool = false,
+    directory: ?[]const u8 = null,
     /// Log file path.
     log: ?[]const u8 = null,
 
@@ -92,11 +93,28 @@ pub fn main(init: std.process.Init) !void {
     const seed = args.seed orelse stdx.crypto_random_int(init.io, u64);
     var prng = stdx.PRNG.from_seed(seed);
 
+    const shell = try stdx.Shell.create(gpa, init.io, init.environ_map);
+    defer shell.destroy();
+
+    const output_directory_relative = args.directory orelse (try shell.create_tmp_dir());
+    const output_directory = try std.Io.Dir.cwd().realPathFileAlloc(
+        shell.io,
+        output_directory_relative,
+        shell.arena.allocator(),
+    );
+    defer {
+        if (args.directory == null) {
+            shell.cwd.deleteTree(shell.io, output_directory) catch |err| {
+                log.err("error deleting tree: {}", .{err});
+            };
+        }
+    }
+
     log.info("seed={}", .{seed});
     switch (args.scenario) {
-        .default => try scenario_default(gpa, init, &prng, args),
-        .upgrade => try scenario_upgrade(gpa, init, &prng),
-        .recover => try scenario_recover(gpa, init, &prng),
+        .default => try scenario_default(gpa, init, &prng, args, output_directory),
+        .upgrade => try scenario_upgrade(gpa, init, &prng, output_directory),
+        .recover => try scenario_recover(gpa, init, &prng, output_directory),
     }
 
     log.info("done", .{});
@@ -118,6 +136,7 @@ fn scenario_default(
     init: std.process.Init,
     prng: *stdx.PRNG,
     args: CLIArgs,
+    output_directory: []const u8,
 ) !void {
     assert(args.scenario == .default);
 
@@ -133,6 +152,7 @@ fn scenario_default(
         .replica_count = args.replica_count,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 
@@ -170,7 +190,12 @@ fn scenario_default(
     supervisor.workload_terminate();
 }
 
-fn scenario_upgrade(gpa: std.mem.Allocator, init: std.process.Init, prng: *stdx.PRNG) !void {
+fn scenario_upgrade(
+    gpa: std.mem.Allocator,
+    init: std.process.Init,
+    prng: *stdx.PRNG,
+    output_directory: []const u8,
+) !void {
     const replica_count = 3;
     const duration_max = stdx.Duration.seconds(200);
     const tick_ms = 10;
@@ -181,6 +206,7 @@ fn scenario_upgrade(gpa: std.mem.Allocator, init: std.process.Init, prng: *stdx.
         .replica_count = replica_count,
         .faulty = false,
         .log_debug = false,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 
@@ -230,7 +256,12 @@ fn scenario_upgrade(gpa: std.mem.Allocator, init: std.process.Init, prng: *stdx.
     }
 }
 
-fn scenario_recover(gpa: std.mem.Allocator, init: std.process.Init, prng: *stdx.PRNG) !void {
+fn scenario_recover(
+    gpa: std.mem.Allocator,
+    init: std.process.Init,
+    prng: *stdx.PRNG,
+    output_directory: []const u8,
+) !void {
     const replica_count = 3;
 
     var supervisor = try Supervisor.create(gpa, init.io, init.environ_map, .{
@@ -238,6 +269,7 @@ fn scenario_recover(gpa: std.mem.Allocator, init: std.process.Init, prng: *stdx.
         .replica_count = replica_count,
         .faulty = false,
         .log_debug = false,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 

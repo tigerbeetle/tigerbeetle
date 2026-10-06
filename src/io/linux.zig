@@ -1586,7 +1586,7 @@ pub const IO = struct {
         // can see "another process holds the data file lock" errors, even though the process really
         // has terminated.
         const lock_acquired = blk: {
-            for (0..5) |_| {
+            for (0..10) |_| {
                 posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
                     error.WouldBlock => {
                         std.Io.sleep(self.io_std, .fromMilliseconds(50), .awake) catch {};
