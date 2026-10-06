@@ -364,7 +364,6 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
     buffer.write(
         \\    def initialize: (cluster_id: Integer, replica_addresses: String) -> void
         \\    def close: () -> nil
-        \\    def closed?: () -> bool
         \\
         \\    def create_accounts: (Array[Account]) -> Array[CreateAccountResult]
         \\    def create_transfers: (Array[Transfer]) -> Array[CreateTransferResult]

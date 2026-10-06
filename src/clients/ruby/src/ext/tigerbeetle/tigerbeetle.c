@@ -200,8 +200,14 @@ static VALUE rb_tb_client_initialize(
     return self;
 }
 
+typedef struct rb_tb_deinit_context {
+    tb_client_t *client;
+    TB_CLIENT_STATUS status;
+} rb_tb_deinit_context_t;
+
 static void *rb_tb_deinit_without_gvl(void *arg) {
-    tb_client_deinit((tb_client_t *)arg);
+    rb_tb_deinit_context_t *context = (rb_tb_deinit_context_t *)arg;
+    context->status = tb_client_deinit(context->client);
     return NULL;
 }
 
@@ -211,7 +217,10 @@ static VALUE rb_tb_client_close(VALUE self) {
 
     // deinit blocks until all in-flight callbacks complete. The GVL is released
     // while waiting so other Ruby threads can run.
-    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, client, NULL, NULL);
+    rb_tb_deinit_context_t context = { .client = client };
+    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, &context, NULL, NULL);
+    tb_assert(context.status != TB_CLIENT_NOT_INITIALIZED);
+
     return Qnil;
 }
 
