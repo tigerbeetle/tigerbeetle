@@ -57,31 +57,48 @@ const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
 /// Executables/releases are ordered from oldest to newest.
 /// All paths are absolute.
-fn configuration(shell: *Shell) !struct {
+///
+/// Hard-link the dependencies (replica and driver binaries) into our run's target directory
+/// so that Vortex keeps running if they are removed or replaced.
+fn configuration(
+    shell: *Shell,
+    source_directory: []const u8,
+    target_directory: []const u8,
+) !struct {
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
     releases: [dependencies_count]Release,
 } {
+    assert(std.fs.path.isAbsolute(source_directory));
+    assert(std.fs.path.isAbsolute(target_directory));
+
+    const source_dir = try std.Io.Dir.openDirAbsolute(shell.io, source_directory, .{});
+    defer source_dir.close(shell.io);
+
+    const target_dir = try std.Io.Dir.openDirAbsolute(shell.io, target_directory, .{});
+    defer target_dir.close(shell.io);
+
     comptime assert(dependencies_count > 0);
-    const server_executables: [dependencies_count][]const u8 = comptime array: {
+    const server_executables: [dependencies_count][]const u8 = executables: {
         var executables: [dependencies_count][]const u8 = undefined;
-        for (&executables, 0..) |*server, i| {
-            server.* = std.fmt.comptimePrint(
-                "{s}/tigerbeetle-{d}",
-                .{ dependencies_path, dependencies_count - i - 1 },
-            );
+        for (&executables, 0..) |*executable, i| {
+            const file = try shell.fmt("tigerbeetle-{d}", .{dependencies_count - i - 1});
+            try source_dir.hardLink(file, target_dir, file, shell.io, .{});
+
+            executable.* = try shell.fmt("{s}/{s}", .{ target_directory, file });
         }
-        break :array executables;
+        break :executables executables;
     };
-    const driver_executables: [dependencies_count][]const u8 = comptime array: {
+
+    const driver_executables: [dependencies_count][]const u8 = executables: {
         var executables: [dependencies_count][]const u8 = undefined;
-        for (&executables, 0..) |*server, i| {
-            server.* = std.fmt.comptimePrint(
-                "{s}/vortex-driver-zig-{d}",
-                .{ dependencies_path, dependencies_count - i - 1 },
-            );
+        for (&executables, 0..) |*executable, i| {
+            const file = try shell.fmt("vortex-driver-zig-{d}", .{dependencies_count - i - 1});
+            try source_dir.hardLink(file, target_dir, file, shell.io, .{});
+
+            executable.* = try shell.fmt("{s}/{s}", .{ target_directory, file });
         }
-        break :array executables;
+        break :executables executables;
     };
 
     const releases: [dependencies_count]Release = array: {
@@ -152,11 +169,12 @@ pub const Supervisor = struct {
     ) !*Supervisor {
         // Vortex currently only supports Linux.
         assert(builtin.os.tag == .linux);
+        assert(std.fs.path.isAbsolute(options.directory));
 
         const shell = try Shell.create(allocator, io_std, environ_map);
         errdefer shell.destroy();
 
-        const dependencies = try configuration(shell);
+        const dependencies = try configuration(shell, dependencies_path, options.directory);
         assert(dependencies.releases.len == dependencies.server_executables.len);
         assert(dependencies.releases.len == dependencies.driver_executables.len);
         assert(options.replica_count > 0);
