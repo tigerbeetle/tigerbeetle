@@ -23,7 +23,7 @@ const tb_client = @import("./scripts/tb_client.zig");
 
 pub fn log_fn(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -75,8 +75,8 @@ const CLIArgs = union(enum) {
     ;
 };
 
-pub fn main() !void {
-    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init) !void {
+    var gpa_allocator = std.heap.DebugAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
         .ok => {},
         .leak => @panic("memory leak"),
@@ -84,13 +84,13 @@ pub fn main() !void {
 
     const gpa = gpa_allocator.allocator();
 
-    const shell = try Shell.create(gpa);
+    const shell = try Shell.create(gpa, init.io, init.environ_map);
     defer shell.destroy();
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    const cli_args = flags.parse(CLIArgs, init.minimal.args);
 
     switch (cli_args) {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
@@ -98,6 +98,6 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
-        .tbclient => |args_tb_client| try tb_client.main(gpa, args_tb_client),
+        .tbclient => |args_tb_client| try tb_client.main(shell, gpa, args_tb_client),
     }
 }

@@ -22,7 +22,6 @@ module TigerBeetle
 
     def initialize: (cluster_id: Integer, replica_addresses: String) -> void
     def close: () -> nil
-    def closed?: () -> bool
 
     def create_accounts: (Array[Account]) -> Array[CreateAccountResult]
     def create_transfers: (Array[Transfer]) -> Array[CreateTransferResult]

@@ -32,12 +32,12 @@ const TimeIt = struct {
         const label_alignment = comptime " " ** (1 + (12 -| label.len));
 
         const now = self.time.benchmark_monotonic();
-        const elapsed = self.timer.elapsed(now);
+        const elapsed = self.timer.until(now);
         self.timer = now;
 
         std.debug.print(
-            label ++ ":" ++ label_alignment ++ "{}\n",
-            .{std.fmt.fmtDuration(elapsed.ns)},
+            label ++ ":" ++ label_alignment ++ "{f}\n",
+            .{elapsed},
         );
     }
 
@@ -64,12 +64,12 @@ const TimeIt = struct {
         backtrace: bool,
     ) void {
         const now = self.time.benchmark_monotonic();
-        const elapsed = self.timer.elapsed(now);
+        const elapsed = self.timer.until(now);
         self.timer = now;
 
         if (elapsed.ns > threshold_ms * std.time.ns_per_ms) {
-            std.debug.print(label ++ ": {}\n", .{std.fmt.fmtDuration(elapsed.ns)});
-            if (backtrace) std.debug.dumpCurrentStackTrace(null);
+            std.debug.print(label ++ ": {f}\n", .{elapsed});
+            if (backtrace) std.debug.dumpCurrentStackTrace(.{});
         }
     }
 };

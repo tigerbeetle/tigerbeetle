@@ -14,12 +14,15 @@ const ClientError = tb_client.ClientError;
 const Operation = tb_client.Operation;
 
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
+const stdx = @import("stdx");
+const Shell = stdx.Shell;
 
 pub const CLIArgs = struct {};
 
 const TestingContext = struct {
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    io: std.Io,
+    mutex: std.Io.Mutex = .init,
+    cond: std.Io.Condition = .init,
     reply: ?struct {
         tb_context: usize,
         tb_packet: *Packet,
@@ -28,11 +31,11 @@ const TestingContext = struct {
     } = null,
 
     pub fn wait_pending(self: *TestingContext) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         while (self.reply == null) {
-            self.cond.wait(&self.mutex);
+            self.cond.waitUncancelable(self.io, &self.mutex);
         }
     }
 
@@ -46,8 +49,8 @@ const TestingContext = struct {
         _ = result;
         var self: *TestingContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         assert(self.reply == null);
         self.reply = .{
@@ -56,22 +59,22 @@ const TestingContext = struct {
             .timestamp = timestamp,
             .result_size = result_size,
         };
-        self.cond.signal();
+        self.cond.signal(self.io);
     }
 };
 
-pub fn main(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     _ = cli_args;
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = false,
         .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
     try test_init(gpa, tmp_beetle.port_str);
-    try test_client_status(gpa, tmp_beetle.port_str);
-    try test_packet_status(gpa, tmp_beetle.port_str);
+    try test_client_status(gpa, shell.io, tmp_beetle.port_str);
+    try test_packet_status(gpa, shell.io, tmp_beetle.port_str);
 }
 
 // Asserts the validation rules associated with the `init` function.
@@ -118,8 +121,8 @@ fn test_init(gpa: std.mem.Allocator, _: []const u8) !void {
 }
 
 // Asserts the validation rules associated with the client status.
-fn test_client_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
-    var request: TestingContext = .{};
+fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
+    var request: TestingContext = .{ .io = io };
     var packet: Packet = .{
         .operation = @intFromEnum(Operation.create_accounts),
         .user_data = &request,
@@ -163,7 +166,7 @@ fn test_client_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
 }
 
 // Asserts the validation rules associated with the "PacketStatus" enum.
-fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
+fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
     var client: ClientInterface = undefined;
     const cluster_id: u128 = 0;
     const tb_context: usize = 42;
@@ -179,11 +182,12 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
 
     const submit = struct {
         fn submit(
+            client_io: std.Io,
             client_interface: *ClientInterface,
             operation: u8,
             request_size: u32,
         ) !tb_client.PacketStatus {
-            var request: TestingContext = .{};
+            var request: TestingContext = .{ .io = client_io };
             var packet: Packet = .{
                 .operation = operation,
                 .user_data = &request,
@@ -209,6 +213,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
 
     // Messages larger than constants.message_body_size_max should return "too_much_data":
     try std.testing.expectEqual(PacketStatus.too_much_data, try submit(
+        io,
         &client,
         @intFromEnum(tb_client.Operation.create_transfers),
         constants.message_body_size_max + @sizeOf(tb_client.exports.tb_transfer_t),
@@ -217,15 +222,15 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     // All reserved and unknown operations should return "invalid_operation":
     try std.testing.expectEqual(
         PacketStatus.invalid_operation,
-        try submit(&client, 0, @sizeOf(u128)),
+        try submit(io, &client, 0, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
         PacketStatus.invalid_operation,
-        try submit(&client, 1, @sizeOf(u128)),
+        try submit(io, &client, 1, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
         PacketStatus.invalid_operation,
-        try submit(&client, std.math.maxInt(u8), @sizeOf(u128)),
+        try submit(io, &client, std.math.maxInt(u8), @sizeOf(u128)),
     );
 
     // Messages not a multiple of the event size
@@ -233,6 +238,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.invalid_data_size,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.create_transfers),
             @sizeOf(tb_client.exports.tb_transfer_t) - 1,
@@ -241,6 +247,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.invalid_data_size,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.lookup_transfers),
             @sizeOf(u128) + 1,
@@ -249,6 +256,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.invalid_data_size,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.lookup_accounts),
             @sizeOf(u128) * 2.5,
@@ -259,6 +267,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.ok,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.create_accounts),
             0,
@@ -269,6 +278,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.invalid_data_size,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.query_accounts),
             0,
@@ -277,6 +287,7 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try std.testing.expectEqual(
         PacketStatus.invalid_data_size,
         try submit(
+            io,
             &client,
             @intFromEnum(Operation.query_transfers),
             @sizeOf(tb_client.exports.tb_query_filter_t) * 2,

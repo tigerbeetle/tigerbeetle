@@ -9,8 +9,10 @@ const TypeMapping = struct {
     source: type,
     target: enum {
         auto, // auto-detect based on zig type
+        operation,
         enum_manual,
-        struct_with_default,
+        struct_default,
+        struct_default_eq,
     } = .auto,
     name: []const u8,
     comment: ?[]const u8 = null,
@@ -18,9 +20,9 @@ const TypeMapping = struct {
 
 const type_mappings = [_]TypeMapping{
     .{ .source = exports.tb_account_flags, .name = "AccountFlags" },
-    .{ .source = exports.tb_account_t, .name = "tb_account_t" },
+    .{ .source = exports.tb_account_t, .name = "Account", .target = .struct_default_eq },
     .{ .source = exports.tb_transfer_flags, .name = "TransferFlags" },
-    .{ .source = exports.tb_transfer_t, .name = "tb_transfer_t" },
+    .{ .source = exports.tb_transfer_t, .name = "Transfer", .target = .struct_default_eq },
     .{ .source = exports.tb_create_account_status, .name = "CreateAccountStatus" },
     .{ .source = exports.tb_create_transfer_status, .name = "CreateTransferStatus" },
     .{ .source = exports.tb_create_account_result_t, .name = "CreateAccountResult" },
@@ -28,11 +30,15 @@ const type_mappings = [_]TypeMapping{
     .{
         .source = exports.tb_account_filter_t,
         .name = "AccountFilter",
-        .target = .struct_with_default,
+        .target = .struct_default,
     },
     .{ .source = exports.tb_account_filter_flags, .name = "AccountFilterFlags" },
-    .{ .source = exports.tb_account_balance_t, .name = "tb_account_balance_t" },
-    .{ .source = exports.tb_query_filter_t, .name = "QueryFilter", .target = .struct_with_default },
+    .{
+        .source = exports.tb_account_balance_t,
+        .name = "AccountBalance",
+        .target = .struct_default,
+    },
+    .{ .source = exports.tb_query_filter_t, .name = "QueryFilter", .target = .struct_default },
     .{ .source = exports.tb_query_filter_flags, .name = "QueryFilterFlags" },
     .{
         .source = exports.tb_client_t,
@@ -52,7 +58,7 @@ const type_mappings = [_]TypeMapping{
         \\// must remain stable throughout the lifetime of the request.
         ,
     },
-    .{ .source = exports.tb_operation, .name = "TB_OPERATION", .target = .enum_manual },
+    .{ .source = exports.tb_operation, .name = "Operation", .target = .operation },
     .{ .source = exports.tb_packet_status, .name = "TB_PACKET_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_init_status, .name = "TB_INIT_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_client_status, .name = "TB_CLIENT_STATUS", .target = .enum_manual },
@@ -328,25 +334,24 @@ fn emit_struct(
     try writer.print("pub struct {s} {{\n", .{rust_name});
 
     inline for (type_info.fields) |field| {
-        switch (@typeInfo(field.type)) {
-            .array => |array| {
-                if (std.mem.eql(u8, field.name, "reserved")) {
-                    assert(array.child == u8);
-                    try writer.print("    pub reserved: Reserved<{d}>", .{array.len});
-                } else {
+        if (std.mem.eql(u8, field.name, "reserved")) {
+            try writer.print("    pub reserved: Reserved<{d}>", .{@sizeOf(field.type)});
+        } else {
+            switch (@typeInfo(field.type)) {
+                .array => |array| {
                     try writer.print("    pub {s}: [{s}; {}]", .{
                         field.name,
                         resolve_rust_type(field.type),
                         array.len,
                     });
-                }
-            },
-            else => {
-                try writer.print("    pub {s}: {s}", .{
-                    field.name,
-                    resolve_rust_type(field.type),
-                });
-            },
+                },
+                else => {
+                    try writer.print("    pub {s}: {s}", .{
+                        field.name,
+                        resolve_rust_type(field.type),
+                    });
+                },
+            }
         }
 
         try writer.print(",\n", .{});
@@ -355,13 +360,77 @@ fn emit_struct(
     try writer.print("}}\n\n", .{});
 }
 
-pub fn main() !void {
+fn emit_operations(
+    writer: anytype,
+    comptime Operation: type,
+    comptime type_info: std.builtin.Type.Enum,
+    comptime rust_name: []const u8,
+    comptime skip_fields: []const []const u8,
+) !void {
+    assert(Operation == exports.tb_operation);
+
+    try writer.print(
+        \\#[doc(hidden)]
+        \\pub(crate) trait {s}: Send + Sync + 'static {{
+        \\    type OpSource: Send + 'static;
+        \\    type OutputItem: Copy + Send + 'static;
+        \\    const OP_CODE: u8;
+        \\
+        \\    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize);
+        \\}}
+        \\
+        \\
+    , .{rust_name});
+
+    inline for (type_info.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+        comptime var skip = false;
+        inline for (skip_fields) |sf| {
+            skip = skip or comptime std.mem.eql(u8, sf, field.name);
+        }
+        if (skip) continue;
+
+        const op_enum = @field(Operation, field.name);
+        const op_name = stdx.to_case(field.name, .PascalCase);
+
+        try writer.print("pub(crate) struct {s};\n", .{op_name});
+        try writer.print(
+            \\impl {[rust_name]s} for {[op_name]s} {{
+            \\    type OpSource = {[source_type]s};
+            \\    type OutputItem = {[output_type]s};
+            \\    const OP_CODE: u8 = {[op_code]d};
+            \\
+            \\    fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize) {{
+            \\        let events = {[source_slice]s};
+            \\        (events.as_ptr().cast(), std::mem::size_of_val(events))
+            \\    }}
+            \\}}
+            \\
+            \\
+        , .{
+            .rust_name = rust_name,
+            .op_name = op_name,
+            .source_type = comptime if (op_enum.is_batchable())
+                "Vec<" ++ resolve_rust_type(op_enum.EventType()) ++ ">"
+            else
+                resolve_rust_type(op_enum.EventType()),
+            .output_type = resolve_rust_type(op_enum.ResultType()),
+            .op_code = @intFromEnum(op_enum),
+            .source_slice = if (op_enum.is_batchable())
+                "source.as_slice()"
+            else
+                "std::slice::from_ref(source)",
+        });
+    }
+}
+
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var buffer = std.ArrayList(u8).init(allocator);
-    var writer = buffer.writer();
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    const writer = &buffer.writer;
     try writer.print(
         \\ ///////////////////////////////////////////////////////
         \\ // This file was auto-generated by rust_bindings.zig //
@@ -384,10 +453,22 @@ pub fn main() !void {
             .enum_manual => {
                 try emit_enum_manual(writer, type_mapping.source, type_info.@"enum", rust_name);
             },
-            .struct_with_default => {
+            .struct_default => {
                 try emit_struct(writer, type_info.@"struct", rust_name, .{
                     .derive = "Debug, Copy, Clone, Default",
                 });
+            },
+            .struct_default_eq => {
+                try emit_struct(writer, type_info.@"struct", rust_name, .{
+                    .derive = "Debug, Copy, Clone, Default, PartialEq, Eq",
+                });
+            },
+            .operation => {
+                // try writer.print("pub mod op {{\n\n", .{});
+                try emit_operations(writer, type_mapping.source, type_info.@"enum", rust_name, &.{
+                    "get_change_events", "pulse",
+                });
+                // try writer.print("}} // mod op\n\n", .{});
             },
             .auto => switch (type_info) {
                 .@"struct" => |info| switch (info.layout) {
@@ -475,5 +556,5 @@ pub fn main() !void {
         \\}}
     , .{});
 
-    try std.io.getStdOut().writeAll(buffer.items);
+    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }

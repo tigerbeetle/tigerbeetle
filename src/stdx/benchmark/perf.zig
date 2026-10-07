@@ -50,7 +50,7 @@ test "perf: usage example" {
     };
     defer perf.deinit();
 
-    var output_memory = std.ArrayList(u8).init(std.testing.allocator);
+    var output_memory: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer output_memory.deinit();
 
     const scale = 1_000;
@@ -63,13 +63,13 @@ test "perf: usage example" {
     const measurement = try perf.lap();
 
     const Parameters = struct { op: []const u8, context: []const u8 };
-    var output: PerfTableType(Parameters) = try .init(output_memory.writer().any());
+    var output: PerfTableType(Parameters) = try .init(&output_memory.writer);
     try output.row(&measurement, .{ .checksum = @truncate(checksum), .scale = scale }, .{
         .op = "*",
         .context = "test",
     });
 
-    const header, const values = stdx.cut(output_memory.items, "\n").?;
+    const header, const values = stdx.cut(output_memory.written(), "\n").?;
     assert(header.len > 0);
     assert(values.len > 0);
     assert(std.mem.startsWith(u8, header, "  op, context, elapsed_ms"));
@@ -99,7 +99,7 @@ pub fn PerfTableType(BenchmarkParameters: type) type {
 
         output: TabularOutput,
 
-        pub fn init(writer: std.io.AnyWriter) !PerfTable {
+        pub fn init(writer: *std.Io.Writer) !PerfTable {
             return .{ .output = try .init(writer, .{ .header = true }) };
         }
 

@@ -104,7 +104,7 @@ pub fn main(
         message_pools.push(try MessagePool.init(allocator, .client));
     }
 
-    std.log.info("Benchmark running against {any}", .{addresses});
+    std.log.info("Benchmark running against {f}", .{vsr.format_addresses(addresses)});
 
     var clients = stdx.BoundedArrayType(Client, constants.clients_max){};
     defer for (clients.slice()) |*client| client.deinit(allocator);
@@ -115,7 +115,7 @@ pub fn main(
             time,
             &message_pools.slice()[i],
             .{
-                .id = stdx.crypto_u128(),
+                .id = stdx.crypto_u128(io.io_std),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
                 .aof_recovery = false,
@@ -139,14 +139,14 @@ pub fn main(
 
     const client_requests = try allocator.alignedAlloc(
         [constants.message_body_size_max]u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         clients.count(),
     );
     defer allocator.free(client_requests);
 
     const client_replies = try allocator.alignedAlloc(
         [constants.message_body_size_max]u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         clients.count(),
     );
     defer allocator.free(client_replies);
@@ -184,15 +184,17 @@ pub fn main(
 
     const use_tbid = cli_args.id_order == .tbid;
     const account_id_start: ?u128 = if (use_tbid)
-        stdx.crypto_u128()
+        stdx.crypto_u128(io.io_std)
     else
         null;
+
+    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
 
     var benchmark = Benchmark{
         .io = io,
         .prng = &prng,
-        .timer = try std.time.Timer.start(),
-        .output = std.io.getStdOut().writer().any(),
+        .timer = .init(time),
+        .output = &stdout_writer.interface,
         .clients = clients.slice(),
         .client_timeouts = client_timeouts,
         .client_requests = client_requests,
@@ -206,7 +208,7 @@ pub fn main(
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
-        .tbid_generator = if (use_tbid) TbidGenerator.init(&prng) else null,
+        .tbid_generator = if (use_tbid) TBIDGenerator.init(time, &prng) else null,
         .transfer_batch_count = cli_args.transfer_batch_count,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
@@ -245,7 +247,7 @@ pub fn main(
 
         benchmark.timer.reset();
         _ = vsr.checksum(buffer);
-        const checksum_duration_ns = benchmark.timer.read();
+        const checksum_duration_ns = benchmark.timer.read().ns;
 
         benchmark.output.print(
             \\message size max = {} bytes
@@ -285,46 +287,71 @@ const Generator = union(enum) {
 /// - Advancing time: new random value
 /// - Same/backward time: incrementing random
 /// - Random overflow: carry to timestamp, new random
-const TbidGenerator = struct {
+const TBIDGenerator = struct {
+    time: Time,
     prng: *stdx.PRNG,
-    epoch_ms: u128,
-    random: u80,
+    previous: u128,
 
-    fn init(prng: *stdx.PRNG) TbidGenerator {
-        const epoch_ms: u128 = @intCast(std.time.milliTimestamp());
+    fn init(time: Time, prng: *stdx.PRNG) TBIDGenerator {
         return .{
+            .time = time,
             .prng = prng,
-            .epoch_ms = epoch_ms,
-            .random = prng.int(u80),
+            .previous = 0,
         };
     }
 
-    fn next(generator: *TbidGenerator) u128 {
-        const now: u128 = @intCast(std.time.milliTimestamp());
+    fn next(generator: *TBIDGenerator) u128 {
+        const time_ms_new = generator.time_ms();
 
-        if (now > generator.epoch_ms) {
-            // Time advanced: use new time and new random.
-            generator.epoch_ms = now;
-            generator.random = generator.prng.int(u80);
+        if (time_ms_new > generator.previous) {
+            // Time advanced by at least a millisecond: use new time and new random.
+            generator.previous = time_ms_new | generator.entropy();
         } else {
-            // Time same or behind: keep old time, increment random.
-            generator.random = std.math.add(u80, generator.random, 1) catch blk: {
-                // Carry the overflow to the time part and reseed random (as the rust client).
-                generator.epoch_ms = std.math.add(u128, generator.epoch_ms, 1) catch
-                    @panic("tbid timestamp overflow");
-                break :blk generator.prng.int(u80);
-            };
+            // Time same or behind, increment.
+            generator.previous += 1;
         }
+        return generator.previous;
+    }
 
-        return (@as(u128, generator.epoch_ms) << 80) | @as(u128, generator.random);
+    const time_ms_mask: u128 = 0xFFFF_FFFF_FFFF_0000_0000_0000_0000_0000;
+    const entropy_mask: u128 = 0x0000_0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF;
+    comptime {
+        assert(@popCount(time_ms_mask) == 48);
+        assert(@popCount(entropy_mask) == 80);
+        assert((time_ms_mask ^ entropy_mask) == std.math.maxInt(u128));
+
+        const instant_max: stdx.InstantUnix = .{ .ns = std.math.maxInt(u64) };
+        const time_ms_max = time_ms_from_instant(instant_max);
+        assert(time_ms_max == 0x10C6_F7A0_B5ED_0000_0000_0000_0000_0000);
+        assert(time_ms_max & (~time_ms_mask) == 0);
+    }
+
+    fn time_ms(generator: *TBIDGenerator) u128 {
+        const now: stdx.InstantUnix = generator.time.realtime();
+        return time_ms_from_instant(now);
+    }
+
+    fn time_ms_from_instant(instant: stdx.InstantUnix) u128 {
+        const instant_ms = @divFloor(instant.ns, std.time.ns_per_ms);
+        const result: u128 = @as(u128, instant_ms) << 80;
+        assert(result & (~time_ms_mask) == 0); // Can't overflow!
+        return result;
+    }
+
+    fn entropy(generator: *TBIDGenerator) u128 {
+        var result: u128 = generator.prng.int(u64);
+        result <<= 16;
+        result |= generator.prng.int(u16);
+        assert(result & (~entropy_mask) == 0);
+        return result;
     }
 };
 
 const Benchmark = struct {
     io: *IO,
     prng: *stdx.PRNG,
-    timer: std.time.Timer,
-    output: std.io.AnyWriter,
+    timer: stdx.Timer,
+    output: *std.Io.Writer,
     clients: []Client,
 
     // Configuration:
@@ -336,7 +363,7 @@ const Benchmark = struct {
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
-    tbid_generator: ?TbidGenerator,
+    tbid_generator: ?TBIDGenerator,
     transfer_batch_count: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
@@ -531,7 +558,7 @@ const Benchmark = struct {
         }
 
         const requests_complete = b.request_index - b.clients_busy.count();
-        const request_duration_ns = b.timer.read() - b.clients_request_ns[client_index];
+        const request_duration_ns = b.timer.read().ns - b.clients_request_ns[client_index];
         const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
         const transfers_created = @min(b.transfer_count, b.transfer_batch_count);
         b.transfers_created += transfers_created;
@@ -583,17 +610,18 @@ const Benchmark = struct {
         b.output.print(
             \\{[batch_count]} batches in {[batch_duration_s]d:.2} s
             \\transfer batch size = {[batch_size]} txs
-            \\transfer batch delay = {[batch_delay]}
+            \\transfer batch delay = {[batch_delay]f}
             \\load accepted = {[transfer_rate]} tx/s
             \\
         , .{
             .batch_count = b.request_index,
-            .batch_duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
+            .batch_duration_s = @as(f64, @floatFromInt(b.timer.read().ns)) /
+                std.time.ns_per_s,
             .batch_size = b.transfer_batch_count,
             .batch_delay = b.transfer_batch_delay,
             .transfer_rate = @divTrunc(
                 @as(u64, b.transfer_count) * std.time.ns_per_s,
-                b.timer.read(),
+                b.timer.read().ns,
             ),
         }) catch unreachable;
         print_percentiles_histogram(b.output, "batch", b.request_latency_histogram);
@@ -663,7 +691,8 @@ const Benchmark = struct {
 
         b.output.print("\n{[query_count]} queries in {[query_duration_s]d:.1} s\n", .{
             .query_count = b.request_index,
-            .query_duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
+            .query_duration_s = @as(f64, @floatFromInt(b.timer.read().ns)) /
+                std.time.ns_per_s,
         }) catch unreachable;
         print_percentiles_histogram(b.output, "query", b.request_latency_histogram);
 
@@ -860,7 +889,7 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
 
         b.clients_busy.set(client_index);
-        b.clients_request_ns[client_index] = b.timer.read();
+        b.clients_request_ns[client_index] = b.timer.read().ns;
         b.request_index += 1;
 
         var encoder = vsr.multi_batch.MultiBatchEncoder.init(
@@ -898,7 +927,7 @@ const Benchmark = struct {
 
         b.clients_busy.unset(client);
 
-        const duration_ns = b.timer.read() - b.clients_request_ns[client];
+        const duration_ns = b.timer.read().ns - b.clients_request_ns[client];
         const duration_ms = @divTrunc(duration_ns, std.time.ns_per_ms);
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
@@ -1068,7 +1097,7 @@ const Benchmark = struct {
 };
 
 fn print_percentiles_histogram(
-    stdout: std.io.AnyWriter,
+    stdout: *std.Io.Writer,
     label: []const u8,
     histogram_buckets: []const u64,
 ) void {

@@ -28,6 +28,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
     return struct {
         const StateChecker = @This();
 
+        allocator: mem.Allocator,
         node_count: u8,
         replica_count: u8,
 
@@ -55,12 +56,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }) !StateChecker {
             const root_prepare = vsr.Header.Prepare.root(options.cluster_id);
 
-            var commits = Commits.init(allocator);
-            errdefer commits.deinit();
+            var commits: Commits = .empty;
+            errdefer commits.deinit(allocator);
 
             var commit_replicas: ReplicaSet = .{};
             for (options.replicas, 0..) |_, i| commit_replicas.set(i);
-            try commits.append(.{
+            try commits.append(allocator, .{
                 .header = root_prepare,
                 .release = null,
                 .replicas = commit_replicas,
@@ -75,6 +76,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
             return StateChecker{
+                .allocator = allocator,
                 .node_count = @intCast(options.replicas.len),
                 .replica_count = options.replica_count,
                 .commits = commits,
@@ -86,11 +88,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn deinit(state_checker: *StateChecker) void {
-            const allocator = state_checker.commits.allocator;
+            const allocator = state_checker.allocator;
 
             allocator.free(state_checker.replica_head_max);
             state_checker.client_replies.deinit(allocator);
-            state_checker.commits.deinit();
+            state_checker.commits.deinit(allocator);
         }
 
         pub fn on_client_eviction(state_checker: *StateChecker, client_id: u128) void {
@@ -294,7 +296,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             };
 
             assert(state_checker.commits.items.len == header_b.?.op);
-            state_checker.commits.append(.{
+            state_checker.commits.append(state_checker.allocator, .{
                 .header = header_b.?.*,
                 .release = release,
             }) catch unreachable;

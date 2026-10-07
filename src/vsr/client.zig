@@ -229,7 +229,7 @@ pub fn ClientType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: on_message: {}", .{ self.id, header });
+                    log.debug("{}: on_message: {f}", .{ self.id, header });
                 },
             }
 
@@ -457,7 +457,7 @@ pub fn ClientType(
                 else => "",
             };
             log.err(
-                "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
+                "{}: session evicted: reason={?s} (cluster_release={f}, client_release={f}){s}",
                 .{
                     self.id,
                     std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
@@ -468,7 +468,7 @@ pub fn ClientType(
             );
 
             const callback = self.on_eviction_callback orelse std.debug.panic(
-                "session evicted: {?s} (cluster_release={})",
+                "session evicted: {?s} (cluster_release={f})",
                 .{
                     std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                     eviction.header.release,
@@ -710,7 +710,7 @@ pub fn ClientType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: sending {s} to replica {}: {}", .{
+                    log.debug("{}: sending {s} to replica {}: {f}", .{
                         self.id,
                         @tagName(message.header.command),
                         replica,

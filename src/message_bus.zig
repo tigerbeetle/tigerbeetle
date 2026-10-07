@@ -482,7 +482,7 @@ pub fn MessageBusType(comptime IO: type) type {
             const connection_to_reclaim = blk: {
                 if (connection_unknown_oldest) |connection| {
                     const unknown_since =
-                        connection.state.connected.elapsed(bus.time.monotonic());
+                        connection.state.connected.until(bus.time.monotonic());
                     if (unknown_since.ns >= constants.message_bus_unknown_time_to_live.ns) {
                         break :blk connection;
                     }
@@ -905,7 +905,7 @@ pub fn MessageBusType(comptime IO: type) type {
             if (bus.replicas[replica]) |connection| {
                 bus.send_message(connection, message);
             } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                log.debug("{}: send_message_to_replica: no connection to={} header={f}", .{
                     bus.id,
                     replica,
                     message.header,

@@ -7,7 +7,7 @@ statement, overview, motivation for design decisions and list of references that
 
 TigerBeetle is a database for workloads that:
 
-- have contended and parallelize/shard poorly due to Amdahl's Law
+- have contention and parallelize/shard poorly due to Amdahl's Law
 - consist mostly of writes
 - need very high throughput and moderately low latency
 - require strong consistency guarantees
@@ -77,8 +77,8 @@ checkpoint/superblock from storage and reconstructs the lost state by replaying 
 log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the exact
 same state.
 
-TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
-block of an LSM trees and the corresponding `fsync` returns `0` it could still be the case that when
+TigerBeetle assumes that a replica's storage can fail. If a replica writes a prepare to the WAL or a
+block of an LSM tree and the corresponding `fsync` returns `0` it could still be the case that when
 reading this data later it will be found to be corrupted. Given that the system is already replicated
 for high-availability, it would be wasteful not to use redundancy to repair local storage failures.
 This is exactly what TigerBeetle does.
@@ -264,13 +264,13 @@ but be caught by the Rust-style type system.
 
 The primary benefit of Zig is the favorable ratio of expressivity to language complexity.
 "Expressivity" here means ability to produce the desired machine code versus source-level
-abstractions. Zig is a DSL for machine code. Its comptime features makes it very easy to _directly_
+abstractions. Zig is a DSL for machine code. Its comptime features make it very easy to _directly_
 express what you want the computer to do. This comes at the cost of missing declaration-site
 interfaces but it's less important in a zero-dependency context.
 
 Zig provides excellent control over layout, alignment and padding. Alignment-carrying pointer types
-prevent subtle errors. Idiomatic Zig collections don't have an allocator as a parameter of
-constructor. Instead they explicitly pass allocator to the specific methods that require allocation.
+prevent subtle errors. Idiomatic Zig collections don't have an allocator as a parameter of the
+constructor. Instead they explicitly pass an allocator to the methods that require allocation.
 This is a perfect fit for the memory management strategy used in TigerBeetle. Cross compilation
 that works and direct (glibc-less) bindings to the kernel help keep dependency count down.
 
@@ -304,7 +304,7 @@ to big advantages:
 - Physical determinism requires that LSM compaction work is scheduled deterministically. Compaction work
   is evenly spread throughout the operation, bounding the worst-case latencies.
 - Determinism supercharges randomized testing. Any test failure can be reliably reproduced by
-  sharing a seed that lead to the failure.
+  sharing a seed that led to the failure.
 
 ### Simulation Testing
 
@@ -364,7 +364,7 @@ either all transfers, or all accounts. The event-kind branching is moved out of 
 ### Batching
 
 One of the most effective optimization principles is the idea of amortizing the overhead. If you
-have to do a costly operation, make sure that its results "pay for" many smaller useful operation.
+have to do a costly operation, make sure that its results "pay for" many smaller useful operations.
 TigerBeetle uses batching at many different levels:
 
 - Individual transfers are aggregated into a prepare. This amortizes replication and prefetch IO
@@ -453,7 +453,7 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
   - writes it to its local storage
   - starts the replication loop.
 
-  The prepare is considered committed when the primary receives a quorum of `prepare_ok`from a set
+  The prepare is considered committed when the primary receives a quorum of `prepare_ok` from a set
   of replicas. This quorum doesn't need to include the primary. It can be the case that the primary
   concurrently executes a prepare while still writing the corresponding message to the (WAL).
 
@@ -467,9 +467,9 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
 ### io_uring
 
 TigerBeetle uses io_uring exclusively for IO. It is a perfect interface for TigerBeetle as it
-combines [batching](#batching) and [concurrency](#embracing-concurrency). At micro level, the
+combines [batching](#batching) and [concurrency](#embracing-concurrency). At the micro level, the
 code in TigerBeetle isn't a good fit for coroutines or threads. The concurrency is very
-fine-grained at the level of individual syscall. For example, for pipelined compaction the natural
+fine-grained at the level of individual syscalls. For example, for pipelined compaction the natural
 way to write code is to issue two concurrent syscalls for reading the data from the corresponding
 levels. That's more or less exactly what io_uring exposes as an interface to the programmer.
 
@@ -516,7 +516,7 @@ flush page cache to disk, it doesn't allow handling errors reliably:
 [Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)
 
 The second reason to bypass the cache is the general principle of avoiding dependencies and reducing
-assumptions. Concretely, TigerBeetle require neither the OS to provide page cache nor a
+assumptions. Concretely, TigerBeetle requires neither the OS to provide page cache nor a
 file system by virtue of using only a single file. As a consequence, TigerBeetle can run directly
 against a block device.
 
@@ -593,11 +593,11 @@ duplicated across four copies on disk. Superblock changes over time, and each _v
 superblock includes a checksum of the previous version --- if two versions co-exist on disk at the
 same time, their ordering is constrained weakly by a sequence number and strongly by hash-chaining.
 
-**Prepares**. Prepare message (units of replication, Write Ahead Log (WAL) and consensus) are hash
+**Prepares**. Prepare messages (units of replication, Write Ahead Log (WAL) and consensus) are hash
 chained. This gives strong ordering guarantees for two adjacent prepares, and, via a transitive
 closure, gives a global consistency guarantee, that the entire sequence of prepares from the
 beginning of history to the latest prepare is valid. Hash-chaining improves WAL repair. Backups need
-extra care (and, during rare view change, an extra message from the primary) to ensure that the
+extra care (and, during a rare view change, an extra message from the primary) to ensure that the
 latest prepare in their log is correct, but any prepares before that can be repaired by following
 the hash chain.
 
@@ -640,7 +640,7 @@ The collection of logical and magical art behind TigerBeetle:
   a relational database is not the right solution.
 
 - [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java -
-  2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
+  2014](https://web.archive.org/web/20160923005004/https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
   - Sam Adams on the high-level design of LMAX.
 
 - [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf) - A high
@@ -662,14 +662,14 @@ The collection of logical and magical art behind TigerBeetle:
   time."
 
 - [The Tail at
-  Scale](https://www2.cs.duke.edu/courses/cps296.4/fall13/838-CloudPapers/dean_longtail.pdf) - "A
+  Scale](https://doi.org/10.1145/2408776.2408794) - "A
   simple way to curb latency variability is to issue the same request to multiple replicas and use
   the results from whichever replica responds first."
 
 - [Viewstamped Replication Revisited](https://hdl.handle.net/1721.1/71763)
 
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
-  Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
+  Systems](https://doi.org/10.1145/62546.62549)
 
 - [Flexible Paxos: Quorum intersection revisited](https://arxiv.org/pdf/1608.06696v1)
 

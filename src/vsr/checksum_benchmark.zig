@@ -23,7 +23,7 @@ test "benchmark: checksum" {
 
     const arena = arena_instance.allocator();
     var prng = stdx.PRNG.from_seed(bench.seed);
-    const blob = try arena.alignedAlloc(u8, cache_line_size, blob_size);
+    const blob = try arena.alignedAlloc(u8, .fromByteUnits(cache_line_size), blob_size);
     prng.fill(blob);
 
     var duration_samples: [repetitions]stdx.Duration = undefined;

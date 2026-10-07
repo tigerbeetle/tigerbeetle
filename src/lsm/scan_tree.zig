@@ -843,11 +843,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             self.state = iterating: {
                 const key_exclusive_next = self.state.loading_index.key_exclusive_next;
+                const table_key_min = self.state.loading_index.table_key_min;
+                const table_key_max = self.state.loading_index.table_key_max;
                 break :iterating .{
                     .iterating = .{
                         .key_exclusive_next = key_exclusive_next,
-                        .index_key_min = self.state.loading_index.table_key_min,
-                        .index_key_max = self.state.loading_index.table_key_max,
+                        .index_key_min = table_key_min,
+                        .index_key_max = table_key_max,
                         .values = .none,
                     },
                 };

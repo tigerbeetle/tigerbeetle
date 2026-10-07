@@ -57,7 +57,7 @@ pub fn init(options: struct {
 pub fn signal(detector: *FaultDetector, now: Instant) void {
     const past = detector.signal_last;
     assert(past.ns <= now.ns);
-    const elapsed = past.elapsed(now)
+    const elapsed = past.until(now)
         // Clamp first, then ewma_add, to avoid overflows.
         .clamp(detector.interval_min, detector.interval_max);
 
@@ -86,7 +86,7 @@ pub fn signal(detector: *FaultDetector, now: Instant) void {
 pub fn tardy(detector: *FaultDetector, now: Instant) enum { green, yellow, red } {
     const past = detector.signal_last;
     assert(past.ns <= now.ns);
-    const elapsed = past.elapsed(now);
+    const elapsed = past.until(now);
 
     if (elapsed.ns *| 2 <= detector.interval_ewma.ns * 3) { // interval <= 1.5 * interval_ewma
         return .green;
@@ -194,7 +194,7 @@ test "FaultDetector: smoothing" {
         now = now.add(.ms(10)); // Advance by one tick.
 
         // Primary broadcasts commit message every 500ms.
-        if (commit_timer.elapsed(now).ns > commit_interval.ns) {
+        if (commit_timer.until(now).ns > commit_interval.ns) {
             commit_timer = now;
             primary.signal(now);
             backup.signal(now.add(backup_delay));
@@ -202,7 +202,7 @@ test "FaultDetector: smoothing" {
         assert(primary.tardy(now) == .green);
 
         // Primary converts a request into prepare every 100ms.
-        if (request_timer.elapsed(now).ns > request_interval.ns) {
+        if (request_timer.until(now).ns > request_interval.ns) {
             request_timer = now;
             primary.signal(now);
             backup.signal(now.add(backup_delay));
@@ -215,7 +215,7 @@ test "FaultDetector: smoothing" {
     for (0..1_000) |_| {
         now = now.add(.ms(10)); // Advance by one tick.
 
-        if (commit_timer.elapsed(now).ns > commit_interval.ns) {
+        if (commit_timer.until(now).ns > commit_interval.ns) {
             commit_timer = now;
             primary.signal(now);
             backup.signal(now.add(backup_delay));

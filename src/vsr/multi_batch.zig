@@ -596,7 +596,7 @@ test "batch: maximum batches with no elements" {
 
     const buffer = try testing.allocator.alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         buffer_size,
     );
     defer testing.allocator.free(buffer);
@@ -622,7 +622,11 @@ test "batch: maximum batches with a single element" {
         .batch_size_limit = buffer_size,
     });
 
-    const buffer = try testing.allocator.alignedAlloc(u8, constants.cache_line_size, buffer_size);
+    const buffer = try testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(constants.cache_line_size),
+        buffer_size,
+    );
     defer testing.allocator.free(buffer);
 
     const written_bytes = try TestRunner.run(.{
@@ -650,7 +654,11 @@ test "batch: maximum elements on a single batch" {
     const batch_size_max = 8189; // maximum number of elements in a single-batch request.
     assert(batch_size_max == @divExact(buffer_size - element_size, element_size));
 
-    const buffer = try testing.allocator.alignedAlloc(u8, constants.cache_line_size, buffer_size);
+    const buffer = try testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(constants.cache_line_size),
+        buffer_size,
+    );
     defer testing.allocator.free(buffer);
 
     const written_bytes = try TestRunner.run(.{
@@ -668,7 +676,11 @@ test "batch: invalid format" {
 
     const element_size = 128;
     const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
-    const buffer = try testing.allocator.alignedAlloc(u8, constants.cache_line_size, buffer_size);
+    const buffer = try testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(constants.cache_line_size),
+        buffer_size,
+    );
     defer testing.allocator.free(buffer);
 
     const batch_count = 10;

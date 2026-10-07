@@ -40,7 +40,8 @@ const MiB = stdx.MiB;
 
 const Aegis128LMac_128 = stdx.aegis.Aegis128LMac_128;
 
-var seed_once = std.once(seed_init);
+var seed_once: std.atomic.Mutex = .unlocked;
+var seed_initialized: std.atomic.Value(bool) = .init(false);
 var seed_state: Aegis128LMac_128 = undefined;
 
 comptime {
@@ -81,7 +82,15 @@ pub const ChecksumStream = struct {
     state: Aegis128LMac_128,
 
     pub fn init() ChecksumStream {
-        seed_once.call();
+        if (!seed_initialized.load(.acquire)) {
+            while (!seed_once.tryLock()) std.atomic.spinLoopHint();
+            defer seed_once.unlock();
+
+            if (!seed_initialized.load(.monotonic)) {
+                seed_init();
+                seed_initialized.store(true, .release);
+            }
+        }
         return ChecksumStream{ .state = seed_state };
     }
 
@@ -210,7 +219,7 @@ test "checksum stability" {
 test "checksum alignment and sizing" {
     var gpa = std.testing.allocator;
 
-    var input: []align(1) u8 = try gpa.alignedAlloc(u8, 1, 8 * stdx.KiB);
+    var input: []align(1) u8 = try gpa.alignedAlloc(u8, .fromByteUnits(1), 8 * stdx.KiB);
     defer gpa.free(input);
 
     var prng = stdx.PRNG.from_seed(92);

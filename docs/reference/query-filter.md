@@ -68,26 +68,26 @@ Constraints:
 ### `timestamp_min`
 
 The minimum [`Account.timestamp`](account.md#timestamp) or
-[`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned,
-inclusive range.
+[`Transfer.timestamp`](transfer.md#timestamp) for which results will be returned
+(inclusive).
 Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must not be `2^64 - 1`
+- Must not be larger than `2^63`
 
 ### `timestamp_max`
 
 The maximum [`Account.timestamp`](account.md#timestamp) or
-[`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned,
-inclusive range.
+[`Transfer.timestamp`](transfer.md#timestamp) for which results will be returned
+(inclusive).
 Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
 
 - Type is 64-bit unsigned integer (8 bytes)
-- Must not be `2^64 - 1`
+- Must not be larger than `2^63`
 
 ### `limit`
 

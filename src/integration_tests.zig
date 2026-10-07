@@ -34,10 +34,10 @@ test "repl integration" {
         tmp_beetle: TmpTigerBeetle,
 
         fn init() !Context {
-            const shell = try Shell.create(std.testing.allocator);
+            const shell = try Shell.create_testing(std.testing.allocator);
             errdefer shell.destroy();
 
-            var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, .{
+            var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, shell.io, &shell.env, .{
                 .development = true,
                 .prebuilt = tigerbeetle,
             });
@@ -252,19 +252,22 @@ test "repl integration" {
 }
 
 test "benchmark/inspect smoke" {
-    const data_file = data_file: {
-        var random_bytes: [4]u8 = undefined;
-        std.crypto.random.bytes(&random_bytes);
-        const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
-        break :data_file "0_0-" ++ random_suffix ++ ".tigerbeetle.benchmark";
-    };
-    defer std.fs.cwd().deleteFile(data_file) catch {};
+    const gpa = std.testing.allocator;
 
-    const trace_file = data_file ++ ".json";
-    defer std.fs.cwd().deleteFile(trace_file) catch {};
-
-    const shell = try Shell.create(std.testing.allocator);
+    const shell = try Shell.create_testing(gpa);
     defer shell.destroy();
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(std.testing.io, ".", gpa);
+    defer gpa.free(tmp_dir_realpath);
+
+    const data_file = try std.fs.path.join(gpa, &.{ tmp_dir_realpath, "benchmark.tigerbeetle" });
+    defer gpa.free(data_file);
+
+    const trace_file = try std.fs.path.join(gpa, &.{ tmp_dir_realpath, "benchmark.json" });
+    defer gpa.free(trace_file);
 
     try shell.exec(
         \\{tigerbeetle} benchmark
@@ -326,34 +329,36 @@ test "benchmark/inspect smoke" {
     );
 
     {
-        const file = try std.fs.cwd().openFile(data_file, .{ .mode = .read_write });
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(std.testing.io, data_file, .{
+            .mode = .read_write,
+        });
+        defer file.close(std.testing.io);
 
         var prng = stdx.PRNG.from_seed_testing();
         var random_bytes: [256]u8 = undefined;
         prng.fill(&random_bytes);
 
-        try file.pwriteAll(&random_bytes, offset);
+        try file.writePositionalAll(std.testing.io, &random_bytes, offset);
     }
 
     // `shell.exec` assumes that success is a zero exit code; but in this case the test expects
     // corruption to be found and wants to assert a non-zero exit code.
-    var child = std.process.Child.init(
-        &.{ tigerbeetle, "inspect", "integrity", data_file },
-        std.testing.allocator,
-    );
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
+    var child = try std.process.spawn(std.testing.io, .{
+        .argv = &.{ tigerbeetle, "inspect", "integrity", data_file },
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
 
-    const term = try child.spawnAndWait();
+    const term = try child.wait(std.testing.io);
     switch (term) {
-        .Exited, .Signal => |value| try std.testing.expect(value != 0),
+        .exited => |value| try std.testing.expect(value != 0),
+        .signal => {},
         else => unreachable,
     }
 }
 
 test "help/version smoke" {
-    const shell = try Shell.create(std.testing.allocator);
+    const shell = try Shell.create_testing(std.testing.allocator);
     defer shell.destroy();
 
     // The substring is chosen to be mostly stable, but from (near) the end of the output, to catch
@@ -375,7 +380,7 @@ test "vortex smoke" {
         return error.SkipZigTest;
     }
 
-    const shell = try Shell.create(std.testing.allocator);
+    const shell = try Shell.create_testing(std.testing.allocator);
     defer shell.destroy();
 
     try shell.exec(
@@ -389,7 +394,7 @@ test "vortex upgrade" {
         return error.SkipZigTest;
     }
 
-    const shell = try Shell.create(std.testing.allocator);
+    const shell = try Shell.create_testing(std.testing.allocator);
     defer shell.destroy();
 
     try shell.exec(
@@ -403,7 +408,7 @@ test "vortex recover" {
         return error.SkipZigTest;
     }
 
-    const shell = try Shell.create(std.testing.allocator);
+    const shell = try Shell.create_testing(std.testing.allocator);
     defer shell.destroy();
 
     try shell.exec(

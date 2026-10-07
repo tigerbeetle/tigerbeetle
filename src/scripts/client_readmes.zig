@@ -45,15 +45,16 @@ pub fn test_freshness(
         .{ docs.test_source_path, docs.test_file_name, docs.extension },
     );
     const walkthrough = try shell.cwd.readFileAlloc(
-        arena.allocator(),
+        shell.io,
         walkthrough_path,
-        1 * MiB,
+        arena.allocator(),
+        .limited(1 * MiB),
     );
 
     var ctx = Context{
         .shell = shell,
         .arena = arena.allocator(),
-        .buffer = std.ArrayList(u8).init(arena.allocator()),
+        .buffer = .empty,
         .docs = docs,
         .walkthrough = walkthrough,
     };
@@ -585,7 +586,7 @@ const Context = struct {
     // comments. If there are several such pairs, their contents is concatenated (see the `imports`
     // section in the Java sample for a motivational example for concatenation behavior).
     fn read_section(ctx: *Context, section_name: []const u8) []const u8 {
-        var section_content = std.ArrayList(u8).init(ctx.arena);
+        var section_content: std.ArrayList(u8) = .empty;
         const section_start =
             ctx.shell.fmt("section:{s}\n", .{section_name}) catch @panic("OOM");
         const section_end =
@@ -616,9 +617,9 @@ const Context = struct {
             while (lines.next()) |line| {
                 if (line.len > 0) {
                     assert(line.len > indent_min);
-                    section_content.appendSlice(line[indent_min..]) catch unreachable;
+                    section_content.appendSlice(ctx.arena, line[indent_min..]) catch unreachable;
                 }
-                section_content.append('\n') catch unreachable;
+                section_content.append(ctx.arena, '\n') catch unreachable;
             }
         } else @panic("too many parts in a section");
         assert(section_content.pop() == '\n');
@@ -654,7 +655,7 @@ const Context = struct {
     }
 
     fn print(ctx: *Context, comptime fmt: []const u8, args: anytype) void {
-        ctx.buffer.writer().print(fmt, args) catch @panic("OOM");
+        ctx.buffer.print(ctx.arena, fmt, args) catch @panic("OOM");
     }
 
     fn ensure_final_newline(ctx: *Context) void {

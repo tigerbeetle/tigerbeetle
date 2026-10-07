@@ -101,7 +101,7 @@ pub fn ContextType(comptime Word: type) type {
 
             const encoded_actual = try gpa.alignedAlloc(
                 u8,
-                @alignOf(Word),
+                .fromByteUnits(@alignOf(Word)),
                 Codec.encode_size_max(size_max),
             );
             errdefer gpa.free(encoded_actual);
