@@ -6,20 +6,17 @@ const ast = @import("conformance_test_ast.zig");
 
 const log = std.log;
 
+pub const Source = struct {
+    path: []const u8,
+    name: []const u8,
+    text: [:0]const u8,
+};
+
 const ParseError = error{ ParseFailed, OutOfMemory };
 
-pub fn parse(
-    arena: std.mem.Allocator,
-    comptime suites: []const struct { []const u8, []const u8 },
-) !ast.ConformanceTests {
-    const suites_parsed = try arena.alloc(ast.Suite, suites.len);
-    inline for (suites, 0..) |suite, index| {
-        const file, const name = suite;
-        const path = "suites/" ++ file ++ ".zig";
-        var parser = try Parser.init(arena, path, @embedFile(path));
-        suites_parsed[index] = try parser.parse_suite(name);
-    }
-    return .{ .suites = suites_parsed };
+pub fn parse(arena: std.mem.Allocator, source: Source) !ast.Suite {
+    var parser = try Parser.init(arena, source.path, source.text);
+    return parser.parse_suite(source.name);
 }
 
 const Parser = struct {

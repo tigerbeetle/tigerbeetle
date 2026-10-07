@@ -1,10 +1,8 @@
 const std = @import("std");
-const stdx = @import("stdx");
 const assert = std.debug.assert;
 
-const MiB = stdx.MiB;
-
 const ast = @import("conformance_test_ast.zig");
+const Arena = @import("conformance_test_arena.zig").Arena;
 
 pub const Printer = struct {
     // For GO* see: https://github.com/golang/go/wiki/CodeReviewComments#initialisms
@@ -24,10 +22,7 @@ pub const Printer = struct {
         comment_marker: []const u8 = "//",
     };
 
-    // What a generator needs to build a whole file. Callers are free to pass a different size.
-    pub const default_memory_size = 2 * MiB;
-
-    fba: std.heap.FixedBufferAllocator,
+    arena: *Arena,
     writer: *std.Io.Writer,
     indent_width: u32,
     indent_char: u8 = ' ',
@@ -36,9 +31,9 @@ pub const Printer = struct {
     level: u32,
     comment_marker: []const u8 = "//",
 
-    pub fn init(memory: []u8, writer: *std.Io.Writer, options: Options) Printer {
+    pub fn init(arena: *Arena, writer: *std.Io.Writer, options: Options) Printer {
         return .{
-            .fba = std.heap.FixedBufferAllocator.init(memory),
+            .arena = arena,
             .writer = writer,
             .indent_width = options.indent_width,
             .indent_char = options.indent_char,
@@ -46,21 +41,6 @@ pub const Printer = struct {
             .level = options.start_level,
             .comment_marker = options.comment_marker,
         };
-    }
-
-    pub fn arena(printer: *Printer) std.mem.Allocator {
-        return printer.fba.allocator();
-    }
-
-    // The strings each case builds are temporary: the generators mark the current arena
-    // emit a case, then release the memory back.
-    pub fn mark(printer: *const Printer) usize {
-        return printer.fba.end_index;
-    }
-
-    pub fn release(printer: *Printer, marked: usize) void {
-        assert(marked <= printer.fba.end_index);
-        printer.fba.end_index = marked;
     }
 
     pub fn indent(printer: *Printer) void {
@@ -122,11 +102,11 @@ pub const Printer = struct {
     }
 
     pub fn string_alloc(printer: *Printer, comptime fmt: []const u8, args: anytype) ![]const u8 {
-        return std.fmt.allocPrint(printer.arena(), fmt, args);
+        return std.fmt.allocPrint(printer.arena.allocator(), fmt, args);
     }
 
     pub fn to_case_alloc(printer: *Printer, casing: Casing, input: []const u8) ![]const u8 {
-        var result = try std.ArrayList(u8).initCapacity(printer.arena(), input.len);
+        var result = try std.ArrayList(u8).initCapacity(printer.arena.allocator(), input.len);
         var words = Words.init(input);
         while (words.next()) |word| {
             const first = result.items.len == 0;
