@@ -85,7 +85,8 @@ fn configuration(
             const file = try shell.fmt("tigerbeetle-{d}", .{dependencies_count - i - 1});
             try source_dir.hardLink(file, target_dir, file, shell.io, .{});
 
-            executable.* = try shell.fmt("{s}/{s}", .{ target_directory, file });
+            executable.* =
+                try std.fs.path.join(shell.arena.allocator(), &.{ target_directory, file });
         }
         break :executables executables;
     };
@@ -96,7 +97,8 @@ fn configuration(
             const file = try shell.fmt("vortex-driver-zig-{d}", .{dependencies_count - i - 1});
             try source_dir.hardLink(file, target_dir, file, shell.io, .{});
 
-            executable.* = try shell.fmt("{s}/{s}", .{ target_directory, file });
+            executable.* =
+                try std.fs.path.join(shell.arena.allocator(), &.{ target_directory, file });
         }
         break :executables executables;
     };
