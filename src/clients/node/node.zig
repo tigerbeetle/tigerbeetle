@@ -276,7 +276,7 @@ fn request(
     };
 
     const array_length: u32 = try translate.array_length(env, array);
-    const packet, const packet_data = switch (operation) {
+    const batch: *tb_client.Batch, const batch_data: []const u8 = switch (operation) {
         inline else => |operation_comptime| blk: {
             const Event = operation_comptime.EventType();
             // Avoid allocating memory for requests that are known to be too large.
