@@ -1,5 +1,4 @@
-const std = @import("std");
-
+pub const Arena = @import("conformance_test_arena.zig").Arena;
 pub const Printer = @import("conformance_test_printer.zig").Printer;
 pub const ast = @import("conformance_test_ast.zig");
 const parser = @import("conformance_test_parser.zig");
@@ -26,6 +25,17 @@ pub const suites: []const struct { []const u8, []const u8 } = &.{
     .{ "client_close", "close_client" },
 };
 
-pub fn parse(arena: std.mem.Allocator) !ast.ConformanceTests {
-    return parser.parse(arena, suites);
-}
+pub const Source = parser.Source;
+
+pub const sources: []const Source = sources: {
+    var result: [suites.len]Source = undefined;
+    for (suites, &result) |suite, *source| {
+        const file, const name = suite;
+        const path = "suites/" ++ file ++ ".zig";
+        source.* = .{ .path = path, .name = name, .text = @embedFile(path) };
+    }
+    const final = result;
+    break :sources &final;
+};
+
+pub const parse = parser.parse;

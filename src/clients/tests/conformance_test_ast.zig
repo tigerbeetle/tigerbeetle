@@ -2,10 +2,6 @@ const std = @import("std");
 const stdx = @import("stdx");
 const api = @import("conformance_test_api.zig");
 
-pub const ConformanceTests = struct {
-    suites: []const Suite,
-};
-
 pub const ClientError = api.ClientError;
 
 pub const Suite = struct {
