@@ -22,7 +22,7 @@ Then create `Cargo.toml` and copy this into it:
 [package]
 name = "tigerbeetle-test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 tigerbeetle.path = "../.."
