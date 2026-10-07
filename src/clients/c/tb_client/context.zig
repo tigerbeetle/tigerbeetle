@@ -585,7 +585,7 @@ pub fn ContextType(
                 // so that batch validation errors are surfaced first.
                 maybe(self.eviction_reason != null);
 
-                const batch = batch.batch_validate(
+                const batch_layout = batch.validate(
                     Operation,
                     operations_allowed,
                     .{
@@ -598,8 +598,8 @@ pub fn ContextType(
                 batch.phase = .pending;
                 batch.multi_batch_time_monotonic = self.client.time.monotonic().ns;
                 batch.multi_batch_count = 1;
-                batch.multi_batch_event_count = @intCast(batch.event_count);
-                batch.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
+                batch.multi_batch_event_count = @intCast(batch_layout.event_count);
+                batch.multi_batch_result_count_expected = @intCast(batch_layout.result_count_expected);
                 return self.batch_send(batch);
             }
             assert(self.client.request_inflight != null);
@@ -608,7 +608,7 @@ pub fn ContextType(
             assert(self.eviction_reason == null);
             maybe(self.pending.empty());
 
-            batch.batch_enqueue(
+            batch.enqueue(
                 Operation,
                 operations_allowed,
                 .{
@@ -642,7 +642,7 @@ pub fn ContextType(
                 batch_list.assert_phase(.sent);
             }
 
-            const batch = batch_list.batch_write(
+            const batch_layout = batch_list.write(
                 Operation,
                 operations_allowed,
                 .{
@@ -660,8 +660,8 @@ pub fn ContextType(
                 .request = 0, // Set by client.raw_request.
                 .cluster = self.client.cluster,
                 .command = .request,
-                .operation = batch.operation.to_vsr(),
-                .size = @sizeOf(vsr.Header) + batch.request_size,
+                .operation = batch_layout.operation.to_vsr(),
+                .size = @sizeOf(vsr.Header) + batch_layout.request_size,
                 .previous_request_latency = @intCast(@min(
                     previous_request_latency.to_us(),
                     std.math.maxInt(u32),
@@ -811,27 +811,27 @@ pub fn ContextType(
                 if (self.client.request_inflight != null) break;
             }
 
-            const batch = batch_list.batch_validate(
+            const batch_layout = batch_list.validate(
                 Operation,
                 operations_allowed,
                 .{
                     .batch_size_limit = self.batch_size_limit.?,
                 },
             ) catch unreachable; // The callback should never be called with an invalid batch.
-            assert(batch.result_size > 0);
+            assert(batch_layout.result_size > 0);
 
-            if (!batch.operation.is_multi_batch()) {
+            if (!batch_layout.operation.is_multi_batch()) {
                 assert(batch_list.multi_batch_next == null);
-                assert(reply.len % batch.result_size == 0);
+                assert(reply.len % batch_layout.result_size == 0);
                 return self.notify_completion(batch_list, .{
                     .timestamp = timestamp,
                     .reply = reply,
                 });
             }
-            assert(batch.operation.is_multi_batch());
+            assert(batch_layout.operation.is_multi_batch());
 
             var reply_decoder = MultiBatchDecoder.init(reply, .{
-                .element_size = batch.result_size,
+                .element_size = batch_layout.result_size,
             }) catch unreachable;
             assert(batch_list.multi_batch_count == reply_decoder.batch_count());
 
@@ -843,7 +843,7 @@ pub fn ContextType(
             var it: ?*Batch = batch_list;
             while (it) |batch_next| {
                 if (batch_next != batch_list) batch_next.assert_phase(.batched);
-                assert(batch_next.operation == @intFromEnum(batch.operation));
+                assert(batch_next.operation == @intFromEnum(batch_layout.operation));
 
                 // NB: The reference to `batch` isn't valid after `notify_completion`.
                 it = batch_next.multi_batch_next;
@@ -851,7 +851,7 @@ pub fn ContextType(
                 const batched_reply: []const u8 = reply_decoder.pop().?;
                 multi_batch_results_actual += @intCast(@divExact(
                     batched_reply.len,
-                    batch.result_size,
+                    batch_layout.result_size,
                 ));
                 self.notify_completion(batch_next, .{
                     .timestamp = timestamp,

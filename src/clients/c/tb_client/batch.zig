@@ -110,7 +110,7 @@ pub const Batch = extern struct {
     }
 
     /// Validates the batch's operation, data size, and expected result count.
-    pub fn batch_validate(
+    pub fn validate(
         batch: *const Batch,
         comptime Operation: type,
         comptime operations_allowed: []const Operation,
@@ -201,7 +201,7 @@ pub const Batch = extern struct {
 
     /// Enqueues a batch into the target queue,
     /// grouping it into a multibatch list when applicable.
-    pub fn batch_enqueue(
+    pub fn enqueue(
         batch: *Batch,
         comptime Operation: type,
         comptime operations_allowed: []const Operation,
@@ -217,13 +217,13 @@ pub const Batch = extern struct {
         assert(options.batch_size_limit <= constants.message_body_size_max);
         maybe(options.target.empty());
 
-        const batch = try batch.batch_validate(Operation, operations_allowed, .{
+        const batch_layout = try batch.validate(Operation, operations_allowed, .{
             .batch_size_limit = options.batch_size_limit,
         });
         errdefer comptime unreachable;
         defer assert(!options.target.empty());
 
-        if (batch.operation.is_multi_batch()) {
+        if (batch_layout.operation.is_multi_batch()) {
             var it = options.target.iterate();
             while (it.next()) |root| {
                 root.assert_phase(.pending);
@@ -233,24 +233,24 @@ pub const Batch = extern struct {
                 // Check if the message has enough space for the submitted number of events:
                 const request_size: u32 = size: {
                     const trailer_size = multi_batch.trailer_total_size(.{
-                        .element_size = batch.event_size,
+                        .element_size = batch_layout.event_size,
                         .batch_count = root.multi_batch_count + 1,
                     });
-                    const event_count: u32 = batch.event_count +
+                    const event_count: u32 = batch_layout.event_count +
                         root.multi_batch_event_count;
-                    break :size (event_count * batch.event_size) + trailer_size;
+                    break :size (event_count * batch_layout.event_size) + trailer_size;
                 };
                 if (request_size > options.batch_size_limit) continue;
 
                 // Check if the reply has enough space for the maximum expected number of results:
                 const reply_size_expected: u32 = size: {
                     const trailer_size = multi_batch.trailer_total_size(.{
-                        .element_size = batch.result_size,
+                        .element_size = batch_layout.result_size,
                         .batch_count = root.multi_batch_count + 1,
                     });
-                    const event_count: u32 = batch.result_count_expected +
+                    const event_count: u32 = batch_layout.result_count_expected +
                         root.multi_batch_result_count_expected;
-                    break :size (event_count * batch.result_size) + trailer_size;
+                    break :size (event_count * batch_layout.result_size) + trailer_size;
                 };
                 if (reply_size_expected > constants.message_body_size_max) continue;
 
@@ -267,8 +267,8 @@ pub const Batch = extern struct {
                     root.multi_batch_tail = batch;
                 }
                 root.multi_batch_count += 1;
-                root.multi_batch_event_count += @intCast(batch.event_count);
-                root.multi_batch_result_count_expected += @intCast(batch.result_count_expected);
+                root.multi_batch_event_count += @intCast(batch_layout.event_count);
+                root.multi_batch_result_count_expected += @intCast(batch_layout.result_count_expected);
                 return;
             }
         }
@@ -277,14 +277,14 @@ pub const Batch = extern struct {
         batch.phase = .pending;
         batch.multi_batch_time_monotonic = options.time.monotonic().ns;
         batch.multi_batch_count = 1;
-        batch.multi_batch_event_count = @intCast(batch.event_count);
-        batch.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
+        batch.multi_batch_event_count = @intCast(batch_layout.event_count);
+        batch.multi_batch_result_count_expected = @intCast(batch_layout.result_count_expected);
         options.target.push(batch);
     }
 
     /// Writes the contents of `batch.data` to the output buffer,
     /// encoding them as a multibatch if necessary.
-    pub fn batch_write(
+    pub fn write(
         batch_list: *Batch,
         comptime Operation: type,
         comptime operations_allowed: []const Operation,
@@ -301,7 +301,7 @@ pub const Batch = extern struct {
         assert(options.batch_size_limit > 0);
         assert(options.batch_size_limit <= constants.message_body_size_max);
 
-        const batch = batch_list.batch_validate(
+        const batch_layout = batch_list.validate(
             Operation,
             operations_allowed,
             .{
@@ -309,10 +309,10 @@ pub const Batch = extern struct {
             },
         ) catch unreachable; // Already validated.
 
-        if (!batch.operation.is_multi_batch()) {
+        if (!batch_layout.operation.is_multi_batch()) {
             assert(batch_list.multi_batch_next == null);
             const source: []const u8 = batch_list.slice();
-            assert(source.len % batch.event_size == 0);
+            assert(source.len % batch_layout.event_size == 0);
             assert(source.len <= options.batch_size_limit);
             stdx.copy_disjoint(
                 .inexact,
@@ -321,14 +321,14 @@ pub const Batch = extern struct {
                 source,
             );
             return .{
-                .operation = batch.operation,
+                .operation = batch_layout.operation,
                 .request_size = @intCast(source.len),
             };
         }
-        assert(batch.operation.is_multi_batch());
+        assert(batch_layout.operation.is_multi_batch());
 
         var message_encoder = MultiBatchEncoder.init(options.output_buffer, .{
-            .element_size = batch.event_size,
+            .element_size = batch_layout.event_size,
         });
 
         var it: ?*Batch = batch_list;
@@ -339,7 +339,7 @@ pub const Batch = extern struct {
             assert(batch_next.operation == batch_list.operation);
             it = batch_next.multi_batch_next;
 
-            const batch_next = batch_next.batch_validate(
+            const batch_next_layout = batch_next.validate(
                 Operation,
                 operations_allowed,
                 .{
@@ -348,7 +348,7 @@ pub const Batch = extern struct {
             ) catch unreachable; // Already validated.
 
             const source: []const u8 = batch_next.slice();
-            assert(source.len % batch_next.event_size == 0);
+            assert(source.len % batch_next_layout.event_size == 0);
             const target = message_encoder.writable().?;
             assert(target.len >= source.len);
             stdx.copy_disjoint(
@@ -358,8 +358,8 @@ pub const Batch = extern struct {
                 source,
             );
             message_encoder.add(@intCast(source.len));
-            multi_batch_event_count += batch_next.event_count;
-            multi_batch_result_count_expected += batch_next.result_count_expected;
+            multi_batch_event_count += batch_next_layout.event_count;
+            multi_batch_result_count_expected += batch_next_layout.result_count_expected;
         }
         assert(message_encoder.batch_count == batch_list.multi_batch_count);
         assert(multi_batch_event_count == batch_list.multi_batch_event_count);
@@ -367,20 +367,20 @@ pub const Batch = extern struct {
 
         // Check if the reply has enough space for the maximum expected number of results.
         const trailer_size = multi_batch.trailer_total_size(.{
-            .element_size = batch.result_size,
+            .element_size = batch_layout.result_size,
             .batch_count = batch_list.multi_batch_count,
         });
-        const reply_size_max: u32 = (batch.result_size *
+        const reply_size_max: u32 = (batch_layout.result_size *
             batch_list.multi_batch_result_count_expected) + trailer_size;
-        assert(reply_size_max % batch.result_size == 0);
+        assert(reply_size_max % batch_layout.result_size == 0);
         assert(reply_size_max <= constants.message_body_size_max);
 
         const request_size = message_encoder.finish();
-        assert(request_size % batch.event_size == 0);
+        assert(request_size % batch_layout.event_size == 0);
         assert(request_size <= options.batch_size_limit);
 
         return .{
-            .operation = batch.operation,
+            .operation = batch_layout.operation,
             .request_size = request_size,
         };
     }
@@ -543,7 +543,7 @@ const TestOperation = enum(u8) {
     }
 };
 
-test "batch_validate" {
+test "batch validate" {
     const operations_allowed: []const TestOperation = &.{ .create, .query };
 
     // Event count == Result count.
@@ -558,7 +558,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        const result = try batch.batch_validate(
+        const result = try batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -582,7 +582,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        const result = try batch.batch_validate(
+        const result = try batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -606,7 +606,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        const result = try batch.batch_validate(
+        const result = try batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -634,7 +634,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        const result = try batch.batch_validate(
+        const result = try batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = TestOperation.query.result_size() * 10 },
@@ -658,7 +658,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.TooMuchData, batch.batch_validate(
+        try testing.expectError(error.TooMuchData, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = TestOperation.create.event_size() * 9 },
@@ -681,7 +681,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.TooMuchData, batch.batch_validate(
+        try testing.expectError(error.TooMuchData, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -699,7 +699,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidDataSize, batch.batch_validate(
+        try testing.expectError(error.InvalidDataSize, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -717,7 +717,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidDataSize, batch.batch_validate(
+        try testing.expectError(error.InvalidDataSize, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -736,7 +736,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidDataSize, batch.batch_validate(
+        try testing.expectError(error.InvalidDataSize, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -755,7 +755,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidDataSize, batch.batch_validate(
+        try testing.expectError(error.InvalidDataSize, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -773,7 +773,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidOperation, batch.batch_validate(
+        try testing.expectError(error.InvalidOperation, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -791,7 +791,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidOperation, batch.batch_validate(
+        try testing.expectError(error.InvalidOperation, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -809,7 +809,7 @@ test "batch_validate" {
             .status = .ok,
         });
 
-        try testing.expectError(error.InvalidOperation, batch.batch_validate(
+        try testing.expectError(error.InvalidOperation, batch.validate(
             TestOperation,
             operations_allowed,
             .{ .batch_size_limit = constants.message_body_size_max },
@@ -817,7 +817,7 @@ test "batch_validate" {
     }
 }
 
-test "batch_enqueue: multibatch event_count" {
+test "batch enqueue: multibatch event_count" {
     const operations_allowed: []const TestOperation = &.{.create};
 
     // batch_size_limit is 10 events,
@@ -842,7 +842,7 @@ test "batch_enqueue: multibatch event_count" {
         .status = .ok,
     });
 
-    try batch_1.batch_enqueue(
+    try batch_1.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -869,7 +869,7 @@ test "batch_enqueue: multibatch event_count" {
         .operation = @intFromEnum(TestOperation.create),
         .status = .ok,
     });
-    try batch_2.batch_enqueue(
+    try batch_2.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -903,7 +903,7 @@ test "batch_enqueue: multibatch event_count" {
         .operation = @intFromEnum(TestOperation.create),
         .status = .ok,
     });
-    try batch_3.batch_enqueue(
+    try batch_3.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -930,7 +930,7 @@ test "batch_enqueue: multibatch event_count" {
         .operation = @intFromEnum(TestOperation.create),
         .status = .ok,
     });
-    try batch_4.batch_enqueue(
+    try batch_4.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -956,7 +956,7 @@ test "batch_enqueue: multibatch event_count" {
     try testing.expectEqual(&batch_4, batch_1.multi_batch_tail.?);
 }
 
-test "batch_enqueue: multibatch result_expected_count" {
+test "batch enqueue: multibatch result_expected_count" {
     const QueryFilter = TestOperation.query.EventType();
     const operations_allowed: []const TestOperation = &.{.query};
 
@@ -981,7 +981,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .status = .ok,
     });
 
-    try batch_1.batch_enqueue(
+    try batch_1.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1008,7 +1008,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .operation = @intFromEnum(TestOperation.query),
         .status = .ok,
     });
-    try batch_2.batch_enqueue(
+    try batch_2.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1042,7 +1042,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .operation = @intFromEnum(TestOperation.query),
         .status = .ok,
     });
-    try batch_3.batch_enqueue(
+    try batch_3.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1069,7 +1069,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .operation = @intFromEnum(TestOperation.query),
         .status = .ok,
     });
-    try batch_4.batch_enqueue(
+    try batch_4.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1095,7 +1095,7 @@ test "batch_enqueue: multibatch result_expected_count" {
     try testing.expectEqual(&batch_4, batch_1.multi_batch_tail.?);
 }
 
-test "batch_enqueue: no multibatch" {
+test "batch enqueue: no multibatch" {
     const operations_allowed: []const TestOperation = &.{.deprecated};
 
     var time_sim = fixtures.init_time(.{});
@@ -1116,7 +1116,7 @@ test "batch_enqueue: no multibatch" {
         .status = .ok,
     });
 
-    try batch_1.batch_enqueue(
+    try batch_1.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1144,7 +1144,7 @@ test "batch_enqueue: no multibatch" {
         .status = .ok,
     });
 
-    try batch_2.batch_enqueue(
+    try batch_2.enqueue(
         TestOperation,
         operations_allowed,
         .{
@@ -1162,7 +1162,7 @@ test "batch_enqueue: no multibatch" {
     try testing.expect(batch_2.multi_batch_time_monotonic != 0);
 }
 
-test "batch_enqueue: batch_validate" {
+test "batch enqueue: validate" {
     const operations_allowed: []const TestOperation = &.{ .create, .query };
 
     var time_sim = fixtures.init_time(.{});
@@ -1181,7 +1181,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.TooMuchData, batch.batch_enqueue(
+        try testing.expectError(error.TooMuchData, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1210,7 +1210,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.TooMuchData, batch.batch_enqueue(
+        try testing.expectError(error.TooMuchData, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1234,7 +1234,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidDataSize, batch.batch_enqueue(
+        try testing.expectError(error.InvalidDataSize, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1258,7 +1258,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidDataSize, batch.batch_enqueue(
+        try testing.expectError(error.InvalidDataSize, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1283,7 +1283,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidDataSize, batch.batch_enqueue(
+        try testing.expectError(error.InvalidDataSize, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1308,7 +1308,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidDataSize, batch.batch_enqueue(
+        try testing.expectError(error.InvalidDataSize, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1332,7 +1332,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidOperation, batch.batch_enqueue(
+        try testing.expectError(error.InvalidOperation, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1356,7 +1356,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidOperation, batch.batch_enqueue(
+        try testing.expectError(error.InvalidOperation, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1380,7 +1380,7 @@ test "batch_enqueue: batch_validate" {
         });
 
         var queue: Batch.Queue = .init(.{ .name = "testing", .verify_push = true });
-        try testing.expectError(error.InvalidOperation, batch.batch_enqueue(
+        try testing.expectError(error.InvalidOperation, batch.enqueue(
             TestOperation,
             operations_allowed,
             .{
@@ -1393,7 +1393,7 @@ test "batch_enqueue: batch_validate" {
     }
 }
 
-test "batch_write: multibatch" {
+test "batch write: multibatch" {
     const operations_allowed: []const TestOperation = &.{ .create, .query };
 
     var time_sim = fixtures.init_time(.{});
@@ -1425,13 +1425,13 @@ test "batch_write: multibatch" {
             .status = .ok,
         });
 
-        try batch.batch_enqueue(TestOperation, operations_allowed, .{
+        try batch.enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
             .time = time_sim.interface(),
         });
 
-        const result = batch.batch_write(TestOperation, operations_allowed, .{
+        const result = batch.write(TestOperation, operations_allowed, .{
             .output_buffer = buffer,
             .batch_size_limit = constants.message_body_size_max,
         });
@@ -1464,7 +1464,7 @@ test "batch_write: multibatch" {
             .status = .ok,
         });
 
-        try batch_1.batch_enqueue(TestOperation, operations_allowed, .{
+        try batch_1.enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
             .time = time_sim.interface(),
@@ -1481,14 +1481,14 @@ test "batch_write: multibatch" {
             .status = .ok,
         });
 
-        try batch_2.batch_enqueue(TestOperation, operations_allowed, .{
+        try batch_2.enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
             .time = time_sim.interface(),
         });
         try testing.expectEqual(Batch.Phase.batched, batch_2.phase);
 
-        const result = batch_1.batch_write(TestOperation, operations_allowed, .{
+        const result = batch_1.write(TestOperation, operations_allowed, .{
             .output_buffer = buffer,
             .batch_size_limit = constants.message_body_size_max,
         });
@@ -1520,13 +1520,13 @@ test "batch_write: multibatch" {
             .status = .ok,
         });
 
-        try batch.batch_enqueue(TestOperation, operations_allowed, .{
+        try batch.enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
             .time = time_sim.interface(),
         });
 
-        const result = batch.batch_write(TestOperation, operations_allowed, .{
+        const result = batch.write(TestOperation, operations_allowed, .{
             .output_buffer = buffer,
             .batch_size_limit = constants.message_body_size_max,
         });
@@ -1542,7 +1542,7 @@ test "batch_write: multibatch" {
     }
 }
 
-test "batch_write: no multibatch" {
+test "batch write: no multibatch" {
     const operations_allowed: []const TestOperation = &.{.deprecated};
 
     var time_sim = fixtures.init_time(.{});
@@ -1564,7 +1564,7 @@ test "batch_write: no multibatch" {
         .status = .ok,
     });
 
-    try batch.batch_enqueue(TestOperation, operations_allowed, .{
+    try batch.enqueue(TestOperation, operations_allowed, .{
         .target = &queue,
         .batch_size_limit = constants.message_body_size_max,
         .time = time_sim.interface(),
@@ -1578,7 +1578,7 @@ test "batch_write: no multibatch" {
         ));
     defer testing.allocator.destroy(buffer);
 
-    const result = batch.batch_write(TestOperation, operations_allowed, .{
+    const result = batch.write(TestOperation, operations_allowed, .{
         .output_buffer = buffer,
         .batch_size_limit = constants.message_body_size_max,
     });

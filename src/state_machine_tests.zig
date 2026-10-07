@@ -1109,7 +1109,7 @@ fn RunnerType(comptime options: Options) type {
                 }),
             };
 
-            try request.batch.batch_enqueue(
+            try request.batch.enqueue(
                 StateMachine.Operation,
                 &options.version_map.values,
                 .{
@@ -1295,7 +1295,7 @@ const TestContext = struct {
         const request = context.message_pool.get_message(.request);
         defer context.message_pool.unref(request);
 
-        const batch = batch_list.batch_write(
+        const batch_layout = batch_list.write(
             StateMachine.Operation,
             std.enums.values(StateMachine.Operation),
             .{
@@ -1308,8 +1308,8 @@ const TestContext = struct {
         defer context.message_pool.unref(reply);
 
         const reply_body = context.raw_request(
-            batch.operation,
-            request.buffer[@sizeOf(vsr.Header)..][0..batch.request_size],
+            batch_layout.operation,
+            request.buffer[@sizeOf(vsr.Header)..][0..batch_layout.request_size],
             reply.buffer[@sizeOf(vsr.Header)..],
         );
 
@@ -1419,31 +1419,31 @@ const TestContext = struct {
         batch_list: *Batch,
         reply: []align(constants.cache_line_size) const u8,
     ) !void {
-        const batch = try batch_list.batch_validate(
+        const batch_layout = try batch_list.validate(
             StateMachine.Operation,
             std.enums.values(StateMachine.Operation),
             .{
                 .batch_size_limit = context.state_machine.batch_size_limit,
             },
         );
-        assert(batch.result_size > 0);
+        assert(batch_layout.result_size > 0);
 
-        if (!batch.operation.is_multi_batch()) {
+        if (!batch_layout.operation.is_multi_batch()) {
             assert(batch_list.multi_batch_next == null);
-            assert(reply.len % batch.result_size == 0);
+            assert(reply.len % batch_layout.result_size == 0);
             try context.callback(
                 context,
-                batch.operation,
+                batch_layout.operation,
                 batch_list,
                 context.state_machine.prepare_timestamp,
                 reply,
             );
             return;
         }
-        assert(batch.operation.is_multi_batch());
+        assert(batch_layout.operation.is_multi_batch());
 
         var reply_decoder = try MultiBatchDecoder.init(reply, .{
-            .element_size = batch.result_size,
+            .element_size = batch_layout.result_size,
         });
         assert(batch_list.multi_batch_count == reply_decoder.batch_count());
 
@@ -1455,18 +1455,18 @@ const TestContext = struct {
         var it: ?*Batch = batch_list;
         while (it) |batch_next| {
             if (batch_next != batch_list) batch_next.assert_phase(.batched);
-            assert(batch_next.operation == @intFromEnum(batch.operation));
+            assert(batch_next.operation == @intFromEnum(batch_layout.operation));
 
             it = batch_next.multi_batch_next;
 
             const batched_reply: []const u8 = reply_decoder.pop().?;
             multi_batch_results_actual += @intCast(@divExact(
                 batched_reply.len,
-                batch.result_size,
+                batch_layout.result_size,
             ));
             try context.callback(
                 context,
-                batch.operation,
+                batch_layout.operation,
                 batch_next,
                 context.state_machine.prepare_timestamp,
                 batched_reply,
