@@ -26,13 +26,13 @@ const type_mappings = .{
         \\// throughout the lifetime of the client instance.
     },
     .{
-        exports.tb_packet_t, "tb_packet_t",
+        exports.tb_batch_t, "tb_batch_t",
         \\// Struct containing the state of a request submitted through the client.
         \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
         \\// throughout the lifetime of the request.
     },
     .{ exports.tb_operation, "TB_OPERATION" },
-    .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
+    .{ exports.tb_batch_status, "TB_BATCH_STATUS" },
     .{ exports.tb_init_status, "TB_INIT_STATUS" },
     .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
     .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
@@ -220,19 +220,19 @@ pub fn main(init: std.process.Init) !void {
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.print(
         \\// Per-client callback invoked every time a `tb_client_submit` completes or is canceled.
-        \\// Use `packet->userdata` to identify the specific submission.
-        \\// `result` is null iff `packet->status != TB_PACKET_OK`
+        \\// Use `batch->userdata` to identify the specific submission.
+        \\// `result` is null iff `batch->status != TB_BATCH_OK`
         \\// `result` is only valid for the duration of the callback itself.
         \\typedef void (*tb_completion_t)(
         \\    uintptr_t userdata,
-        \\    tb_packet_t* packet,
+        \\    tb_batch_t* batch,
         \\    uint64_t timestamp,
         \\    const uint8_t *result, // nullable
         \\    uint32_t result_size
         \\);
         \\
         \\// Initialize a new TigerBeetle client which connects to the addresses provided and
-        \\// completes submitted packets by invoking the callback with the given context.
+        \\// completes submitted batchs by invoking the callback with the given context.
         \\TB_INIT_STATUS tb_client_init(
         \\    tb_client_t *client_out,
         \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -259,18 +259,18 @@ pub fn main(init: std.process.Init) !void {
         \\    uintptr_t* completion_ctx_out
         \\);
         \\
-        \\// Submit a packet with its `operation`, `data`, and `data_size` fields set.
+        \\// Submit a batch with its `operation`, `data`, and `data_size` fields set.
         \\// Once completed, `completion_callback` will be invoked with `completion_ctx`
-        \\// and the given packet on the `tb_client` thread (separate from the caller's thread).
+        \\// and the given batch on the `tb_client` thread (separate from the caller's thread).
         \\// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
         \\// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
         \\TB_CLIENT_STATUS tb_client_submit(
         \\    tb_client_t *client,
-        \\    tb_packet_t *packet
+        \\    tb_batch_t *batch
         \\);
         \\
-        \\// Closes the client, causing any previously submitted packets to be completed with
-        \\// `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+        \\// Closes the client, causing any previously submitted batchs to be completed with
+        \\// `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
         \\// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
         \\TB_CLIENT_STATUS tb_client_deinit(

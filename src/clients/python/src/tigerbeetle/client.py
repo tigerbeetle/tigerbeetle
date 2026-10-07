@@ -44,8 +44,8 @@ class CompletionContextAsync:
 
 
 @dataclass
-class InflightPacket:
-    packet: bindings.CPacket
+class InflightBatch:
+    batch: bindings.CBatch
     response: Any
     operation: bindings.Operation
     c_event_type: Any
@@ -133,7 +133,7 @@ class Client:
         self._client_key = Client._counter.increment()
         self._client = bindings.CClient()
 
-        self._inflight_packets: dict[int, InflightPacket] = {}
+        self._inflight_batchs: dict[int, InflightBatch] = {}
 
         # ctypes needs a reference to keep this alive through the FFI call. Having it as a temporary
         # within the call _does not_ work.
@@ -154,23 +154,23 @@ class Client:
         Client._clients[self._client_key] = self
 
 
-    def _acquire_packet(self, operation: bindings.Operation, operations: Any,
-                        c_event_type: Any, c_result_type: Any) -> InflightPacket:
-        packet = bindings.CPacket()
-        packet.next = None
-        packet.user_data = Client._counter.increment()
-        packet.user_tag = 0
-        packet.operation = operation
-        packet.status = bindings.PacketStatus.OK
+    def _acquire_batch(self, operation: bindings.Operation, operations: Any,
+                        c_event_type: Any, c_result_type: Any) -> InflightBatch:
+        batch = bindings.CBatch()
+        batch.next = None
+        batch.user_data = Client._counter.increment()
+        batch.user_tag = 0
+        batch.operation = operation
+        batch.status = bindings.BatchStatus.OK
 
         operations_array_type = c_event_type * len(operations)
         operations_array = operations_array_type(*map(c_event_type.from_param, operations))
 
-        packet.data_size = ctypes.sizeof(operations_array)
-        packet.data = ctypes.cast(operations_array, ctypes.c_void_p)
+        batch.data_size = ctypes.sizeof(operations_array)
+        batch.data = ctypes.cast(operations_array, ctypes.c_void_p)
 
-        return InflightPacket(
-            packet=packet,
+        return InflightBatch(
+            batch=batch,
             response=None,
             on_completion=None,
             on_completion_context=None,
@@ -180,20 +180,20 @@ class Client:
 
     @staticmethod
     @bindings.OnCompletion  # type: ignore[misc]
-    def _c_on_completion(completion_ctx: int, packet: Any, timestamp: int, bytes_ptr: Any, len_: int) -> None:
+    def _c_on_completion(completion_ctx: int, batch: Any, timestamp: int, bytes_ptr: Any, len_: int) -> None:
         """
         Invoked in a separate thread
         """
         self: Client = Client._clients[completion_ctx]
 
-        packet = ctypes.cast(packet, ctypes.POINTER(bindings.CPacket))
-        inflight_packet = self._inflight_packets[packet[0].user_data]
-        if inflight_packet.on_completion is None:
+        batch = ctypes.cast(batch, ctypes.POINTER(bindings.CBatch))
+        inflight_batch = self._inflight_batchs[batch[0].user_data]
+        if inflight_batch.on_completion is None:
             # Can't use tb_assert here, as mypy complains later that it might be None.
-            raise TypeError("inflight_packet.on_completion not set")
+            raise TypeError("inflight_batch.on_completion not set")
 
-        if packet[0].status == bindings.PacketStatus.OK.value:
-            c_result_type = inflight_packet.c_result_type
+        if batch[0].status == bindings.BatchStatus.OK.value:
+            c_result_type = inflight_batch.c_result_type
             tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
 
             # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
@@ -205,49 +205,49 @@ class Client:
             )[0:(len_ // ctypes.sizeof(c_result_type))]
             results = [result.to_python() for result in results_slice]
 
-            inflight_packet.response = results
+            inflight_batch.response = results
 
-        elif packet[0].status == bindings.PacketStatus.TOO_MUCH_DATA.value:
-            inflight_packet.response = TooMuchDataError()
+        elif batch[0].status == bindings.BatchStatus.TOO_MUCH_DATA.value:
+            inflight_batch.response = TooMuchDataError()
 
-        elif packet[0].status == bindings.PacketStatus.CLIENT_EVICTED.value:
-            inflight_packet.response = ClientEvictedError()
+        elif batch[0].status == bindings.BatchStatus.CLIENT_EVICTED.value:
+            inflight_batch.response = ClientEvictedError()
 
-        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_LOW.value:
-            inflight_packet.response = ClientReleaseTooLowError()
+        elif batch[0].status == bindings.BatchStatus.CLIENT_RELEASE_TOO_LOW.value:
+            inflight_batch.response = ClientReleaseTooLowError()
 
-        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_HIGH.value:
-            inflight_packet.response = ClientReleaseTooHighError()
+        elif batch[0].status == bindings.BatchStatus.CLIENT_RELEASE_TOO_HIGH.value:
+            inflight_batch.response = ClientReleaseTooHighError()
 
-        elif packet[0].status == bindings.PacketStatus.CLIENT_CLOSED.value:
-            inflight_packet.response = ClientClosedError()
+        elif batch[0].status == bindings.BatchStatus.CLIENT_CLOSED.value:
+            inflight_batch.response = ClientClosedError()
 
         else:
             # INVALID_OPERATION and INVALID_DATA_SIZE are unexpected.
-            inflight_packet.response = Exception("Unexpected PacketStatus {status}")
+            inflight_batch.response = Exception("Unexpected BatchStatus {status}")
 
-        inflight_packet.on_completion(inflight_packet)
+        inflight_batch.on_completion(inflight_batch)
 
 
 class ClientSync(Client, bindings.StateMachineMixin):
-    def _on_completion(self, inflight_packet: InflightPacket) -> None:
-        if not isinstance(inflight_packet.on_completion_context, CompletionContextSync):
-            raise TypeError(repr(inflight_packet.on_completion_context))
-        inflight_packet.on_completion_context.event.set()
+    def _on_completion(self, inflight_batch: InflightBatch) -> None:
+        if not isinstance(inflight_batch.on_completion_context, CompletionContextSync):
+            raise TypeError(repr(inflight_batch.on_completion_context))
+        inflight_batch.on_completion_context.event.set()
 
     def _submit(self, operation: bindings.Operation, operations: list[Any],
                 c_event_type: Any, c_result_type: Any) -> Any:
-        inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
-        self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
+        inflight_batch = self._acquire_batch(operation, operations, c_event_type, c_result_type)
+        self._inflight_batchs[inflight_batch.batch.user_data] = inflight_batch
 
-        inflight_packet.on_completion = self._on_completion
-        inflight_packet.on_completion_context = CompletionContextSync(event=threading.Event())
+        inflight_batch.on_completion = self._on_completion
+        inflight_batch.on_completion_context = CompletionContextSync(event=threading.Event())
 
-        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
+        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_batch.batch))
         if client_state == bindings.ClientStatus.SUCCESS:
-            inflight_packet.on_completion_context.event.wait()
+            inflight_batch.on_completion_context.event.wait()
 
-        del self._inflight_packets[inflight_packet.packet.user_data]
+        del self._inflight_batchs[inflight_batch.batch.user_data]
 
         if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
@@ -255,10 +255,10 @@ class ClientSync(Client, bindings.StateMachineMixin):
         if client_state == bindings.ClientStatus.NOT_INITIALIZED:
             raise Exception("Client interface not initialized")
 
-        if isinstance(inflight_packet.response, Exception):
-            raise inflight_packet.response
+        if isinstance(inflight_batch.response, Exception):
+            raise inflight_batch.response
 
-        return inflight_packet.response
+        return inflight_batch.response
 
     def close(self) -> None:
         tb_assert(self._client is not None)
@@ -267,7 +267,7 @@ class ClientSync(Client, bindings.StateMachineMixin):
         if client_state == bindings.ClientStatus.CLOSED:
             return
 
-        tb_assert(len(self._inflight_packets) == 0)
+        tb_assert(len(self._inflight_batchs) == 0)
         del Client._clients[self._client_key]
 
     def __enter__(self) -> Self:
@@ -278,40 +278,40 @@ class ClientSync(Client, bindings.StateMachineMixin):
 
 
 class ClientAsync(Client, bindings.AsyncStateMachineMixin):
-    def _on_completion(self, inflight_packet: InflightPacket) -> None:
+    def _on_completion(self, inflight_batch: InflightBatch) -> None:
         """
         Called by Client._c_on_completion, which itself is called from a different thread. Use
         `call_soon_threadsafe` to return to the thread of the event loop the request was invoked
         from, so _trigger_event() can trigger the async event and allow the client to progress.
         """
-        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
-            raise TypeError(repr(inflight_packet.on_completion_context))
-        inflight_packet.on_completion_context.loop.call_soon_threadsafe(
+        if not isinstance(inflight_batch.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_batch.on_completion_context))
+        inflight_batch.on_completion_context.loop.call_soon_threadsafe(
             self._trigger_event,
-            inflight_packet
+            inflight_batch
         )
 
-    def _trigger_event(self, inflight_packet:InflightPacket) -> None:
-        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
-            raise TypeError(repr(inflight_packet.on_completion_context))
-        inflight_packet.on_completion_context.event.set()
+    def _trigger_event(self, inflight_batch:InflightBatch) -> None:
+        if not isinstance(inflight_batch.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_batch.on_completion_context))
+        inflight_batch.on_completion_context.event.set()
 
     async def _submit(self, operation: bindings.Operation, operations: Any,
                       c_event_type: Any, c_result_type: Any) -> Any:
-        inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
-        self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
+        inflight_batch = self._acquire_batch(operation, operations, c_event_type, c_result_type)
+        self._inflight_batchs[inflight_batch.batch.user_data] = inflight_batch
 
-        inflight_packet.on_completion = self._on_completion
-        inflight_packet.on_completion_context = CompletionContextAsync(
+        inflight_batch.on_completion = self._on_completion
+        inflight_batch.on_completion_context = CompletionContextAsync(
             loop=asyncio.get_event_loop(),
             event=asyncio.Event()
         )
 
-        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
+        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_batch.batch))
         if client_state == bindings.ClientStatus.SUCCESS:
-            await inflight_packet.on_completion_context.event.wait()
+            await inflight_batch.on_completion_context.event.wait()
 
-        del self._inflight_packets[inflight_packet.packet.user_data]
+        del self._inflight_batchs[inflight_batch.batch.user_data]
 
         if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
@@ -319,10 +319,10 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         if client_state == bindings.ClientStatus.NOT_INITIALIZED:
             raise Exception("Client interface not initialized")
 
-        if isinstance(inflight_packet.response, Exception):
-            raise inflight_packet.response
+        if isinstance(inflight_batch.response, Exception):
+            raise inflight_batch.response
 
-        return inflight_packet.response
+        return inflight_batch.response
 
     async def close(self) -> None:
         tb_assert(self._client is not None)
@@ -335,16 +335,16 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         # the client needs to stick around until that's done.
         #
         # This isn't a problem for ClientSync, but ClientAsync invokes the callbacks using
-        # call_soon_threadsafe(), so wait for the event to fire on all pending packets.
+        # call_soon_threadsafe(), so wait for the event to fire on all pending batchs.
         all_events = []
-        for packet in self._inflight_packets.values():
-            if not isinstance(packet.on_completion_context, CompletionContextAsync):
+        for batch in self._inflight_batchs.values():
+            if not isinstance(batch.on_completion_context, CompletionContextAsync):
                 raise AssertionError()
-            all_events.append(packet.on_completion_context.event.wait())
+            all_events.append(batch.on_completion_context.event.wait())
 
         await asyncio.gather(*all_events)
 
-        tb_assert(len(self._inflight_packets) == 0)
+        tb_assert(len(self._inflight_batchs) == 0)
         del Client._clients[self._client_key]
 
     async def __aenter__(self) -> Self:

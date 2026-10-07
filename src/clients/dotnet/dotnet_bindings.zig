@@ -128,8 +128,8 @@ const type_mappings = .{
         .name = "ClientStatus",
         .visibility = .internal,
     } },
-    .{ exports.tb_packet_status, TypeMapping{
-        .name = "PacketStatus",
+    .{ exports.tb_batch_status, TypeMapping{
+        .name = "BatchStatus",
         .visibility = .internal,
     } },
     .{ exports.tb_operation, TypeMapping{
@@ -142,8 +142,8 @@ const type_mappings = .{
         .visibility = .internal,
         .private_fields = &.{"opaque"},
     } },
-    .{ exports.tb_packet_t, TypeMapping{
-        .name = "TBPacket",
+    .{ exports.tb_batch_t, TypeMapping{
+        .name = "TBBatch",
         .visibility = .internal,
         .private_fields = &.{"opaque"},
     } },
@@ -485,14 +485,14 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
         \\        uint address_len,
         \\        IntPtr completion_ctx,
         \\        delegate* unmanaged[Cdecl]<IntPtr,
-        \\                                   TBPacket*, ulong,
+        \\                                   TBBatch*, ulong,
         \\                                   byte*, uint, void> completion_callback
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\    public static unsafe extern ClientStatus tb_client_submit(
         \\        TBClient* client,
-        \\        TBPacket* packet
+        \\        TBBatch* batch
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

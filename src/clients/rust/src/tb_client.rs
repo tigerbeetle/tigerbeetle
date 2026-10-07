@@ -532,13 +532,13 @@ pub struct tb_client_t {
 // must remain stable throughout the lifetime of the request.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct tb_packet_t {
+pub struct tb_batch_t {
     pub user_data: *mut ::std::os::raw::c_void,
     pub data: *mut ::std::os::raw::c_void,
     pub data_size: u32,
     pub user_tag: u16,
     pub operation: u8,
-    pub status: TB_PACKET_STATUS,
+    pub status: TB_BATCH_STATUS,
     pub opaque: [u8; 64],
 }
 
@@ -647,15 +647,15 @@ impl Operation for CreateTransfers {
     }
 }
 
-pub type TB_PACKET_STATUS = u8;
-pub const TB_PACKET_STATUS_TB_PACKET_OK: TB_PACKET_STATUS = 0;
-pub const TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA: TB_PACKET_STATUS = 1;
-pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED: TB_PACKET_STATUS = 2;
-pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW: TB_PACKET_STATUS = 3;
-pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH: TB_PACKET_STATUS = 4;
-pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED: TB_PACKET_STATUS = 5;
-pub const TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION: TB_PACKET_STATUS = 6;
-pub const TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE: TB_PACKET_STATUS = 7;
+pub type TB_BATCH_STATUS = u8;
+pub const TB_BATCH_STATUS_TB_BATCH_OK: TB_BATCH_STATUS = 0;
+pub const TB_BATCH_STATUS_TB_BATCH_TOO_MUCH_DATA: TB_BATCH_STATUS = 1;
+pub const TB_BATCH_STATUS_TB_BATCH_CLIENT_EVICTED: TB_BATCH_STATUS = 2;
+pub const TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_LOW: TB_BATCH_STATUS = 3;
+pub const TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_HIGH: TB_BATCH_STATUS = 4;
+pub const TB_BATCH_STATUS_TB_BATCH_CLIENT_CLOSED: TB_BATCH_STATUS = 5;
+pub const TB_BATCH_STATUS_TB_BATCH_INVALID_OPERATION: TB_BATCH_STATUS = 6;
+pub const TB_BATCH_STATUS_TB_BATCH_INVALID_DATA_SIZE: TB_BATCH_STATUS = 7;
 
 pub type TB_INIT_STATUS = i32;
 pub const TB_INIT_STATUS_TB_INIT_SUCCESS: TB_INIT_STATUS = 0;
@@ -694,7 +694,7 @@ impl<const N: usize> Default for Reserved<N> {
 
 extern "C" {
     // Initialize a new TigerBeetle client which connects to the addresses provided and
-    // completes submitted packets by invoking the callback with the given context.
+    // completes submitted batchs by invoking the callback with the given context.
     pub fn tb_client_init(
         client_out: *mut tb_client_t,
         // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -705,7 +705,7 @@ extern "C" {
         completion_callback: ::std::option::Option<
             unsafe extern "C" fn(
                 arg1: usize,
-                arg3: *mut tb_packet_t,
+                arg3: *mut tb_batch_t,
                 arg4: u64,
                 arg5: *const u8,
                 arg6: u32,
@@ -719,16 +719,16 @@ extern "C" {
         completion_ctx_out: *mut usize,
     ) -> TB_CLIENT_STATUS;
 
-    // Submit a packet with its operation, data, and data_size fields set.
+    // Submit a batch with its operation, data, and data_size fields set.
     // Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
-    // packet on the `tb_client` thread (separate from caller's thread).
+    // batch on the `tb_client` thread (separate from caller's thread).
     pub fn tb_client_submit(
         client: *mut tb_client_t,
-        packet: *mut tb_packet_t,
+        batch: *mut tb_batch_t,
     ) -> TB_CLIENT_STATUS;
 
-    // Closes the client, causing any previously submitted packets to be completed with
-    // `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+    // Closes the client, causing any previously submitted batchs to be completed with
+    // `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
     // It is undefined behavior to use any functions on the client once deinit is called.
     pub fn tb_client_deinit(
         client: *mut tb_client_t,

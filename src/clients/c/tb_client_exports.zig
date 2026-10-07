@@ -5,8 +5,8 @@ const vsr = @import("../../vsr.zig");
 const tb = vsr.tb_client;
 const stdx = vsr.stdx;
 
-pub const tb_packet_t = tb.Packet;
-pub const tb_packet_status = tb.PacketStatus;
+pub const tb_batch_t = tb.Batch;
+pub const tb_batch_status = tb.BatchStatus;
 
 pub const tb_client_t = extern struct {
     @"opaque": [4]u64,
@@ -118,9 +118,9 @@ pub fn init(
     return .success;
 }
 
-pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.c) tb_client_status {
+pub fn submit(tb_client: ?*tb_client_t, batch: *tb_batch_t) callconv(.c) tb_client_status {
     const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
-    client.submit(packet) catch |err| return switch (err) {
+    client.submit(batch) catch |err| return switch (err) {
         tb.ClientError.NotInitialized => .not_initialized,
         tb.ClientError.Closed => .closed,
     };

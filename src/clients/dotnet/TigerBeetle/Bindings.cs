@@ -1186,7 +1186,7 @@ internal enum ClientStatus : uint
 
 }
 
-internal enum PacketStatus : byte
+internal enum BatchStatus : byte
 {
     Ok = 0,
 
@@ -1274,7 +1274,7 @@ internal unsafe struct TBClient
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-internal unsafe struct TBPacket
+internal unsafe struct TBBatch
 {
     public const int SIZE = 88;
 
@@ -1322,7 +1322,7 @@ internal unsafe struct TBPacket
 
     public byte operation;
 
-    public PacketStatus status;
+    public BatchStatus status;
 
     private OpaqueData opaque;
 
@@ -1340,14 +1340,14 @@ internal static class Native
         uint address_len,
         IntPtr completion_ctx,
         delegate* unmanaged[Cdecl]<IntPtr,
-                                   TBPacket*, ulong,
+                                   TBBatch*, ulong,
                                    byte*, uint, void> completion_callback
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern ClientStatus tb_client_submit(
         TBClient* client,
-        TBPacket* packet
+        TBBatch* batch
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

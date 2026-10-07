@@ -80,15 +80,15 @@ pub fn main(init: std.process.Init) !void {
             context.lock.lockUncancelable(init.io);
             defer context.lock.unlock(init.io);
 
-            var packet: c.tb_packet_t = undefined;
-            packet.operation = @intFromEnum(operation);
-            packet.user_data = @ptrCast(@constCast(&context));
-            packet.data = @constCast(events.ptr);
-            packet.data_size = @intCast(events.len);
-            packet.user_tag = 0;
-            packet.status = c.TB_PACKET_OK;
+            var batch: c.tb_batch_t = undefined;
+            batch.operation = @intFromEnum(operation);
+            batch.user_data = @ptrCast(@constCast(&context));
+            batch.data = @constCast(events.ptr);
+            batch.data_size = @intCast(events.len);
+            batch.user_tag = 0;
+            batch.status = c.TB_BATCH_OK;
 
-            const client_status = c.tb_client_submit(&tb_client, &packet);
+            const client_status = c.tb_client_submit(&tb_client, &batch);
             assert(client_status == c.TB_CLIENT_SUCCESS);
 
             while (!context.completed) {
@@ -119,19 +119,19 @@ const RequestContext = struct {
 
 pub fn on_complete(
     tb_context: usize,
-    tb_packet: [*c]c.tb_packet_t,
+    tb_batch: [*c]c.tb_batch_t,
     timestamp: u64,
     result: ?[*]const u8,
     result_size: u32,
 ) callconv(.c) void {
     _ = tb_context;
     _ = timestamp;
-    const context: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
+    const context: *RequestContext = @ptrCast(@alignCast(tb_batch.*.user_data.?));
 
     context.lock.lockUncancelable(context.io);
     defer context.lock.unlock(context.io);
 
-    assert(tb_packet.*.status == c.TB_PACKET_OK);
+    assert(tb_batch.*.status == c.TB_BATCH_OK);
     assert(result != null);
 
     stdx.copy_disjoint(.exact, u8, context.result[0..result_size], result.?[0..result_size]);

@@ -165,7 +165,7 @@
 
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/TBOperation.class</exclude>
-              <exclude>com/tigerbeetle/PacketStatus.class</exclude>
+              <exclude>com/tigerbeetle/BatchStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/ClientStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
@@ -192,7 +192,7 @@
               <exclude>com/tigerbeetle/InitializationStatus.java</exclude>
               <exclude>com/tigerbeetle/TBOperation.java</exclude>
               <exclude>com/tigerbeetle/ClientStatus.java</exclude>
-              <exclude>com/tigerbeetle/PacketStatus.java</exclude>
+              <exclude>com/tigerbeetle/BatchStatus.java</exclude>
               <exclude>com/tigerbeetle/TBClient.java</exclude>
               <exclude>com/tigerbeetle/TransferBatch.java</exclude>
               <exclude>com/tigerbeetle/TransferFlags.java</exclude>

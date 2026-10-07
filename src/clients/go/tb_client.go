@@ -18,9 +18,9 @@ package tigerbeetle_go
 
 typedef const uint8_t* tb_result_bytes_t;
 
-extern __declspec(dllexport) void onGoPacketCompletion(
+extern __declspec(dllexport) void onGoBatchCompletion(
 	uintptr_t ctx,
-	tb_packet_t* packet,
+	tb_batch_t* batch,
 	uint64_t timestamp,
 	tb_result_bytes_t result,
 	uint32_t result_size
@@ -87,7 +87,7 @@ func NewClient(
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
 		C.uintptr_t(0), // on_completion_ctx
-		(*[0]byte)(C.onGoPacketCompletion),
+		(*[0]byte)(C.onGoBatchCompletion),
 	)
 
 	if init_status != C.TB_INIT_SUCCESS {
@@ -153,53 +153,53 @@ func (c *c_client) doRequest(
 	var req request
 	req.ready = make(chan []uint8, 1) // buffered chan prevents completion handler blocking for Go.
 
-	// NOTE: packet must be its own allocation and cannot live in request as then CGO is unable to
+	// NOTE: batch must be its own allocation and cannot live in request as then CGO is unable to
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
-	packet := new(C.tb_packet_t)
-	packet.user_data = unsafe.Pointer(&req)
-	packet.user_tag = 0
-	packet.operation = C.uint8_t(op)
-	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
-	packet.data = data
+	batch := new(C.tb_batch_t)
+	batch.user_data = unsafe.Pointer(&req)
+	batch.user_tag = 0
+	batch.operation = C.uint8_t(op)
+	batch.data_size = C.uint32_t(count * int(getEventSize(op)))
+	batch.data = data
 
-	// NOTE: Pin all go-allocated refs that will be accessed by onGoPacketCompletion after submit().
+	// NOTE: Pin all go-allocated refs that will be accessed by onGoBatchCompletion after submit().
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 	pinner.Pin(&req)
-	pinner.Pin(packet)
+	pinner.Pin(batch)
 	if data != nil {
 		pinner.Pin(data)
 	}
 
-	client_status := C.tb_client_submit(c.tb_client, packet)
+	client_status := C.tb_client_submit(c.tb_client, batch)
 	switch client_status {
 	case C.TB_CLIENT_SUCCESS:
 		// Wait for the request to complete.
 		reply := <-req.ready
-		packet_status := C.TB_PACKET_STATUS(packet.status)
+		batch_status := C.TB_BATCH_STATUS(batch.status)
 
-		// Handle packet error
-		if packet_status != C.TB_PACKET_OK {
-			switch packet_status {
-			case C.TB_PACKET_TOO_MUCH_DATA:
+		// Handle batch error
+		if batch_status != C.TB_BATCH_OK {
+			switch batch_status {
+			case C.TB_BATCH_TOO_MUCH_DATA:
 				return nil, ErrTooMuchData
-			case C.TB_PACKET_CLIENT_EVICTED:
+			case C.TB_BATCH_CLIENT_EVICTED:
 				return nil, ErrClientEvicted
-			case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
+			case C.TB_BATCH_CLIENT_RELEASE_TOO_LOW:
 				return nil, ErrClientReleaseTooLow
-			case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
+			case C.TB_BATCH_CLIENT_RELEASE_TOO_HIGH:
 				return nil, ErrClientReleaseTooHigh
-			case C.TB_PACKET_CLIENT_CLOSED:
+			case C.TB_BATCH_CLIENT_CLOSED:
 				return nil, ErrClientClosed
-			case C.TB_PACKET_INVALID_OPERATION:
+			case C.TB_BATCH_INVALID_OPERATION:
 				// We control what C.TB_OPERATION is given
 				// but allow an invalid opcode to be passed to emulate a client nop.
 				return nil, ErrInvalidOperation
-			case C.TB_PACKET_INVALID_DATA_SIZE:
+			case C.TB_BATCH_INVALID_DATA_SIZE:
 				// We control what type of data is given.
 				panic("unreachable")
 			default:
-				panic("tb_client_submit(): returned packet with invalid status")
+				panic("tb_client_submit(): returned batch with invalid status")
 			}
 		}
 
@@ -216,10 +216,10 @@ func (c *c_client) doRequest(
 	}
 }
 
-//export onGoPacketCompletion
-func onGoPacketCompletion(
+//export onGoBatchCompletion
+func onGoBatchCompletion(
 	_context C.uintptr_t,
-	packet *C.tb_packet_t,
+	batch *C.tb_batch_t,
 	timestamp C.uint64_t,
 	result C.tb_result_bytes_t,
 	result_size C.uint32_t,
@@ -227,8 +227,8 @@ func onGoPacketCompletion(
 	_ = _context
 	_ = timestamp
 
-	// Get the request from the packet user data.
-	req := (*request)(unsafe.Pointer(packet.user_data))
+	// Get the request from the batch user data.
+	req := (*request)(unsafe.Pointer(batch.user_data))
 	var reply []uint8 = nil
 	if result_size > 0 && result != nil {
 		// Copy the result data into a new buffer. The reply's size, alignment, and

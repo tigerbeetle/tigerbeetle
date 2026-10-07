@@ -19,7 +19,7 @@ const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
-const Packet = @import("packet.zig").Packet;
+const Batch = @import("batch.zig").Batch;
 const Signal = @import("signal.zig").Signal;
 
 const KiB = stdx.KiB;
@@ -55,9 +55,9 @@ pub const ClientError = error{
 
 /// Completion errors encompass any kind of failure that
 /// can prevent a submitted batch from completing.
-/// For example, validation failures (`Packet.Error`), client shutdown,
+/// For example, validation failures (`Batch.Error`), client shutdown,
 /// and cluster eviction.
-pub const CompletionError = Packet.Error || error{
+pub const CompletionError = Batch.Error || error{
     /// The client was closed.
     Closed,
     /// The client session was evicted by the cluster,
@@ -75,7 +75,7 @@ pub const CompletionError = Packet.Error || error{
 /// Safe to call from multiple threads, even after `deinit` is called.
 pub const ClientInterface = extern struct {
     pub const VTable = struct {
-        submit_fn: *const fn (*anyopaque, *Packet.Extern) void,
+        submit_fn: *const fn (*anyopaque, *Batch.Extern) void,
         completion_context_fn: *const fn (*anyopaque) usize,
         deinit_fn: *const fn (*anyopaque) void,
         init_parameters_fn: *const fn (*anyopaque, *InitParameters) void,
@@ -111,7 +111,7 @@ pub const ClientInterface = extern struct {
         };
     }
 
-    pub fn submit(interface: *ClientInterface, packet: *Packet.Extern) ClientError!void {
+    pub fn submit(interface: *ClientInterface, batch: *Batch.Extern) ClientError!void {
         if (interface.magic_number != beetle) return ClientError.NotInitialized;
         assert(interface.reserved == 0);
 
@@ -119,7 +119,7 @@ pub const ClientInterface = extern struct {
         defer interface.locker.unlock();
 
         const context: *anyopaque = interface.context.ptr orelse return ClientError.Closed;
-        interface.vtable.ptr.submit_fn(context, packet);
+        interface.vtable.ptr.submit_fn(context, batch);
     }
 
     pub fn completion_context(interface: *ClientInterface) ClientError!usize {
@@ -172,10 +172,10 @@ pub const ClientInterface = extern struct {
 
 /// The function pointer called by the IO thread when a request is completed or fails.
 /// The memory referenced by `result` is only valid for the duration of this callback.
-/// `result_ptr` is `null` for unsuccessful requests. See `packet.status` for more details.
+/// `result_ptr` is `null` for unsuccessful requests. See `batch.status` for more details.
 pub const CompletionCallback = *const fn (
     context: usize,
-    packet: *Packet.Extern,
+    batch: *Batch.Extern,
     timestamp: u64,
     result: ?[*]const u8,
     result_size: u32,
@@ -214,8 +214,8 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
-        submitted: Packet.Queue,
-        pending: Packet.Queue,
+        submitted: Batch.Queue,
+        pending: Batch.Queue,
 
         signal: Signal,
         thread: std.Thread,
@@ -232,7 +232,7 @@ pub fn ContextType(
 
         const UserData = extern struct {
             self: *Context,
-            packet: *Packet,
+            batch: *Batch,
 
             comptime {
                 assert(@sizeOf(UserData) == @sizeOf(u128));
@@ -282,11 +282,11 @@ pub fn ContextType(
                 .completion_context = completion_ctx,
 
                 .interface = client_out,
-                .submitted = Packet.Queue.init(.{
+                .submitted = Batch.Queue.init(.{
                     .name = null,
                     .verify_push = builtin.is_test,
                 }),
-                .pending = Packet.Queue.init(.{
+                .pending = Batch.Queue.init(.{
                     .name = null,
                     .verify_push = builtin.is_test,
                 }),
@@ -465,16 +465,16 @@ pub fn ContextType(
 
             self.cancel_request_inflight();
 
-            while (self.pending.pop()) |packet| {
-                packet.assert_phase(.pending);
-                self.packet_cancel(packet);
+            while (self.pending.pop()) |batch| {
+                batch.assert_phase(.pending);
+                self.batch_cancel(batch);
             }
 
             // The submitted queue is no longer accessible to user threads,
             // so synchronization is not required here.
-            while (self.submitted.pop()) |packet| {
-                packet.assert_phase(.submitted);
-                self.packet_cancel(packet);
+            while (self.submitted.pop()) |batch| {
+                batch.assert_phase(.submitted);
+                self.batch_cancel(batch);
             }
 
             // Close every connection and drain outstanding IO before tearing the
@@ -491,7 +491,7 @@ pub fn ContextType(
             }
         }
 
-        /// Cancel the current inflight request (and the entire batched linked list of packets),
+        /// Cancel the current inflight request (and the entire batched linked list of batchs),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
             assert(thread_caller == .io);
@@ -502,20 +502,20 @@ pub fn ContextType(
                 self.client.release_message(inflight.message.base());
 
                 if (operation != .register) {
-                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    packet.assert_phase(.sent);
-                    self.packet_cancel(packet);
+                    const batch: *Batch = @as(UserData, @bitCast(inflight.user_data)).batch;
+                    batch.assert_phase(.sent);
+                    self.batch_cancel(batch);
                 }
             }
         }
 
-        /// Calls the user callback when a packet (the entire batched linked list of packets)
+        /// Calls the user callback when a batch (the entire batched linked list of batchs)
         /// is canceled due to the client being either evicted or shutdown.
-        fn packet_cancel(self: *Context, packet_list: *Packet) void {
+        fn batch_cancel(self: *Context, batch_list: *Batch) void {
             assert(thread_caller == .io);
-            assert(packet_list.link.next == null);
-            assert(packet_list.phase != .complete);
-            packet_list.assert_phase(packet_list.phase);
+            assert(batch_list.link.next == null);
+            assert(batch_list.phase != .complete);
+            batch_list.assert_phase(batch_list.phase);
 
             const result: CompletionError = result: {
                 // When the client is explicitly closed by the user, submitted batches
@@ -557,20 +557,20 @@ pub fn ContextType(
                 };
             };
 
-            var it: ?*Packet = packet_list;
+            var it: ?*Batch = batch_list;
             while (it) |batched| {
-                if (batched != packet_list) batched.assert_phase(.batched);
+                if (batched != batch_list) batched.assert_phase(.batched);
                 it = batched.multi_batch_next;
                 self.notify_completion(batched, result);
             }
         }
 
-        fn packet_enqueue(self: *Context, packet: *Packet) void {
+        fn batch_enqueue(self: *Context, batch: *Batch) void {
             assert(thread_caller == .io);
-            packet.assert_phase(.submitted);
+            batch.assert_phase(.submitted);
             maybe(self.batch_size_limit == null);
 
-            // Nothing inflight means the packet should be submitted right now.
+            // Nothing inflight means the batch should be submitted right now.
             if (self.client.request_inflight == null) {
                 assert(self.pending.empty());
 
@@ -578,29 +578,29 @@ pub fn ContextType(
                     // Evicted during registration.
                     assert(self.client.evicted);
                     assert(self.eviction_reason != null);
-                    return self.packet_cancel(packet);
+                    return self.batch_cancel(batch);
                 }
 
                 // The client might have been evicted, but we don't return early,
                 // so that batch validation errors are surfaced first.
                 maybe(self.eviction_reason != null);
 
-                const batch = packet.batch_validate(
+                const batch = batch.batch_validate(
                     Operation,
                     operations_allowed,
                     .{
                         .batch_size_limit = self.batch_size_limit.?,
                     },
                 ) catch |err| {
-                    return self.notify_completion(packet, err);
+                    return self.notify_completion(batch, err);
                 };
 
-                packet.phase = .pending;
-                packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
-                packet.multi_batch_count = 1;
-                packet.multi_batch_event_count = @intCast(batch.event_count);
-                packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
-                return self.packet_send(packet);
+                batch.phase = .pending;
+                batch.multi_batch_time_monotonic = self.client.time.monotonic().ns;
+                batch.multi_batch_count = 1;
+                batch.multi_batch_event_count = @intCast(batch.event_count);
+                batch.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
+                return self.batch_send(batch);
             }
             assert(self.client.request_inflight != null);
             assert(self.batch_size_limit != null);
@@ -608,7 +608,7 @@ pub fn ContextType(
             assert(self.eviction_reason == null);
             maybe(self.pending.empty());
 
-            packet.batch_enqueue(
+            batch.batch_enqueue(
                 Operation,
                 operations_allowed,
                 .{
@@ -617,32 +617,32 @@ pub fn ContextType(
                     .time = self.client.time,
                 },
             ) catch |err| {
-                return self.notify_completion(packet, err);
+                return self.notify_completion(batch, err);
             };
         }
 
-        /// Sends the packet (the entire batched linked list of packets) through the vsr client.
+        /// Sends the batch (the entire batched linked list of batchs) through the vsr client.
         /// Always called by the io thread.
-        fn packet_send(self: *Context, packet_list: *Packet) void {
+        fn batch_send(self: *Context, batch_list: *Batch) void {
             assert(thread_caller == .io);
             assert(self.batch_size_limit != null);
             assert(self.client.request_inflight == null);
-            packet_list.assert_phase(.pending);
+            batch_list.assert_phase(.pending);
 
-            // Avoid making a packet inflight by cancelling it
+            // Avoid making a batch inflight by cancelling it
             // if the client was closed or evicted.
             if (self.signal.status() != .running or self.eviction_reason != null) {
-                return self.packet_cancel(packet_list);
+                return self.batch_cancel(batch_list);
             }
             assert(self.eviction_reason == null);
 
             const message = self.client.get_message().build(.request);
             defer {
                 self.client.release_message(message.base());
-                packet_list.assert_phase(.sent);
+                batch_list.assert_phase(.sent);
             }
 
-            const batch = packet_list.batch_write(
+            const batch = batch_list.batch_write(
                 Operation,
                 operations_allowed,
                 .{
@@ -668,14 +668,14 @@ pub fn ContextType(
                 )),
             };
 
-            self.request_timer = .{ .ns = packet_list.multi_batch_time_monotonic };
+            self.request_timer = .{ .ns = batch_list.multi_batch_time_monotonic };
 
-            packet_list.phase = .sent;
+            batch_list.phase = .sent;
             self.client.raw_request(
                 Context.client_result_callback,
                 @bitCast(UserData{
                     .self = self,
-                    .packet = packet_list,
+                    .batch = batch_list,
                 }),
                 message.ref(),
             );
@@ -709,23 +709,23 @@ pub fn ContextType(
             maybe(self.batch_size_limit == null);
 
             // Prevents IO thread starvation under heavy client load.
-            // Process only the minimal number of packets for the next pending request.
+            // Process only the minimal number of batchs for the next pending request.
             const enqueued_count = self.pending.count();
-            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
+            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid batchs.
             for (0..safety_limit) |_| {
-                const packet: *Packet = pop: {
+                const batch: *Batch = pop: {
                     self.interface.locker.lock();
                     defer self.interface.locker.unlock();
 
                     break :pop self.submitted.pop() orelse return;
                 };
-                self.packet_enqueue(packet);
+                self.batch_enqueue(batch);
 
-                // Packets can be processed without increasing `pending.count`:
-                // - If the packet is invalid.
-                // - If there's no in-flight request, the packet is sent immediately without
+                // Batchs can be processed without increasing `pending.count`:
+                // - If the batch is invalid.
+                // - If there's no in-flight request, the batch is sent immediately without
                 //   using the pending queue.
-                // - If the packet can be batched with another previously enqueued packet.
+                // - If the batch can be batched with another previously enqueued batch.
                 if (self.pending.count() > enqueued_count) break;
             }
 
@@ -793,37 +793,37 @@ pub fn ContextType(
 
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
-            const packet_list: *Packet = user_data.packet;
+            const batch_list: *Batch = user_data.batch;
             const operation = operation_vsr.cast(Client.Operation);
             assert(self.eviction_reason == null);
-            assert(packet_list.operation == @intFromEnum(operation));
+            assert(batch_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
-            packet_list.assert_phase(.sent);
+            batch_list.assert_phase(.sent);
 
             const current_timestamp = self.client.time.monotonic();
             self.request_latency =
                 self.request_timer.until(current_timestamp);
 
-            // Submit the next pending packet (if any) now that VSR has completed this one.
+            // Submit the next pending batch (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
-            while (self.pending.pop()) |packet_next| {
-                self.packet_send(packet_next);
+            while (self.pending.pop()) |batch_next| {
+                self.batch_send(batch_next);
                 if (self.client.request_inflight != null) break;
             }
 
-            const batch = packet_list.batch_validate(
+            const batch = batch_list.batch_validate(
                 Operation,
                 operations_allowed,
                 .{
                     .batch_size_limit = self.batch_size_limit.?,
                 },
-            ) catch unreachable; // The callback should never be called with an invalid packet.
+            ) catch unreachable; // The callback should never be called with an invalid batch.
             assert(batch.result_size > 0);
 
             if (!batch.operation.is_multi_batch()) {
-                assert(packet_list.multi_batch_next == null);
+                assert(batch_list.multi_batch_next == null);
                 assert(reply.len % batch.result_size == 0);
-                return self.notify_completion(packet_list, .{
+                return self.notify_completion(batch_list, .{
                     .timestamp = timestamp,
                     .reply = reply,
                 });
@@ -833,27 +833,27 @@ pub fn ContextType(
             var reply_decoder = MultiBatchDecoder.init(reply, .{
                 .element_size = batch.result_size,
             }) catch unreachable;
-            assert(packet_list.multi_batch_count == reply_decoder.batch_count());
+            assert(batch_list.multi_batch_count == reply_decoder.batch_count());
 
-            // Copying it because `packet` is no longer valid after the callback.
+            // Copying it because `batch` is no longer valid after the callback.
             const multi_batch_result_count_expected: u32 =
-                packet_list.multi_batch_result_count_expected;
+                batch_list.multi_batch_result_count_expected;
 
             var multi_batch_results_actual: u16 = 0;
-            var it: ?*Packet = packet_list;
-            while (it) |packet_next| {
-                if (packet_next != packet_list) packet_next.assert_phase(.batched);
-                assert(packet_next.operation == @intFromEnum(batch.operation));
+            var it: ?*Batch = batch_list;
+            while (it) |batch_next| {
+                if (batch_next != batch_list) batch_next.assert_phase(.batched);
+                assert(batch_next.operation == @intFromEnum(batch.operation));
 
-                // NB: The reference to `packet` isn't valid after `notify_completion`.
-                it = packet_next.multi_batch_next;
+                // NB: The reference to `batch` isn't valid after `notify_completion`.
+                it = batch_next.multi_batch_next;
 
                 const batched_reply: []const u8 = reply_decoder.pop().?;
                 multi_batch_results_actual += @intCast(@divExact(
                     batched_reply.len,
                     batch.result_size,
                 ));
-                self.notify_completion(packet_next, .{
+                self.notify_completion(batch_next, .{
                     .timestamp = timestamp,
                     .reply = batched_reply,
                 });
@@ -864,7 +864,7 @@ pub fn ContextType(
 
         fn notify_completion(
             self: *Context,
-            packet: *Packet,
+            batch: *Batch,
             completion: CompletionError!struct {
                 timestamp: u64,
                 reply: []const u8,
@@ -873,7 +873,7 @@ pub fn ContextType(
             assert(thread_caller == .io);
 
             const result = completion catch |err| {
-                packet.status = switch (err) {
+                batch.status = switch (err) {
                     CompletionError.Closed => .client_closed,
                     CompletionError.Evicted => .client_evicted,
                     CompletionError.ReleaseTooLow => .client_release_too_low,
@@ -882,13 +882,13 @@ pub fn ContextType(
                     CompletionError.InvalidDataSize => .invalid_data_size,
                     CompletionError.TooMuchData => .too_much_data,
                 };
-                assert(packet.status != .ok);
-                packet.phase = .complete;
+                assert(batch.status != .ok);
+                batch.phase = .complete;
 
-                // The packet completed with an error.
+                // The batch completed with an error.
                 self.completion_callback(
                     self.completion_context,
-                    packet.cast(),
+                    batch.cast(),
                     0,
                     null,
                     0,
@@ -896,12 +896,12 @@ pub fn ContextType(
                 return;
             };
 
-            // The packet completed normally.
-            assert(packet.status == .ok);
-            packet.phase = .complete;
+            // The batch completed normally.
+            assert(batch.status == .ok);
+            batch.phase = .complete;
             self.completion_callback(
                 self.completion_context,
-                packet.cast(),
+                batch.cast(),
                 result.timestamp,
                 result.reply.ptr,
                 @intCast(result.reply.len),
@@ -910,22 +910,22 @@ pub fn ContextType(
 
         // VTable functions called by `ClientInterface`, which are thread-safe.
 
-        fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+        fn vtable_submit_fn(context: *anyopaque, batch_extern: *Batch.Extern) void {
             assert(thread_caller == .user);
 
             const self: *Context = @ptrCast(@alignCast(context));
 
-            // Packet is caller-allocated to enable elastic intrusive-link-list-based
-            // memory management. However, some of Packet's fields are essentially private.
+            // Batch is caller-allocated to enable elastic intrusive-link-list-based
+            // memory management. However, some of Batch's fields are essentially private.
             // Initialize them here to avoid threading default fields through FFI boundary.
-            const packet: *Packet = packet_extern.cast();
-            packet.* = .init(packet_extern);
+            const batch: *Batch = batch_extern.cast();
+            batch.* = .init(batch_extern);
 
-            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            // Enqueue the batch and notify the IO thread to process it asynchronously.
             // The mutex is locked during this operation, so it's guaranteed
             // that the I/O thread hasn't been canceled.
             assert(self.signal.status() == .running);
-            self.submitted.push(packet);
+            self.submitted.push(batch);
             self.signal.notify();
         }
 

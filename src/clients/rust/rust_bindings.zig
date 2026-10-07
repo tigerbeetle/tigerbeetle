@@ -50,8 +50,8 @@ const type_mappings = [_]TypeMapping{
         ,
     },
     .{
-        .source = exports.tb_packet_t,
-        .name = "tb_packet_t",
+        .source = exports.tb_batch_t,
+        .name = "tb_batch_t",
         .comment =
         \\// Struct containing the state of a request submitted through the client.
         \\// This struct must be "pinned" (not copyable or movable), as its address
@@ -59,7 +59,7 @@ const type_mappings = [_]TypeMapping{
         ,
     },
     .{ .source = exports.tb_operation, .name = "Operation", .target = .operation },
-    .{ .source = exports.tb_packet_status, .name = "TB_PACKET_STATUS", .target = .enum_manual },
+    .{ .source = exports.tb_batch_status, .name = "TB_BATCH_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_init_status, .name = "TB_INIT_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_client_status, .name = "TB_CLIENT_STATUS", .target = .enum_manual },
     .{
@@ -502,7 +502,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\extern "C" {{
         \\    // Initialize a new TigerBeetle client which connects to the addresses provided and
-        \\    // completes submitted packets by invoking the callback with the given context.
+        \\    // completes submitted batchs by invoking the callback with the given context.
         \\    pub fn tb_client_init(
         \\        client_out: *mut tb_client_t,
         \\        // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -513,7 +513,7 @@ pub fn main(init: std.process.Init) !void {
         \\        completion_callback: ::std::option::Option<
         \\            unsafe extern "C" fn(
         \\                arg1: usize,
-        \\                arg3: *mut tb_packet_t,
+        \\                arg3: *mut tb_batch_t,
         \\                arg4: u64,
         \\                arg5: *const u8,
         \\                arg6: u32,
@@ -527,16 +527,16 @@ pub fn main(init: std.process.Init) !void {
         \\        completion_ctx_out: *mut usize,
         \\    ) -> TB_CLIENT_STATUS;
         \\
-        \\    // Submit a packet with its operation, data, and data_size fields set.
+        \\    // Submit a batch with its operation, data, and data_size fields set.
         \\    // Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
-        \\    // packet on the `tb_client` thread (separate from caller's thread).
+        \\    // batch on the `tb_client` thread (separate from caller's thread).
         \\    pub fn tb_client_submit(
         \\        client: *mut tb_client_t,
-        \\        packet: *mut tb_packet_t,
+        \\        batch: *mut tb_batch_t,
         \\    ) -> TB_CLIENT_STATUS;
         \\
-        \\    // Closes the client, causing any previously submitted packets to be completed with
-        \\    // `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+        \\    // Closes the client, causing any previously submitted batchs to be completed with
+        \\    // `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\    // It is undefined behavior to use any functions on the client once deinit is called.
         \\    pub fn tb_client_deinit(
         \\        client: *mut tb_client_t,

@@ -153,8 +153,8 @@ const type_mappings = .{
         .name = "ClientStatus",
         .visibility = .internal,
     } },
-    .{ exports.tb_packet_status, TypeMapping{
-        .name = "PacketStatus",
+    .{ exports.tb_batch_status, TypeMapping{
+        .name = "BatchStatus",
         .visibility = .internal,
     } },
 };

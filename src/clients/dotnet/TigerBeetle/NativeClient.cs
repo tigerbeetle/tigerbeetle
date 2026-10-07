@@ -86,13 +86,13 @@ internal sealed class NativeClient : IDisposable
         }
     }
 
-    public unsafe void Submit(TBPacket* packet)
+    public unsafe void Submit(TBBatch* batch)
     {
         unsafe
         {
             fixed (TBClient* client = &tb_client[0])
             {
-                var status = tb_client_submit(client, packet);
+                var status = tb_client_submit(client, batch);
                 switch (status)
                 {
                     case ClientStatus.Success: break;
@@ -116,25 +116,25 @@ internal sealed class NativeClient : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private unsafe static void OnCompletionCallback(IntPtr ctx, TBPacket* packet, ulong timestamp, byte* result, uint resultLen)
+    private unsafe static void OnCompletionCallback(IntPtr ctx, TBBatch* batch, ulong timestamp, byte* result, uint resultLen)
     {
         _ = timestamp;
 
         try
         {
             AssertTrue(ctx == IntPtr.Zero);
-            OnComplete(packet, result, resultLen);
+            OnComplete(batch, result, resultLen);
         }
         catch (Exception e)
         {
             // The caller is unmanaged code, so if an exception occurs here we should force panic.
-            Environment.FailFast("Failed to process a packet in the OnCompletionCallback", e);
+            Environment.FailFast("Failed to process a batch in the OnCompletionCallback", e);
         }
     }
 
-    private unsafe static void OnComplete(TBPacket* packet, byte* result, uint resultLen)
+    private unsafe static void OnComplete(TBBatch* batch, byte* result, uint resultLen)
     {
         var span = resultLen > 0 ? new ReadOnlySpan<byte>(result, (int)resultLen) : ReadOnlySpan<byte>.Empty;
-        NativeRequest.OnComplete(packet, span);
+        NativeRequest.OnComplete(batch, span);
     }
 }

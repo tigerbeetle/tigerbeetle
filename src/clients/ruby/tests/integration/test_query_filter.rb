@@ -198,8 +198,8 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     assert_empty(@client.query_transfers(filter))
 
     too_much_data = TigerBeetle::QueryFilter.new(limit: 10_000)
-    assert_raises(TigerBeetle::PacketError) { @client.query_accounts(too_much_data) }
-    assert_raises(TigerBeetle::PacketError) { @client.query_transfers(too_much_data) }
+    assert_raises(TigerBeetle::BatchError) { @client.query_accounts(too_much_data) }
+    assert_raises(TigerBeetle::BatchError) { @client.query_transfers(too_much_data) }
   end
 
   def test_query_operations_raise_after_close

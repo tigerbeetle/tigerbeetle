@@ -14,7 +14,7 @@ module TigerBeetle
   class ClientClosedError < StandardError
   end
 
-  class PacketError < StandardError
+  class BatchError < StandardError
   end
 
   class Client

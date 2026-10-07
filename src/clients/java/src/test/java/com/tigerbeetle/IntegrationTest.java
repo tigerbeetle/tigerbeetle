@@ -1202,8 +1202,8 @@ public class IntegrationTest {
         // calling "submit()", but also during the native call.
         //
         // Unfortunately this is a hacky test, but a reasonable one:
-        // Since our JNI module does not expose the acquire_packet function,
-        // we cannot insert a lock/wait in between "acquire_packet" and "submit"
+        // Since our JNI module does not expose the acquire_batch function,
+        // we cannot insert a lock/wait in between "acquire_batch" and "submit"
         // in order to cause and assert each variant.
         final int TASKS_COUNT = 256;
         final var enterBarrier = new CountDownLatch(TASKS_COUNT);

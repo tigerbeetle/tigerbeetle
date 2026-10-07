@@ -29,7 +29,7 @@ const StateMachineType = @import("state_machine.zig").StateMachineType;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
 const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
-const Packet = @import("./clients/c/tb_client/packet.zig").Packet;
+const Batch = @import("./clients/c/tb_client/batch.zig").Batch;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const TimeSim = stdx.TimeSim;
@@ -517,7 +517,7 @@ const Options = struct {
 };
 
 const Request = struct {
-    packet: Packet,
+    batch: Batch,
     reply_expected: []const u8,
 };
 
@@ -1089,7 +1089,7 @@ fn RunnerType(comptime options: Options) type {
             input_buffer: *ArrayList,
             output_buffer: *ArrayList,
         ) !void {
-            // Enqueues a `packet` to be submitted to the state machine when `flush()` is called.
+            // Enqueues a `batch` to be submitted to the state machine when `flush()` is called.
             // Multibatching can be achieved by calling `submit()` multiple times.
             assert(context.state == .idle);
 
@@ -1099,7 +1099,7 @@ fn RunnerType(comptime options: Options) type {
 
             request.* = .{
                 .reply_expected = reply_expected,
-                .packet = .init(&.{
+                .batch = .init(&.{
                     .data = data.ptr,
                     .data_size = @intCast(data.len),
                     .user_data = request,
@@ -1109,7 +1109,7 @@ fn RunnerType(comptime options: Options) type {
                 }),
             };
 
-            try request.packet.batch_enqueue(
+            try request.batch.batch_enqueue(
                 StateMachine.Operation,
                 &options.version_map.values,
                 .{
@@ -1123,16 +1123,16 @@ fn RunnerType(comptime options: Options) type {
         fn assert_results(
             client: *TestContext,
             operation: StateMachine.Operation,
-            packet: *Packet,
+            batch: *Batch,
             timestamp: u64,
             reply_actual: []const u8,
         ) !void {
-            assert(packet.operation == @intFromEnum(operation));
-            assert(packet.status == .ok);
-            assert(packet.data_size == 0 or packet.data != null);
+            assert(batch.operation == @intFromEnum(operation));
+            assert(batch.status == .ok);
+            assert(batch.data_size == 0 or batch.data != null);
             assert(TimestampRange.valid(timestamp));
 
-            const request: *Request = @alignCast(@fieldParentPtr("packet", packet));
+            const request: *Request = @alignCast(@fieldParentPtr("batch", batch));
 
             switch (operation) {
                 inline else => |operation_actual_comptime| {
@@ -1192,7 +1192,7 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
 
-    pending: Packet.Queue,
+    pending: Batch.Queue,
     op: u64,
     commit_timestamp_expected: u64,
     state: enum {
@@ -1205,7 +1205,7 @@ const TestContext = struct {
     const Callback = *const fn (
         context: *TestContext,
         operation: StateMachine.Operation,
-        packet: *Packet,
+        batch: *Batch,
         timestamp: u64,
         reply_actual: []const u8,
     ) anyerror!void;
@@ -1230,7 +1230,7 @@ const TestContext = struct {
             .state_machine = undefined,
             .storage = undefined,
 
-            .pending = Packet.Queue.init(.{
+            .pending = Batch.Queue.init(.{
                 .name = null,
                 .verify_push = true,
             }),
@@ -1289,13 +1289,13 @@ const TestContext = struct {
             TimestampRange.timestamp_max;
     }
 
-    fn submit(context: *TestContext, packet_list: *Packet) !void {
-        packet_list.assert_phase(.pending);
+    fn submit(context: *TestContext, batch_list: *Batch) !void {
+        batch_list.assert_phase(.pending);
 
         const request = context.message_pool.get_message(.request);
         defer context.message_pool.unref(request);
 
-        const batch = packet_list.batch_write(
+        const batch = batch_list.batch_write(
             StateMachine.Operation,
             std.enums.values(StateMachine.Operation),
             .{
@@ -1313,7 +1313,7 @@ const TestContext = struct {
             reply.buffer[@sizeOf(vsr.Header)..],
         );
 
-        try context.raw_reply(packet_list, reply_body);
+        try context.raw_reply(batch_list, reply_body);
     }
 
     fn flush(context: *TestContext) !void {
@@ -1331,15 +1331,15 @@ const TestContext = struct {
         defer if (pulse_needed) context.pulse();
 
         var operation: ?u8 = null;
-        while (context.pending.pop()) |packet_list| {
+        while (context.pending.pop()) |batch_list| {
             // The real client can enqueue batches of different operations,
             // although they are never sent together in the same request.
             // For testing, we always flush between operations, so
             // the pending queue must contain only batches of the same kind.
-            if (operation) |current| assert(packet_list.operation == current);
-            operation = packet_list.operation;
+            if (operation) |current| assert(batch_list.operation == current);
+            operation = batch_list.operation;
 
-            try context.submit(packet_list);
+            try context.submit(batch_list);
         }
 
         context.commit_timestamp_expected = context.state_machine.prefetch_timestamp;
@@ -1416,10 +1416,10 @@ const TestContext = struct {
 
     fn raw_reply(
         context: *TestContext,
-        packet_list: *Packet,
+        batch_list: *Batch,
         reply: []align(constants.cache_line_size) const u8,
     ) !void {
-        const batch = try packet_list.batch_validate(
+        const batch = try batch_list.batch_validate(
             StateMachine.Operation,
             std.enums.values(StateMachine.Operation),
             .{
@@ -1429,12 +1429,12 @@ const TestContext = struct {
         assert(batch.result_size > 0);
 
         if (!batch.operation.is_multi_batch()) {
-            assert(packet_list.multi_batch_next == null);
+            assert(batch_list.multi_batch_next == null);
             assert(reply.len % batch.result_size == 0);
             try context.callback(
                 context,
                 batch.operation,
-                packet_list,
+                batch_list,
                 context.state_machine.prepare_timestamp,
                 reply,
             );
@@ -1445,19 +1445,19 @@ const TestContext = struct {
         var reply_decoder = try MultiBatchDecoder.init(reply, .{
             .element_size = batch.result_size,
         });
-        assert(packet_list.multi_batch_count == reply_decoder.batch_count());
+        assert(batch_list.multi_batch_count == reply_decoder.batch_count());
 
-        // Copying it because `packet` is no longer valid after the callback.
+        // Copying it because `batch` is no longer valid after the callback.
         const multi_batch_result_count_expected: u32 =
-            packet_list.multi_batch_result_count_expected;
+            batch_list.multi_batch_result_count_expected;
 
         var multi_batch_results_actual: u16 = 0;
-        var it: ?*Packet = packet_list;
-        while (it) |packet_next| {
-            if (packet_next != packet_list) packet_next.assert_phase(.batched);
-            assert(packet_next.operation == @intFromEnum(batch.operation));
+        var it: ?*Batch = batch_list;
+        while (it) |batch_next| {
+            if (batch_next != batch_list) batch_next.assert_phase(.batched);
+            assert(batch_next.operation == @intFromEnum(batch.operation));
 
-            it = packet_next.multi_batch_next;
+            it = batch_next.multi_batch_next;
 
             const batched_reply: []const u8 = reply_decoder.pop().?;
             multi_batch_results_actual += @intCast(@divExact(
@@ -1467,7 +1467,7 @@ const TestContext = struct {
             try context.callback(
                 context,
                 batch.operation,
-                packet_next,
+                batch_next,
                 context.state_machine.prepare_timestamp,
                 batched_reply,
             );
@@ -3564,7 +3564,7 @@ test "StateMachine: input_valid" {
         fn callback(
             _: *TestContext,
             _: StateMachine.Operation,
-            _: *Packet,
+            _: *Batch,
             _: u64,
             _: []const u8,
         ) !void {
@@ -3653,7 +3653,7 @@ test "StateMachine: query multi-batch input_valid" {
         fn callback(
             _: *TestContext,
             _: StateMachine.Operation,
-            _: *Packet,
+            _: *Batch,
             _: u64,
             _: []const u8,
         ) !void {

@@ -160,9 +160,9 @@ fn round_trip_init_status() {
 }
 
 #[test]
-fn round_trip_packet_status() {
+fn round_trip_batch_status() {
     round_trip_test::<tb::Error, u8>(
-        "TB_PACKET_STATUS",
+        "TB_BATCH_STATUS",
         // Success not represented in tb::Error
         &[0],
         |c_value| tb::Error::from(c_value),

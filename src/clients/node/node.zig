@@ -262,7 +262,7 @@ fn request(
     );
     const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
 
-    // Create a reference to the callback so it stay alive until the packet completes.
+    // Create a reference to the callback so it stay alive until the batch completes.
     var callback_ref: c.napi_ref = undefined;
     try translate.create_reference(
         env,
@@ -289,12 +289,12 @@ fn request(
                 return request_error(env, .ERR_TOO_MUCH_DATA);
             }
 
-            const packet = global_allocator.create(tb_client.Packet) catch {
+            const batch = global_allocator.create(tb_client.Batch) catch {
                 return translate.throw(env, .{
-                    .message = "Failed to allocated a new packet.",
+                    .message = "Failed to allocated a new batch.",
                 });
             };
-            errdefer global_allocator.destroy(packet);
+            errdefer global_allocator.destroy(batch);
 
             const buffer: []Event = global_allocator.alloc(Event, array_length) catch {
                 return translate.throw(env, .{
@@ -304,20 +304,20 @@ fn request(
             errdefer global_allocator.free(buffer);
 
             try decode_array(Event, env, array, buffer);
-            break :blk .{ packet, std.mem.sliceAsBytes(buffer) };
+            break :blk .{ batch, std.mem.sliceAsBytes(buffer) };
         },
         .pulse, .get_change_events => unreachable,
     };
 
-    packet.* = .{
+    batch.* = .{
         .user_data = callback_ref,
         .operation = @intFromEnum(operation),
-        .data = packet_data.ptr,
-        .data_size = @intCast(packet_data.len),
+        .data = batch_data.ptr,
+        .data_size = @intCast(batch_data.len),
         .user_tag = 0,
         .status = undefined,
     };
-    client.submit(packet) catch |err| switch (err) {
+    client.submit(batch) catch |err| switch (err) {
         error.Closed => return request_error(env, .ERR_CLIENT_CLOSED),
         error.NotInitialized => unreachable,
     };
@@ -329,24 +329,24 @@ fn request_error(env: c.napi_env, code: ErrorCodes) translate.Error {
 
 fn on_completion(
     completion_ctx: usize,
-    packet_extern: *tb_client.Packet,
+    batch_extern: *tb_client.Batch,
     timestamp: u64,
     result: ?[*]const u8,
     result_size: u32,
 ) callconv(.c) void {
     _ = timestamp;
 
-    switch (packet_extern.status) {
+    switch (batch_extern.status) {
         .ok => {
-            const operation: Operation = @enumFromInt(packet_extern.operation);
+            const operation: Operation = @enumFromInt(batch_extern.operation);
             switch (operation) {
                 inline else => |operation_comptime| {
                     const Event = operation_comptime.EventType();
                     const Result = operation_comptime.ResultType();
 
-                    const packet = packet_extern.cast();
+                    const batch = batch_extern.cast();
                     const request_buffer: []align(@alignOf(Event)) u8 =
-                        @alignCast(@constCast(packet.slice()));
+                        @alignCast(@constCast(batch.slice()));
                     // Trying to reallocate the request buffer instead of allocating a new one.
                     // This is optimal for create_* operations.
                     const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(
@@ -377,8 +377,8 @@ fn on_completion(
 
                     // Store the size of the results in the `tag` field, so we can access it back
                     // during `on_completion_js`.
-                    packet.data = reply_buffer.ptr;
-                    packet.data_size = @intCast(reply_buffer.len);
+                    batch.data = reply_buffer.ptr;
+                    batch.data_size = @intCast(reply_buffer.len);
                 },
                 .pulse, .get_change_events => unreachable,
             }
@@ -393,11 +393,11 @@ fn on_completion(
         .invalid_data_size => unreachable, // We set correct data size during request().
     }
 
-    // Queue the packet to be processed on the JS thread to invoke its JS callback.
+    // Queue the batch to be processed on the JS thread to invoke its JS callback.
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
     switch (c.napi_call_threadsafe_function(
         completion_tsfn,
-        packet_extern,
+        batch_extern,
         c.napi_tsfn_nonblocking,
     )) {
         c.napi_ok => {},
@@ -412,28 +412,28 @@ fn on_completion_js(
     env: c.napi_env,
     unused_js_cb: c.napi_value,
     unused_context: ?*anyopaque,
-    packet_argument: ?*anyopaque,
+    batch_argument: ?*anyopaque,
 ) callconv(.c) void {
     _ = unused_js_cb;
     _ = unused_context;
 
-    // Extract the remaining packet information from the packet before it's freed.
-    const packet_extern: *tb_client.Packet = @ptrCast(@alignCast(packet_argument.?));
-    const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet_extern.user_data.?));
+    // Extract the remaining batch information from the batch before it's freed.
+    const batch_extern: *tb_client.Batch = @ptrCast(@alignCast(batch_argument.?));
+    const callback_ref: c.napi_ref = @ptrCast(@alignCast(batch_extern.user_data.?));
 
-    // Decode the packet's Buffer results into an array then free the packet/Buffer.
-    const operation: Operation = @enumFromInt(packet_extern.operation);
+    // Decode the batch's Buffer results into an array then free the batch/Buffer.
+    const operation: Operation = @enumFromInt(batch_extern.operation);
     const array_or_error = switch (operation) {
         inline else => |operation_comptime| blk: {
             const Result = operation_comptime.ResultType();
 
-            const packet = packet_extern.cast();
-            defer global_allocator.destroy(packet);
+            const batch = batch_extern.cast();
+            defer global_allocator.destroy(batch);
 
-            const buffer: []const u8 = packet.slice();
+            const buffer: []const u8 = batch.slice();
             defer global_allocator.free(buffer);
 
-            switch (packet.status) {
+            switch (batch.status) {
                 .ok => {
                     const results = stdx.bytes_as_slice(
                         .exact,
@@ -457,13 +457,13 @@ fn on_completion_js(
                 .too_much_data => {
                     break :blk request_error(env, .ERR_TOO_MUCH_DATA);
                 },
-                else => unreachable, // all other packet status' handled in previous callback.
+                else => unreachable, // all other batch status' handled in previous callback.
             }
         },
         .pulse, .get_change_events => unreachable,
     };
 
-    // Parse Result array out of packet data, freeing it in the process.
+    // Parse Result array out of batch data, freeing it in the process.
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
     var callback_error = napi_null;
     const callback_result = array_or_error catch |err| switch (err) {

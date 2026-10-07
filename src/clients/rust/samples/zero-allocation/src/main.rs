@@ -50,8 +50,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .await?;
 
         // The future's output type is Result<(Completion, InputVec, OutputVec), Error>.
-        // On packet error, the completion and buffers are not returned for reuse, since this
-        // would significantly complicate the API, while packet errors are rarely recoverable.
+        // On batch error, the completion and buffers are not returned for reuse, since this
+        // would significantly complicate the API, while batch errors are rarely recoverable.
         assert_eq!(accounts_results.len(), accounts.len());
         for account_result in &accounts_results {
             if account_result.status != tb::CreateAccountStatus::Created {
