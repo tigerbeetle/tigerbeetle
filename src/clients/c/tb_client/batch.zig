@@ -268,7 +268,9 @@ pub const Batch = extern struct {
                 }
                 root.multi_batch_count += 1;
                 root.multi_batch_event_count += @intCast(batch_layout.event_count);
-                root.multi_batch_result_count_expected += @intCast(batch_layout.result_count_expected);
+                root.multi_batch_result_count_expected += @intCast(
+                    batch_layout.result_count_expected,
+                );
                 return;
             }
         }

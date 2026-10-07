@@ -599,7 +599,9 @@ pub fn ContextType(
                 batch.multi_batch_time_monotonic = self.client.time.monotonic().ns;
                 batch.multi_batch_count = 1;
                 batch.multi_batch_event_count = @intCast(batch_layout.event_count);
-                batch.multi_batch_result_count_expected = @intCast(batch_layout.result_count_expected);
+                batch.multi_batch_result_count_expected = @intCast(
+                    batch_layout.result_count_expected,
+                );
                 return self.batch_send(batch);
             }
             assert(self.client.request_inflight != null);
