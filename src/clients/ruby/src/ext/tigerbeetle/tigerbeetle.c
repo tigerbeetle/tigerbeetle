@@ -212,6 +212,7 @@ typedef struct rb_tb_deinit_context {
 static void *rb_tb_deinit_without_gvl(void *arg) {
     rb_tb_deinit_context_t *context = (rb_tb_deinit_context_t *)arg;
     context->status = tb_client_deinit(context->client);
+    return NULL;
 }
 
 static VALUE rb_tb_client_close(VALUE self) {
