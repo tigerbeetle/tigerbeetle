@@ -480,6 +480,21 @@ pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
     }
 }
 
+pub fn set_instance_data(env: c.napi_env, data: *anyopaque, finalize_fn: c.napi_finalize) !void {
+    if (c.napi_set_instance_data(env, data, finalize_fn, null) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to set instance data." });
+    }
+}
+
+pub fn get_instance_data(env: c.napi_env) !?*anyopaque {
+    var data: ?*anyopaque = null;
+    if (c.napi_get_instance_data(env, &data) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to get instance data." });
+    }
+
+    return data;
+}
+
 pub fn call_function(
     env: c.napi_env,
     this: c.napi_value,
