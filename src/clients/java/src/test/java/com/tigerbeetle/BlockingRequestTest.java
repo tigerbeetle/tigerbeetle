@@ -191,8 +191,8 @@ public class BlockingRequestTest {
 
         var dummyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE);
         request.setReplyBuffer(dummyBuffer.array());
-        request.endRequest(TBOperation.CreateTransfers.value,
-                BatchStatus.ClientReleaseTooLow.value, 0L);
+        request.endRequest(TBOperation.CreateTransfers.value, BatchStatus.ClientReleaseTooLow.value,
+                0L);
 
         assertTrue(request.isDone());
 
