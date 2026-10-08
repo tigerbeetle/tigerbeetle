@@ -623,12 +623,12 @@ const ClockUnitTestContainer = struct {
         offset_coefficient_B: i64,
     ) !void {
         self.* = .{
-            .time = .{
-                .resolution = std.time.ns_per_s / 2,
+            .time = .init(.{
+                .tick_duration = .{ .ns = std.time.ns_per_s / 2 },
                 .offset_type = offset_type,
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
-            },
+            }),
             .clock = try Clock.init(allocator, self.time.interface(), null, .{
                 .replica_count = 3,
                 .replica = 0,
@@ -833,13 +833,13 @@ const ClockSimulator = struct {
                 std.time.ns_per_s;
             const phase = @as(i64, @intCast(prng.range_inclusive(u64, 100, 1000))) +
                 @as(i64, @intFromFloat(std.Random.init(&prng, stdx.PRNG.fill).floatNorm(f64) * 50));
-            times[replica] = .{
-                .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
+            times[replica] = .init(.{
+                .tick_duration = .{ .ns = std.time.ns_per_s / 2 }, // delta_t = 0.5s
                 .offset_type = .non_ideal,
                 .offset_coefficient_A = amplitude,
                 .offset_coefficient_B = phase,
                 .offset_coefficient_C = 10,
-            };
+            });
 
             clock.* = try Clock.init(allocator, times[replica].interface(), null, .{
                 .replica_count = options.clock_count,

@@ -7,6 +7,7 @@ const log = std.log.scoped(.cluster);
 const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
+const fixtures = @import("./fixtures.zig");
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
 const ratio = stdx.PRNG.ratio;
@@ -257,12 +258,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const replica_times = try allocator.alloc(TimeSim, node_count);
             errdefer allocator.free(replica_times);
-            @memset(replica_times, .{
-                .resolution = constants.tick_ms * std.time.ns_per_ms,
-                .offset_type = .linear,
-                .offset_coefficient_A = 0,
-                .offset_coefficient_B = 0,
-            });
+
+            const time_default = fixtures.init_time(.{});
+
+            @memset(replica_times, time_default);
 
             const replica_tracers = try allocator.alloc(Tracer, node_count);
             errdefer allocator.free(replica_tracers);
@@ -309,12 +308,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const client_times = try allocator.alloc(TimeSim, client_count_total);
             errdefer allocator.free(client_times);
-            @memset(client_times, .{
-                .resolution = constants.tick_ms * std.time.ns_per_ms,
-                .offset_type = .linear,
-                .offset_coefficient_A = 0,
-                .offset_coefficient_B = 0,
-            });
+
+            @memset(client_times, time_default);
 
             const client_id_permutation = IdPermutation.generate(&prng);
             var clients = try allocator.alloc(?Client, client_count_total);

@@ -827,7 +827,7 @@ test "batch enqueue: multibatch event_count" {
     const batch_size_limit = TestOperation.create.event_size() * 10;
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     var queue: Batch.Queue = .init(.{
         .name = "testing",
@@ -966,7 +966,7 @@ test "batch enqueue: multibatch result_expected_count" {
     const result_max = TestOperation.query.result_max(constants.message_body_size_max);
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     var queue: Batch.Queue = .init(.{
         .name = "testing",
@@ -1101,7 +1101,7 @@ test "batch enqueue: no multibatch" {
     const operations_allowed: []const TestOperation = &.{.deprecated};
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     var queue: Batch.Queue = .init(.{
         .name = "testing",
@@ -1168,7 +1168,7 @@ test "batch enqueue: validate" {
     const operations_allowed: []const TestOperation = &.{ .create, .query };
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     // Event count == Result count.
     // `data_size` larger than `batch_size_limit`.
@@ -1399,7 +1399,7 @@ test "batch write: multibatch" {
     const operations_allowed: []const TestOperation = &.{ .create, .query };
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     var buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8 =
         @ptrCast(try testing.allocator.alignedAlloc(
@@ -1548,7 +1548,7 @@ test "batch write: no multibatch" {
     const operations_allowed: []const TestOperation = &.{.deprecated};
 
     var time_sim = fixtures.init_time(.{});
-    time_sim.ticks = 1;
+    time_sim.tick();
 
     var queue: Batch.Queue = .init(.{
         .name = "testing",

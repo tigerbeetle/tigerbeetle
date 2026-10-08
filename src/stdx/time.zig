@@ -12,6 +12,7 @@ const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
 const InstantUnix = stdx.InstantUnix;
+const Duration = stdx.Duration;
 
 pub const Time = struct {
     context: *anyopaque,
@@ -195,8 +196,12 @@ test "TimeOS realtime smoke" {
 
 /// Simulated Time for testing.
 pub const TimeSim = struct {
-    /// The duration of a single tick in nanoseconds.
-    resolution: u64,
+    monotonic: Instant,
+    realtime: InstantUnix,
+    realtime_epoch: InstantUnix,
+
+    ticks: u64,
+    tick_duration: Duration,
 
     offset_type: OffsetType,
 
@@ -211,15 +216,21 @@ pub const TimeSim = struct {
     /// offset_coefficient_C) is added to the result.
     offset_coefficient_A: i64,
     offset_coefficient_B: i64,
-    offset_coefficient_C: u32 = 0,
+    offset_coefficient_C: u32,
 
     prng: stdx.PRNG = stdx.PRNG.from_seed(0),
 
-    /// The number of ticks elapsed since initialization.
-    ticks: u64 = 0,
-
-    /// The instant in time chosen as the origin of this time source.
-    epoch: i64 = 0,
+    pub const fixed: TimeSim = .{
+        .monotonic = .{ .ns = 0 },
+        .realtime = .{ .ns = 0 },
+        .realtime_epoch = .{ .ns = 0 },
+        .ticks = 0,
+        .tick_duration = .{ .ns = 0 },
+        .offset_type = .linear,
+        .offset_coefficient_A = 0,
+        .offset_coefficient_B = 0,
+        .offset_coefficient_C = 0,
+    };
 
     pub const OffsetType = enum {
         linear,
@@ -228,27 +239,46 @@ pub const TimeSim = struct {
         non_ideal,
     };
 
+    pub fn init(options: struct {
+        tick_duration: Duration,
+        realtime_epoch: InstantUnix = .{ .ns = 0 },
+        offset_type: OffsetType,
+        offset_coefficient_A: i64,
+        offset_coefficient_B: i64,
+        offset_coefficient_C: u32 = 0,
+    }) TimeSim {
+        assert(options.tick_duration.ns > 0);
+        return .{
+            .monotonic = .{ .ns = 0 },
+            .realtime = .{ .ns = 0 },
+            .realtime_epoch = options.realtime_epoch,
+            .ticks = 0,
+            .tick_duration = options.tick_duration,
+            .offset_type = options.offset_type,
+            .offset_coefficient_A = options.offset_coefficient_A,
+            .offset_coefficient_B = options.offset_coefficient_B,
+            .offset_coefficient_C = options.offset_coefficient_C,
+        };
+    }
+
     pub fn interface(self: *TimeSim) Time {
         return .{
             .context = self,
             .vtable = &.{
-                .monotonic = monotonic,
-                .realtime = realtime,
+                .monotonic = vtable_monotonic,
+                .realtime = vtable_realtime,
             },
         };
     }
 
-    fn monotonic(context: *anyopaque) Instant {
+    fn vtable_monotonic(context: *anyopaque) Instant {
         const self: *TimeSim = @ptrCast(@alignCast(context));
-
-        return .{ .ns = self.ticks * self.resolution };
+        return self.monotonic;
     }
 
-    fn realtime(context: *anyopaque) InstantUnix {
+    fn vtable_realtime(context: *anyopaque) InstantUnix {
         const self: *TimeSim = @ptrCast(@alignCast(context));
-
-        const realtime_true = self.epoch + @as(i64, @intCast(monotonic(context).ns));
-        return .{ .ns = @intCast(realtime_true - self.offset(self.ticks)) };
+        return self.realtime;
     }
 
     pub fn offset(self: *TimeSim, ticks: u64) i64 {
@@ -284,6 +314,13 @@ pub const TimeSim = struct {
 
     pub fn tick(self: *TimeSim) void {
         self.ticks += 1;
+        self.monotonic.ns = self.ticks * self.tick_duration.ns;
+        const realtime_value: i64 = @as(i64, @intCast(self.realtime_epoch.ns)) +
+            @as(i64, @intCast(self.monotonic.ns));
+        const offset_value = self.offset(self.ticks);
+        assert(offset_value < realtime_value);
+
+        self.realtime.ns = @intCast(realtime_value - offset_value);
     }
 };
 
@@ -301,7 +338,7 @@ pub const Timer = struct {
     }
 
     /// Reads the timer value since start or the last reset.
-    pub fn read(self: *Timer) stdx.Duration {
+    pub fn read(self: *Timer) Duration {
         const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
         return self.started.until(current);
@@ -318,8 +355,8 @@ pub const Timer = struct {
 const testing = std.testing;
 
 test Timer {
-    var time_sim: TimeSim = (.{
-        .resolution = 1,
+    var time_sim: TimeSim = .init(.{
+        .tick_duration = .{ .ns = 1 },
         .offset_type = .linear,
         .offset_coefficient_A = 0,
         .offset_coefficient_B = 0,

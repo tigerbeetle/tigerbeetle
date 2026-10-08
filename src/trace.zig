@@ -493,17 +493,17 @@ test "trace json and statsd" {
 
     // Check that JSON is valid even while process id not known.
     trace.start(.metrics_emit);
-    time_sim.ticks += 10;
+    for (0..10) |_| time_sim.tick();
     trace.stop(.metrics_emit);
 
     trace.set_replica(.{ .cluster = 1, .replica = 1 });
 
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
-    time_sim.ticks += 1;
+    time_sim.tick();
     trace.start(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
-    time_sim.ticks += 2;
+    for (0..2) |_| time_sim.tick();
     trace.stop(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
-    time_sim.ticks += 3;
+    for (0..3) |_| time_sim.tick();
     trace.stop(.{ .replica_commit = .{ .stage = .idle, .op = 456 } });
 
     try snap(@src(),
@@ -518,11 +518,11 @@ test "trace json and statsd" {
     ).diff(trace_buffer.written());
 
     trace.start(.metrics_emit);
-    time_sim.ticks += 1;
+    time_sim.tick();
     trace.stop(.metrics_emit);
 
     trace.start(.metrics_emit);
-    time_sim.ticks += 5;
+    for (0..5) |_| time_sim.tick();
     trace.stop(.metrics_emit);
 
     trace.emit_metrics();

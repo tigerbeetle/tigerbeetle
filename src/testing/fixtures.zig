@@ -34,20 +34,19 @@ pub const replica: u8 = 0;
 pub const replica_count: u8 = 6;
 
 pub fn init_time(options: struct {
-    resolution: u64 = constants.tick_ms * std.time.ns_per_ms,
+    tick_duration: stdx.Duration = .{ .ns = constants.tick_ms * std.time.ns_per_ms },
     offset_type: TimeSim.OffsetType = .linear,
     offset_coefficient_A: i64 = 0,
     offset_coefficient_B: i64 = 0,
     offset_coefficient_C: u32 = 0,
 }) TimeSim {
-    const result: TimeSim = .{
-        .resolution = options.resolution,
+    return .init(.{
+        .tick_duration = options.tick_duration,
         .offset_type = options.offset_type,
         .offset_coefficient_A = options.offset_coefficient_A,
         .offset_coefficient_B = options.offset_coefficient_B,
         .offset_coefficient_C = options.offset_coefficient_C,
-    };
-    return result;
+    });
 }
 
 pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {

@@ -1501,8 +1501,8 @@ const fixtures = @import("../testing/fixtures.zig");
 test "amqp: RateLimit" {
     // Simulated clock with 300ms resolution,
     // to force an uneven ratio of 3.333 requests per second.
-    const resolution: u64 = 300 * std.time.ns_per_ms;
-    var time_sim = fixtures.init_time(.{ .resolution = resolution });
+    const tick_duration: stdx.Duration = .{ .ns = 300 * std.time.ns_per_ms };
+    var time_sim = fixtures.init_time(.{ .tick_duration = tick_duration });
     const time = time_sim.interface();
     var rate_limit = RateLimit.init(
         time,
@@ -1523,7 +1523,7 @@ test "amqp: RateLimit" {
         .ok => testing.expect(false),
         .wait => |duration| testing.expectEqual(
             // 3 requests in 600ms, needs to wait 400ms.
-            std.time.ns_per_s - (2 * resolution),
+            std.time.ns_per_s - (2 * tick_duration.ns),
             duration.ns,
         ),
     };
@@ -1533,7 +1533,7 @@ test "amqp: RateLimit" {
         .ok => testing.expect(false),
         .wait => |duration| testing.expectEqual(
             // 3 requests in 900ms, needs to wait 100ms.
-            std.time.ns_per_s - (3 * resolution),
+            std.time.ns_per_s - (3 * tick_duration.ns),
             duration.ns,
         ),
     };

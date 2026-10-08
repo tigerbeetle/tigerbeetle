@@ -1246,7 +1246,7 @@ const TestContext = struct {
         context.storage = try fixtures.init_storage(arena, .{ .size = 4096 });
 
         context.time_sim = fixtures.init_time(.{});
-        context.time_sim.ticks = 1;
+        context.time_sim.tick();
 
         context.trace = try fixtures.init_tracer(arena, context.time_sim.interface(), .{});
 
