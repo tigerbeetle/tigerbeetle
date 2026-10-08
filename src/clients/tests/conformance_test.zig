@@ -7,6 +7,7 @@ const parser = @import("conformance_test_parser.zig");
 // this like a walkthrough for readers of the conformance test suite. The second tuple item is used
 // in the generated test identifiers e.g. test_get_account_balances_*.
 pub const suites: []const struct { []const u8, []const u8 } = &.{
+    .{ "client_create", "create_client" },
     .{ "ids_generate", "generate_ids" },
     .{ "accounts_create", "create_accounts" },
     .{ "accounts_lookup", "lookup_accounts" },

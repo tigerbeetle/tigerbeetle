@@ -26,6 +26,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => true,
+        .requires_empty_address_passthrough => true,
     };
 }
 
@@ -81,6 +82,74 @@ fn emit_step(printer: *Printer, step: ast.Step) !void {
         .binding => |binding| try emit_binding(printer, binding),
         .call => |call| try emit_call(printer, call, .{}),
         .assertion => |assertion| try emit_assertion(printer, assertion),
+        .directive => |directive| try emit_directive(printer, directive),
+        .create_client => |arguments| try emit_create_client(printer, arguments, .success),
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "@tb_address",
+        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+    };
+    switch (outcome) {
+        .success => try printer.print_indented(
+            "TigerBeetle::Client.new(cluster_id: {s}, replica_addresses: {s}).close",
+            .{ arguments.cluster_id, replica_addresses },
+        ),
+        .failure => |client_error| {
+            const error_class: []const u8, const message: ?[]const u8 =
+                if (client_error) |expected| switch (expected) {
+                    .address_invalid => .{ "TigerBeetle::InitError", "Init error: address_invalid" },
+                    .address_limit_exceeded => .{
+                        "TigerBeetle::InitError",
+                        "Init error: address_limit_exceeded",
+                    },
+                    .cluster_id_invalid => .{
+                        "RangeError",
+                        "integer must be between 0 and 2**128 - 1",
+                    },
+                    .too_much_data, .client_closed => unreachable,
+                } else .{ "StandardError", null };
+            try printer.print_indented("{s}assert_raises({s}) do", .{
+                if (message == null) "" else "error = ",
+                error_class,
+            });
+            printer.indent();
+            try printer.write_indented("TigerBeetle::Client.new(");
+            printer.indent();
+            try printer.print_indented("cluster_id: {s},", .{arguments.cluster_id});
+            try printer.print_indented("replica_addresses: {s}", .{replica_addresses});
+            printer.dedent();
+            try printer.write_indented(")");
+            printer.dedent();
+            try printer.write_indented("end");
+            if (message) |text| {
+                try printer.print_indented("assert_equal(\"{s}\", error.message)", .{text});
+            }
+        },
+    }
+}
+
+fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
+    switch (directive) {
+        .sleep_ms => |ms| try printer.print_indented("sleep({d} / 1000.0)", .{ms}),
+        .concurrently => |concurrently| {
+            try printer.print_indented("threads = Array.new({d}) do", .{concurrently.n});
+            printer.indent();
+            try printer.write_indented("Thread.new do");
+            printer.indent();
+            try emit_invocation(printer, concurrently.call, .{});
+            printer.dedent();
+            try printer.write_indented("end");
+            printer.dedent();
+            try printer.write_indented("end");
+            try printer.write_indented("threads.each(&:join)");
+        },
     }
 }
 
@@ -142,21 +211,7 @@ fn emit_call(
         prefix: []const u8 = "",
     },
 ) !void {
-    if (call.concurrency > 1) {
-        assert(options.prefix.len == 0);
-        try printer.print_indented("threads = Array.new({d}) do", .{call.concurrency});
-        printer.indent();
-        try printer.write_indented("Thread.new do");
-        printer.indent();
-        try emit_invocation(printer, call, .{});
-        printer.dedent();
-        try printer.write_indented("end");
-        printer.dedent();
-        try printer.write_indented("end");
-        try printer.write_indented("threads.each(&:join)");
-    } else {
-        try emit_invocation(printer, call, .{ .prefix = options.prefix });
-    }
+    try emit_invocation(printer, call, .{ .prefix = options.prefix });
 }
 
 fn emit_invocation(
@@ -170,12 +225,6 @@ fn emit_invocation(
         .close_client => {
             assert(options.prefix.len == 0);
             try printer.write_indented("@client.close");
-        },
-        .sleep_ms => {
-            assert(options.prefix.len == 0);
-            assert(call.arguments.len == 1);
-            const ms = try render_expression(printer, call.arguments[0]);
-            try printer.print_indented("sleep({s} / 1000.0)", .{ms});
         },
         .create_accounts, .create_transfers, .lookup_accounts, .lookup_transfers => {
             if (!arguments_contain_record(call)) {
@@ -297,18 +346,23 @@ fn emit_assertion(
             const value = try render_expression(printer, comparison.expected.expression);
             try printer.print_indented("assert_operator({s}, :>, {s})", .{ actual, value });
         },
-        .fail => |failure| {
-            if (failure.client_error) |client_error| {
-                try printer.print_indented("assert_raises(TigerBeetle::{s}) do", .{
-                    ruby_error_name(client_error),
-                });
-            } else {
-                try printer.write_indented("assert_raises(StandardError) do");
-            }
-            printer.indent();
-            try emit_invocation(printer, failure.call, .{});
-            printer.dedent();
-            try printer.write_indented("end");
+        .fail => |failure| switch (failure.action) {
+            .call => |call| {
+                if (failure.client_error) |client_error| {
+                    try printer.print_indented("assert_raises(TigerBeetle::{s}) do", .{
+                        ruby_error_name(client_error),
+                    });
+                } else {
+                    try printer.write_indented("assert_raises(StandardError) do");
+                }
+                printer.indent();
+                try emit_invocation(printer, call, .{});
+                printer.dedent();
+                try printer.write_indented("end");
+            },
+            .create_client => |arguments| {
+                try emit_create_client(printer, arguments, .{ .failure = failure.client_error });
+            },
         },
     }
 }
@@ -344,7 +398,6 @@ fn render_call(printer: *Printer, call: ast.Call) ![]const u8 {
             return text.written();
         },
         .close_client,
-        .sleep_ms,
         .get_account_transfers,
         .get_account_balances,
         .query_accounts,
@@ -399,6 +452,7 @@ fn ruby_error_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "PacketError",
         .client_closed => "ClientClosedError",
+        .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
 }
 

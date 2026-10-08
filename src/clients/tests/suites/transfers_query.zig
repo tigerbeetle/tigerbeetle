@@ -1,4 +1,5 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "returns transfers matching user data" {
     const debit_account_id = ct.generate_id();
@@ -6,11 +7,11 @@ test "returns transfers matching user data" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -40,7 +41,7 @@ test "returns transfers matching user data" {
         },
     });
 
-    const transfers = ct.query_transfers(.{ .user_data_128 = user_data, .limit = 10 });
+    const transfers = client.query_transfers(.{ .user_data_128 = user_data, .limit = 10 });
 
     ct.assert_equal(transfers, .{
         .{ .id = transfer_1_id, .amount = 10, .user_data_128 = user_data },
@@ -55,13 +56,13 @@ test "returns transfers matching ledger and code" {
     const ledger_7_credit_id = ct.generate_id();
     const ledger_8_debit_id = ct.generate_id();
     const ledger_8_credit_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = ledger_7_debit_id, .ledger = 7, .code = 1 },
         .{ .id = ledger_7_credit_id, .ledger = 7, .code = 1 },
         .{ .id = ledger_8_debit_id, .ledger = 8, .code = 1 },
         .{ .id = ledger_8_credit_id, .ledger = 8, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = ledger_7_debit_id,
@@ -91,7 +92,7 @@ test "returns transfers matching ledger and code" {
         },
     });
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .ledger = 7,
         .code = 42,
@@ -107,11 +108,11 @@ test "returns transfers matching every filter field" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -158,7 +159,7 @@ test "returns transfers matching every filter field" {
         },
     });
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .user_data_64 = 100,
         .user_data_32 = 10,
@@ -179,11 +180,11 @@ test "returns transfers matching every filter field in reverse order" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -230,7 +231,7 @@ test "returns transfers matching every filter field in reverse order" {
         },
     });
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .user_data_64 = 100,
         .user_data_32 = 10,
@@ -251,11 +252,11 @@ test "returns transfers matching code" {
     const credit_account_id = ct.generate_id();
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    const results = ct.create_transfers(.{
+    const results = client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -286,7 +287,7 @@ test "returns transfers matching code" {
     const timestamp_first = result_first.timestamp;
     const timestamp_last = result_last.timestamp;
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .code = 999,
         .timestamp_min = timestamp_first,
         .timestamp_max = timestamp_last,
@@ -305,11 +306,11 @@ test "returns transfers in reverse order with the reversed flag" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -330,7 +331,7 @@ test "returns transfers in reverse order with the reversed flag" {
         },
     });
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .limit = 10,
         .flags = .{ .reversed = true },
@@ -349,11 +350,11 @@ test "pages through reversed transfers with a timestamp cursor" {
     const transfer_2_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -383,7 +384,7 @@ test "pages through reversed transfers with a timestamp cursor" {
         },
     });
 
-    const page_1 = ct.query_transfers(.{
+    const page_1 = client.query_transfers(.{
         .user_data_128 = user_data,
         .limit = 2,
         .flags = .{ .reversed = true },
@@ -396,7 +397,7 @@ test "pages through reversed transfers with a timestamp cursor" {
 
     const page_1_last = page_1[1];
     const cursor_1 = page_1_last.timestamp;
-    const page_2 = ct.query_transfers(.{
+    const page_2 = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_max = ct.decrement(cursor_1, 1),
         .limit = 2,
@@ -407,7 +408,7 @@ test "pages through reversed transfers with a timestamp cursor" {
 
     const page_2_last = page_2[0];
     const cursor_2 = page_2_last.timestamp;
-    const page_3 = ct.query_transfers(.{
+    const page_3 = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_max = ct.decrement(cursor_2, 1),
         .limit = 2,
@@ -418,7 +419,7 @@ test "pages through reversed transfers with a timestamp cursor" {
 }
 
 test "returns no transfers for unused user data" {
-    const transfers = ct.query_transfers(.{ .user_data_128 = ct.generate_id(), .limit = 10 });
+    const transfers = client.query_transfers(.{ .user_data_128 = ct.generate_id(), .limit = 10 });
 
     ct.assert_empty(transfers);
 }
@@ -427,11 +428,11 @@ test "returns no transfers when no transfer matches every user data field" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = debit_account_id,
@@ -456,7 +457,7 @@ test "returns no transfers when no transfer matches every user data field" {
         },
     });
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .user_data_64 = 200,
         .user_data_32 = 10,
@@ -467,7 +468,7 @@ test "returns no transfers when no transfer matches every user data field" {
 }
 
 test "returns no transfers for a default filter" {
-    const transfers = ct.query_transfers(.{});
+    const transfers = client.query_transfers(.{});
 
     ct.assert_empty(transfers);
 }
@@ -476,11 +477,11 @@ test "returns no transfers for a zero limit" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = debit_account_id,
@@ -492,7 +493,7 @@ test "returns no transfers for a zero limit" {
         },
     });
 
-    const transfers = ct.query_transfers(.{ .user_data_128 = user_data, .limit = 0 });
+    const transfers = client.query_transfers(.{ .user_data_128 = user_data, .limit = 0 });
 
     ct.assert_empty(transfers);
 }
@@ -501,11 +502,11 @@ test "returns no transfers when the timestamp range is inverted" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
     const user_data = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = debit_account_id,
@@ -517,11 +518,11 @@ test "returns no transfers when the timestamp range is inverted" {
         },
     });
 
-    const matched = ct.query_transfers(.{ .user_data_128 = user_data, .limit = 10 });
+    const matched = client.query_transfers(.{ .user_data_128 = user_data, .limit = 10 });
     const transfer = matched[0];
     const transfer_timestamp = transfer.timestamp;
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_min = ct.increment(transfer_timestamp, 1),
         .timestamp_max = ct.decrement(transfer_timestamp, 1),
@@ -534,7 +535,7 @@ test "returns no transfers when the timestamp range is inverted" {
 test "returns no transfers for a timestamp minimum of u64 max" {
     const user_data = ct.generate_id();
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_min = 18446744073709551615,
         .limit = 10,
@@ -546,7 +547,7 @@ test "returns no transfers for a timestamp minimum of u64 max" {
 test "returns no transfers for a timestamp maximum of u64 max" {
     const user_data = ct.generate_id();
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_max = 18446744073709551615,
         .limit = 10,
@@ -558,7 +559,7 @@ test "returns no transfers for a timestamp maximum of u64 max" {
 test "returns no transfers for an inverted timestamp range at u64 max" {
     const user_data = ct.generate_id();
 
-    const transfers = ct.query_transfers(.{
+    const transfers = client.query_transfers(.{
         .user_data_128 = user_data,
         .timestamp_min = 18446744073709551614,
         .timestamp_max = 1,
@@ -569,5 +570,5 @@ test "returns no transfers for an inverted timestamp range at u64 max" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail_with(ct.query_transfers(.{ .limit = 10000 }), .too_much_data);
+    ct.assert_fail_with(client.query_transfers(.{ .limit = 10000 }), .too_much_data);
 }

@@ -36,6 +36,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
+        .requires_empty_address_passthrough => true,
     };
 }
 
@@ -386,6 +387,127 @@ fn emit_step(scope: *Scope, step: ast.Step, variant: ClientVariant) !void {
         .binding => |binding| try emit_binding(scope, binding, variant),
         .call => |call| try emit_call(scope, call, variant, .{}),
         .assertion => |assertion| try emit_assertion(scope, assertion, variant),
+        .directive => |directive| try emit_directive(scope, directive, variant),
+        .create_client => |arguments| try emit_create_client(scope.printer, arguments, .success),
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const cluster_id = try render_uint128(printer, arguments.cluster_id);
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "server.getAddress()",
+        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+    };
+    switch (outcome) {
+        .success => try printer.print_indented(
+            "new Client({s}, new String[] {{{s}}}).close();",
+            .{ cluster_id, replica_addresses },
+        ),
+        .failure => |client_error| {
+            const status: ?[]const u8 = if (client_error) |expected| switch (expected) {
+                .address_invalid => "AddressInvalid",
+                .address_limit_exceeded => "AddressLimitExceeded",
+                .too_much_data, .client_closed, .cluster_id_invalid => unreachable,
+            } else null;
+            try printer.print_indented("{s}assertThrows(", .{
+                if (status == null) "" else "final var exception = ",
+            });
+            printer.indent();
+            printer.indent();
+            try printer.print_indented("{s}.class,", .{
+                if (status == null) "Exception" else "InitializationException",
+            });
+            try printer.write_indented("() -> new Client(");
+            printer.indent();
+            printer.indent();
+            try printer.print_indented("{s},", .{cluster_id});
+            try printer.print_indented("new String[] {{{s}}}));", .{replica_addresses});
+            printer.dedent();
+            printer.dedent();
+            printer.dedent();
+            printer.dedent();
+            if (status) |name| {
+                try printer.print_indented(
+                    "assertEquals(InitializationStatus.{s}.value, exception.getStatus());",
+                    .{name},
+                );
+            }
+        },
+    }
+}
+
+fn emit_directive(
+    scope: *Scope,
+    directive: ast.HarnessDirective,
+    variant: ClientVariant,
+) !void {
+    const printer = scope.printer;
+    switch (directive) {
+        .sleep_ms => |ms| try printer.print_indented("Thread.sleep({d});", .{ms}),
+        .concurrently => |concurrently| {
+            if (variant == .asynchronous) {
+                try printer.print_indented("final var tasks = new CompletableFuture[{d}];", .{
+                    concurrently.n,
+                });
+                try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{
+                    concurrently.n,
+                });
+                printer.indent();
+                try emit_invocation(scope, concurrently.call, variant, .{ .task = true });
+                printer.dedent();
+                try printer.write_indented("}");
+                try printer.write_indented("CompletableFuture.allOf(tasks).join();");
+                return;
+            }
+            try printer.print_indented("final var threads = new Thread[{d}];", .{concurrently.n});
+            try printer.print_indented("final var exceptions = new Exception[{d}];", .{
+                concurrently.n,
+            });
+            try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{
+                concurrently.n,
+            });
+            printer.indent();
+            try printer.write_indented("final var threadIndex = index;");
+            try printer.write_indented("threads[index] = new Thread(() -> {");
+            printer.indent();
+            try printer.write_indented("try {");
+
+            printer.indent();
+            var thread_scope = Scope.init(printer);
+            try emit_invocation(&thread_scope, concurrently.call, variant, .{});
+            printer.dedent();
+
+            try printer.write_indented("} catch (Exception exception) {");
+            printer.indent();
+            try printer.write_indented("exceptions[threadIndex] = exception;");
+            printer.dedent();
+            try printer.write_indented("}");
+            printer.dedent();
+            try printer.write_indented("});");
+            try printer.write_indented("threads[index].start();");
+            printer.dedent();
+            try printer.write_indented("}");
+            try printer.write_indented("for (final var thread : threads) {");
+            printer.indent();
+            try printer.write_indented("thread.join(Duration.ofSeconds(60).toMillis());");
+            try printer.write_indented(
+                "assertTrue(\"Worker did not terminate within 60 seconds\", !thread.isAlive());",
+            );
+            printer.dedent();
+            try printer.write_indented("}");
+            try printer.write_indented("for (final var exception : exceptions) {");
+            printer.indent();
+            try printer.write_indented("if (exception != null)");
+            printer.indent();
+            try printer.write_indented("throw exception;");
+            printer.dedent();
+            printer.dedent();
+            try printer.write_indented("}");
+        },
     }
 }
 
@@ -483,70 +605,6 @@ fn emit_call(
         client_error: ?ast.ClientError = null,
     },
 ) !void {
-    const printer = scope.printer;
-    if (call.concurrency > 1) {
-        assert(options.binding == null);
-        if (variant == .asynchronous) {
-            try printer.print_indented("final var tasks = new CompletableFuture[{d}];", .{
-                call.concurrency,
-            });
-            try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{
-                call.concurrency,
-            });
-            printer.indent();
-            try emit_invocation(scope, call, variant, .{ .task = true });
-            printer.dedent();
-            try printer.write_indented("}");
-            try printer.write_indented("CompletableFuture.allOf(tasks).join();");
-            return;
-        }
-        try printer.print_indented("final var threads = new Thread[{d}];", .{call.concurrency});
-        try printer.print_indented("final var exceptions = new Exception[{d}];", .{
-            call.concurrency,
-        });
-        try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{
-            call.concurrency,
-        });
-        printer.indent();
-        try printer.write_indented("final var threadIndex = index;");
-        try printer.write_indented("threads[index] = new Thread(() -> {");
-        printer.indent();
-        try printer.write_indented("try {");
-
-        printer.indent();
-        var thread_scope = Scope.init(printer);
-        try emit_invocation(&thread_scope, call, variant, .{});
-        printer.dedent();
-
-        try printer.write_indented("} catch (Exception exception) {");
-        printer.indent();
-        try printer.write_indented("exceptions[threadIndex] = exception;");
-        printer.dedent();
-        try printer.write_indented("}");
-        printer.dedent();
-        try printer.write_indented("});");
-        try printer.write_indented("threads[index].start();");
-        printer.dedent();
-        try printer.write_indented("}");
-        try printer.write_indented("for (final var thread : threads) {");
-        printer.indent();
-        try printer.write_indented("thread.join(Duration.ofSeconds(60).toMillis());");
-        try printer.write_indented(
-            "assertTrue(\"Worker did not terminate within 60 seconds\", !thread.isAlive());",
-        );
-        printer.dedent();
-        try printer.write_indented("}");
-        try printer.write_indented("for (final var exception : exceptions) {");
-        printer.indent();
-        try printer.write_indented("if (exception != null)");
-        printer.indent();
-        try printer.write_indented("throw exception;");
-        printer.dedent();
-        printer.dedent();
-        try printer.write_indented("}");
-        return;
-    }
-
     try emit_invocation(scope, call, variant, .{
         .binding = options.binding,
         .expect_error = options.expect_error,
@@ -570,12 +628,6 @@ fn emit_invocation(
         .close_client => {
             assert(options.binding == null);
             try printer.write_indented("client.close();");
-            return;
-        },
-        .sleep_ms => {
-            assert(options.binding == null);
-            assert(call.arguments.len == 1);
-            try printer.print_indented("Thread.sleep({s});", .{call.arguments[0].integer});
             return;
         },
         else => {},
@@ -705,7 +757,7 @@ fn emit_argument(
             }
             return name;
         },
-        .close_client, .sleep_ms => unreachable,
+        .close_client => unreachable,
     }
 }
 
@@ -843,10 +895,17 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVarian
                 ),
             });
         },
-        .fail => |failure| try emit_call(scope, failure.call, variant, .{
-            .expect_error = true,
-            .client_error = failure.client_error,
-        }),
+        .fail => |failure| switch (failure.action) {
+            .call => |call| try emit_call(scope, call, variant, .{
+                .expect_error = true,
+                .client_error = failure.client_error,
+            }),
+            .create_client => |arguments| {
+                try emit_create_client(scope.printer, arguments, .{
+                    .failure = failure.client_error,
+                });
+            },
+        },
     }
 }
 
@@ -1004,6 +1063,7 @@ fn java_exception_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "TooMuchDataException",
         .client_closed => "ClientClosedException",
+        .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
 }
 
@@ -1017,7 +1077,7 @@ fn java_operation_name(name: ast.Call.Name) []const u8 {
         .get_account_balances => "getAccountBalances",
         .query_accounts => "queryAccounts",
         .query_transfers => "queryTransfers",
-        .close_client, .sleep_ms => unreachable,
+        .close_client => unreachable,
     };
 }
 

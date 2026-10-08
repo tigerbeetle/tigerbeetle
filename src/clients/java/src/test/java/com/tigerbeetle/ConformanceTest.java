@@ -56,6 +56,72 @@ public class ConformanceTest {
     // Sync client
     /////////////////
 
+    // Suite: create_client
+
+    @Test
+    public void testCreateClientCreatesAClientFromValidArguments()
+            throws Exception {
+        new Client(UInt128.asBytes(0L), new String[] {server.getAddress()}).close();
+    }
+
+    @Test
+    public void testCreateClientRejectsAnInvalidAddress()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"not-an-address"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsAnAddressWithAPortAboveTheMaximum()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"127.0.0.1:99999"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsMoreAddressesThanReplicas()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
+        assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsAnEmptyAddress()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {""}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsEmptyAddresses()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {",,"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    // Omitted: "rejects a cluster_id above the maximum"
+    // Reason: requires unbounded integers
+
     // Suite: generate_ids
 
     @Test
@@ -6006,6 +6072,72 @@ public class ConformanceTest {
     //////////////////
     // Async client
     //////////////////
+
+    // Suite: create_client
+
+    @Test
+    public void testCreateClientCreatesAClientFromValidArgumentsAsync()
+            throws Exception {
+        new Client(UInt128.asBytes(0L), new String[] {server.getAddress()}).close();
+    }
+
+    @Test
+    public void testCreateClientRejectsAnInvalidAddressAsync()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"not-an-address"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsAnAddressWithAPortAboveTheMaximumAsync()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"127.0.0.1:99999"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsMoreAddressesThanReplicasAsync()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
+        assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsAnEmptyAddressAsync()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {""}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    @Test
+    public void testCreateClientRejectsEmptyAddressesAsync()
+            throws Exception {
+        final var exception = assertThrows(
+                InitializationException.class,
+                () -> new Client(
+                        UInt128.asBytes(0L),
+                        new String[] {",,"}));
+        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+    }
+
+    // Omitted: "rejects a cluster_id above the maximum"
+    // Reason: requires unbounded integers
 
     // Suite: generate_ids
 

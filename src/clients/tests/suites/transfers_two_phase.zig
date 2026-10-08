@@ -1,17 +1,18 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "creates, posts, voids, and expires two-phase transfers" {
     const account_a_id = ct.generate_id();
     const account_b_id = ct.generate_id();
 
-    const account_results_1 = ct.create_accounts(.{
+    const account_results_1 = client.create_accounts(.{
         .{ .id = account_a_id, .ledger = 1, .code = 718 },
     });
     const account_result_1 = account_results_1[0];
     ct.assert_equal(account_result_1.status, .created);
     ct.assert_greater_than(account_result_1.timestamp, 0);
 
-    const account_results_2 = ct.create_accounts(.{
+    const account_results_2 = client.create_accounts(.{
         .{ .id = account_a_id, .ledger = 1, .code = 718 },
         .{ .id = account_b_id, .ledger = 1, .code = 719 },
     });
@@ -22,7 +23,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(account_result_3.status, .created);
     ct.assert_greater_than(account_result_3.timestamp, 0);
 
-    const transfer_results_1 = ct.create_transfers(.{
+    const transfer_results_1 = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_b_id,
@@ -36,7 +37,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(transfer_result_1.status, .created);
     ct.assert_greater_than(transfer_result_1.timestamp, 0);
 
-    const accounts_1 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_1 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_1, .{
         .{
             .id = account_a_id,
@@ -55,7 +56,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     });
 
     const transfer_2_id = ct.generate_id();
-    const transfer_results_2 = ct.create_transfers(.{
+    const transfer_results_2 = client.create_transfers(.{
         .{
             .id = transfer_2_id,
             .debit_account_id = account_b_id,
@@ -71,7 +72,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(transfer_result_2.status, .created);
     ct.assert_greater_than(transfer_result_2.timestamp, 0);
 
-    const accounts_2 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_2 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_2, .{
         .{
             .id = account_a_id,
@@ -89,7 +90,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
         },
     });
 
-    const transfers_1 = ct.lookup_transfers(.{transfer_2_id});
+    const transfers_1 = client.lookup_transfers(.{transfer_2_id});
     const transfer_lookup_1 = transfers_1[0];
     ct.assert_equal(transfers_1, .{.{
         .id = transfer_2_id,
@@ -105,7 +106,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_greater_than(transfer_lookup_1.timeout, 0);
     ct.assert_equal(transfer_lookup_1.timestamp, transfer_result_2.timestamp);
 
-    const commit_results = ct.create_transfers(.{
+    const commit_results = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .amount = ct.uint128_max,
@@ -119,7 +120,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(commit_result.status, .created);
     ct.assert_greater_than(commit_result.timestamp, 0);
 
-    const accounts_3 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_3 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_3, .{
         .{
             .id = account_a_id,
@@ -138,7 +139,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     });
 
     const transfer_3_id = ct.generate_id();
-    const transfer_results_3 = ct.create_transfers(.{
+    const transfer_results_3 = client.create_transfers(.{
         .{
             .id = transfer_3_id,
             .debit_account_id = account_b_id,
@@ -154,7 +155,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(transfer_result_3.status, .created);
     ct.assert_greater_than(transfer_result_3.timestamp, 0);
 
-    const reject_results = ct.create_transfers(.{
+    const reject_results = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .pending_id = transfer_3_id,
@@ -167,7 +168,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(reject_result.status, .created);
     ct.assert_greater_than(reject_result.timestamp, 0);
 
-    const accounts_4 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_4 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_4, .{
         .{
             .id = account_a_id,
@@ -186,7 +187,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     });
 
     const transfer_4_id = ct.generate_id();
-    const transfer_results_4 = ct.create_transfers(.{
+    const transfer_results_4 = client.create_transfers(.{
         .{
             .id = transfer_4_id,
             .debit_account_id = account_b_id,
@@ -202,7 +203,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     ct.assert_equal(transfer_result_4.status, .created);
     ct.assert_greater_than(transfer_result_4.timestamp, 0);
 
-    const accounts_5 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_5 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_5, .{
         .{
             .id = account_a_id,
@@ -222,7 +223,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
 
     ct.sleep_ms(1500);
 
-    const accounts_6 = ct.lookup_accounts(.{ account_a_id, account_b_id });
+    const accounts_6 = client.lookup_accounts(.{ account_a_id, account_b_id });
     ct.assert_equal(accounts_6, .{
         .{
             .id = account_a_id,
@@ -240,7 +241,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
         },
     });
 
-    const expired_results = ct.create_transfers(.{
+    const expired_results = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .pending_id = transfer_4_id,

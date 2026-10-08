@@ -26,6 +26,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => true,
+        .requires_empty_address_passthrough => true,
     };
 }
 
@@ -139,6 +140,116 @@ fn emit_step(printer: *Printer, step: ast.Step, variant: ClientVariant) !void {
         .binding => |binding| try emit_binding(printer, binding, variant),
         .call => |call| try emit_call(printer, call, variant, .{}),
         .assertion => |assertion| try emit_assertion(printer, assertion, variant),
+        .directive => |directive| try emit_directive(printer, directive, variant),
+        .create_client => |arguments| {
+            try emit_create_client(printer, arguments, variant, .success);
+        },
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    arguments: ast.ClientInitArgs,
+    variant: ClientVariant,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const class_name = switch (variant) {
+        .synchronous => "ClientSync",
+        .asynchronous => "ClientAsync",
+    };
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "replica_addresses",
+        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+    };
+    switch (outcome) {
+        .success => try printer.print_indented(
+            "{s}tb.{s}(cluster_id={s}, replica_addresses={s}).close()",
+            .{
+                switch (variant) {
+                    .synchronous => "",
+                    .asynchronous => "await ",
+                },
+                class_name,
+                arguments.cluster_id,
+                replica_addresses,
+            },
+        ),
+        .failure => |client_error| {
+            const raises: []const u8, const status: ?[]const u8 =
+                if (client_error) |expected| switch (expected) {
+                    .address_invalid => .{ "tb.client.InitError", "ADDRESS_INVALID" },
+                    .address_limit_exceeded => .{
+                        "tb.client.InitError",
+                        "ADDRESS_LIMIT_EXCEEDED",
+                    },
+                    .cluster_id_invalid => .{ "tb.IntegerOverflowError", null },
+                    .too_much_data, .client_closed => unreachable,
+                } else .{ "Exception", null };
+            try printer.print_indented("with pytest.raises({s}){s}:", .{
+                raises,
+                if (status == null) "" else " as error",
+            });
+            printer.indent();
+            try printer.print_indented("tb.{s}(", .{class_name});
+            printer.indent();
+            try printer.print_indented("cluster_id={s},", .{arguments.cluster_id});
+            try printer.print_indented("replica_addresses={s},", .{replica_addresses});
+            printer.dedent();
+            try printer.write_indented(")");
+            printer.dedent();
+            if (status) |name| {
+                try printer.print_indented(
+                    "assert error.value.args[0] == tb.InitStatus.{s}",
+                    .{name},
+                );
+            }
+        },
+    }
+}
+
+fn emit_directive(
+    printer: *Printer,
+    directive: ast.HarnessDirective,
+    variant: ClientVariant,
+) !void {
+    switch (directive) {
+        .sleep_ms => |ms| switch (variant) {
+            .synchronous => try printer.print_indented("time.sleep({d} / 1000)", .{ms}),
+            .asynchronous => try printer.print_indented(
+                "await asyncio.sleep({d} / 1000)",
+                .{ms},
+            ),
+        },
+        .concurrently => |concurrently| {
+            try printer.write_indented(switch (variant) {
+                .synchronous => "def operation():",
+                .asynchronous => "async def operation():",
+            });
+            printer.indent();
+            try emit_invocation(printer, concurrently.call, variant, .{});
+            printer.dedent();
+            try printer.write_empty_line();
+            switch (variant) {
+                .synchronous => {
+                    try printer.print_indented(
+                        "threads = [threading.Thread(target=operation) for _ in range({d})]",
+                        .{concurrently.n},
+                    );
+                    try printer.write_indented("for thread in threads:");
+                    printer.indent();
+                    try printer.write_indented("thread.start()");
+                    printer.dedent();
+                    try printer.write_indented("for thread in threads:");
+                    printer.indent();
+                    try printer.write_indented("thread.join()");
+                    printer.dedent();
+                },
+                .asynchronous => try printer.print_indented(
+                    "await asyncio.gather(*(operation() for _ in range({d})))",
+                    .{concurrently.n},
+                ),
+            }
+        },
     }
 }
 
@@ -198,39 +309,7 @@ fn emit_call(
         prefix: []const u8 = "",
     },
 ) !void {
-    if (call.concurrency > 1) {
-        assert(options.prefix.len == 0);
-        try printer.write_indented(switch (variant) {
-            .synchronous => "def operation():",
-            .asynchronous => "async def operation():",
-        });
-        printer.indent();
-        try emit_invocation(printer, call, variant, .{});
-        printer.dedent();
-        try printer.write_empty_line();
-        switch (variant) {
-            .synchronous => {
-                try printer.print_indented(
-                    "threads = [threading.Thread(target=operation) for _ in range({d})]",
-                    .{call.concurrency},
-                );
-                try printer.write_indented("for thread in threads:");
-                printer.indent();
-                try printer.write_indented("thread.start()");
-                printer.dedent();
-                try printer.write_indented("for thread in threads:");
-                printer.indent();
-                try printer.write_indented("thread.join()");
-                printer.dedent();
-            },
-            .asynchronous => try printer.print_indented(
-                "await asyncio.gather(*(operation() for _ in range({d})))",
-                .{call.concurrency},
-            ),
-        }
-    } else {
-        try emit_invocation(printer, call, variant, .{ .prefix = options.prefix });
-    }
+    try emit_invocation(printer, call, variant, .{ .prefix = options.prefix });
 }
 
 fn emit_invocation(
@@ -249,18 +328,6 @@ fn emit_invocation(
         .close_client => {
             assert(options.prefix.len == 0);
             try printer.print_indented("{s}client.close()", .{await_keyword});
-        },
-        .sleep_ms => {
-            assert(options.prefix.len == 0);
-            assert(call.arguments.len == 1);
-            const ms = try render_expression(printer, call.arguments[0]);
-            switch (variant) {
-                .synchronous => try printer.print_indented("time.sleep({s} / 1000)", .{ms}),
-                .asynchronous => try printer.print_indented(
-                    "await asyncio.sleep({s} / 1000)",
-                    .{ms},
-                ),
-            }
         },
         .create_accounts, .create_transfers => {
             if (call.arguments.len == 0) {
@@ -395,17 +462,24 @@ fn emit_assertion(
                 comparison.actual.reference, comparison.actual.field.name, value,
             });
         },
-        .fail => |failure| {
-            if (failure.client_error) |client_error| {
-                try printer.print_indented("with pytest.raises(tb.{s}):", .{
-                    python_error_name(client_error),
+        .fail => |failure| switch (failure.action) {
+            .call => |call| {
+                if (failure.client_error) |client_error| {
+                    try printer.print_indented("with pytest.raises(tb.{s}):", .{
+                        python_error_name(client_error),
+                    });
+                } else {
+                    try printer.write_indented("with pytest.raises(Exception):");
+                }
+                printer.indent();
+                try emit_invocation(printer, call, variant, .{});
+                printer.dedent();
+            },
+            .create_client => |arguments| {
+                try emit_create_client(printer, arguments, variant, .{
+                    .failure = failure.client_error,
                 });
-            } else {
-                try printer.write_indented("with pytest.raises(Exception):");
-            }
-            printer.indent();
-            try emit_invocation(printer, failure.call, variant, .{});
-            printer.dedent();
+            },
         },
     }
 }
@@ -488,6 +562,7 @@ fn python_error_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "TooMuchDataError",
         .client_closed => "ClientClosedError",
+        .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
 }
 

@@ -46,6 +46,62 @@ public class ConformanceTests
     // Sync client
     /////////////////
 
+    // Suite: create_client
+
+    [TestMethod]
+    public void CreateClientCreatesAClientFromValidArguments()
+    {
+        new Client(0, new string[] { server.Address }).Dispose();
+    }
+
+    [TestMethod]
+    public void CreateClientRejectsAnInvalidAddress()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "not-an-address" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public void CreateClientRejectsAnAddressWithAPortAboveTheMaximum()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "127.0.0.1:99999" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public void CreateClientRejectsMoreAddressesThanReplicas()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
+    }
+
+    [TestMethod]
+    public void CreateClientRejectsAnEmptyAddress()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public void CreateClientRejectsEmptyAddresses()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { ",," })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    // Omitted: "rejects a cluster_id above the maximum"
+    // Reason: requires unbounded integers
+
     // Suite: generate_ids
 
     [TestMethod]
@@ -6059,6 +6115,62 @@ public class ConformanceTests
 
     // Cases without a request have nothing to await.
 #pragma warning disable CS1998
+
+    // Suite: create_client
+
+    [TestMethod]
+    public async Task CreateClientCreatesAClientFromValidArgumentsAsync()
+    {
+        new Client(0, new string[] { server.Address }).Dispose();
+    }
+
+    [TestMethod]
+    public async Task CreateClientRejectsAnInvalidAddressAsync()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "not-an-address" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public async Task CreateClientRejectsAnAddressWithAPortAboveTheMaximumAsync()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "127.0.0.1:99999" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public async Task CreateClientRejectsMoreAddressesThanReplicasAsync()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
+    }
+
+    [TestMethod]
+    public async Task CreateClientRejectsAnEmptyAddressAsync()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { "" })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    [TestMethod]
+    public async Task CreateClientRejectsEmptyAddressesAsync()
+    {
+        var exception = Assert.ThrowsException<InitializationException>(
+            () => new Client(0, new string[] { ",," })
+        );
+        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+    }
+
+    // Omitted: "rejects a cluster_id above the maximum"
+    // Reason: requires unbounded integers
 
     // Suite: generate_ids
 

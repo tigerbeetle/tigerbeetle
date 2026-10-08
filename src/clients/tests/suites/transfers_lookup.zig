@@ -1,14 +1,15 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "returns an existing transfer" {
     const transfer_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = debit_account_id,
@@ -19,7 +20,7 @@ test "returns an existing transfer" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{transfer_id});
+    const transfers = client.lookup_transfers(.{transfer_id});
 
     ct.assert_equal(transfers, .{.{
         .id = transfer_id,
@@ -30,7 +31,7 @@ test "returns an existing transfer" {
 }
 
 test "returns no transfers for a missing id" {
-    const transfers = ct.lookup_transfers(.{ct.generate_id()});
+    const transfers = client.lookup_transfers(.{ct.generate_id()});
 
     ct.assert_empty(transfers);
 }
@@ -40,11 +41,11 @@ test "returns transfers in the order they were requested" {
     const transfer_2_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = debit_account_id,
@@ -63,7 +64,7 @@ test "returns transfers in the order they were requested" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{ transfer_2_id, transfer_1_id });
+    const transfers = client.lookup_transfers(.{ transfer_2_id, transfer_1_id });
 
     ct.assert_equal(transfers, .{
         .{ .id = transfer_2_id, .amount = 20 },
@@ -75,11 +76,11 @@ test "returns a transfer once per requested id" {
     const transfer_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = debit_account_id,
@@ -90,7 +91,7 @@ test "returns a transfer once per requested id" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{ transfer_id, transfer_id });
+    const transfers = client.lookup_transfers(.{ transfer_id, transfer_id });
 
     ct.assert_equal(transfers, .{
         .{ .id = transfer_id, .amount = 10 },
@@ -102,7 +103,7 @@ test "returns no transfer for an id that failed" {
     const transfer_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{
             .id = debit_account_id,
             .ledger = 1,
@@ -111,7 +112,7 @@ test "returns no transfer for an id that failed" {
         },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = debit_account_id,
@@ -122,7 +123,7 @@ test "returns no transfer for an id that failed" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{transfer_id});
+    const transfers = client.lookup_transfers(.{transfer_id});
 
     ct.assert_empty(transfers);
 }
@@ -132,11 +133,11 @@ test "returns only the existing transfer for a partial match" {
     const missing_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = existing_id,
             .debit_account_id = debit_account_id,
@@ -147,13 +148,13 @@ test "returns only the existing transfer for a partial match" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{ existing_id, missing_id });
+    const transfers = client.lookup_transfers(.{ existing_id, missing_id });
 
     ct.assert_equal(transfers, .{.{ .id = existing_id }});
 }
 
 test "returns no transfers for an empty batch" {
-    const transfers = ct.lookup_transfers(.{});
+    const transfers = client.lookup_transfers(.{});
 
     ct.assert_empty(transfers);
 }
@@ -163,11 +164,11 @@ test "round-trips all fields" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
     const user_data_128 = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = debit_account_id,
@@ -181,7 +182,7 @@ test "round-trips all fields" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{transfer_id});
+    const transfers = client.lookup_transfers(.{transfer_id});
 
     ct.assert_equal(transfers, .{.{
         .id = transfer_id,

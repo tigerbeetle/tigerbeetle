@@ -16,6 +16,72 @@ class TestConformance < Minitest::Test
     @client&.close
   end
 
+  # Suite: create_client
+
+  def test_create_client_creates_a_client_from_valid_arguments
+    TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address).close
+  end
+
+  def test_create_client_rejects_an_invalid_address
+    error = assert_raises(TigerBeetle::InitError) do
+      TigerBeetle::Client.new(
+        cluster_id: 0,
+        replica_addresses: "not-an-address"
+      )
+    end
+    assert_equal("Init error: address_invalid", error.message)
+  end
+
+  def test_create_client_rejects_an_address_with_a_port_above_the_maximum
+    error = assert_raises(TigerBeetle::InitError) do
+      TigerBeetle::Client.new(
+        cluster_id: 0,
+        replica_addresses: "127.0.0.1:99999"
+      )
+    end
+    assert_equal("Init error: address_invalid", error.message)
+  end
+
+  def test_create_client_rejects_more_addresses_than_replicas
+    error = assert_raises(TigerBeetle::InitError) do
+      TigerBeetle::Client.new(
+        cluster_id: 0,
+        replica_addresses: "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"
+      )
+    end
+    assert_equal("Init error: address_limit_exceeded", error.message)
+  end
+
+  def test_create_client_rejects_an_empty_address
+    error = assert_raises(TigerBeetle::InitError) do
+      TigerBeetle::Client.new(
+        cluster_id: 0,
+        replica_addresses: ""
+      )
+    end
+    assert_equal("Init error: address_invalid", error.message)
+  end
+
+  def test_create_client_rejects_empty_addresses
+    error = assert_raises(TigerBeetle::InitError) do
+      TigerBeetle::Client.new(
+        cluster_id: 0,
+        replica_addresses: ",,"
+      )
+    end
+    assert_equal("Init error: address_invalid", error.message)
+  end
+
+  def test_create_client_rejects_a_cluster_id_above_the_maximum
+    error = assert_raises(RangeError) do
+      TigerBeetle::Client.new(
+        cluster_id: 340282366920938463463374607431768211456,
+        replica_addresses: @tb_address
+      )
+    end
+    assert_equal("integer must be between 0 and 2**128 - 1", error.message)
+  end
+
   # Suite: generate_ids
 
   def test_generate_ids_generates_monotonically_increasing_ids

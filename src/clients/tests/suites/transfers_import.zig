@@ -1,7 +1,8 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "imports a transfer with an explicit timestamp" {
-    const reference_results = ct.create_accounts(.{
+    const reference_results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
     });
     const reference_result = reference_results[0];
@@ -11,7 +12,7 @@ test "imports a transfer with an explicit timestamp" {
 
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{
             .id = debit_account_id,
             .ledger = 1,
@@ -29,7 +30,7 @@ test "imports a transfer with an explicit timestamp" {
     });
 
     const transfer_id = ct.generate_id();
-    const results = ct.create_transfers(.{
+    const results = client.create_transfers(.{
         .{
             .id = transfer_id,
             .debit_account_id = debit_account_id,
@@ -44,7 +45,7 @@ test "imports a transfer with an explicit timestamp" {
 
     ct.assert_equal(results, .{.{ .status = .created }});
 
-    const transfers = ct.lookup_transfers(.{transfer_id});
+    const transfers = client.lookup_transfers(.{transfer_id});
     ct.assert_equal(transfers, .{
         .{ .id = transfer_id, .amount = 100, .flags = .{ .imported = true } },
     });

@@ -33,6 +33,44 @@ func TestConformance(t *testing.T) {
 		})
 	}
 
+	// Suite: create_client
+
+	test("create_client_creates_a_client_from_valid_arguments", func(t *testing.T, client Client) {
+		testClient, err := NewClient(ToUint128(0), []string{port})
+		if err != nil {
+			t.Fatal(err)
+		}
+		testClient.Close()
+	})
+
+	test("create_client_rejects_an_invalid_address", func(t *testing.T, client Client) {
+		_, err := NewClient(ToUint128(0), []string{"not-an-address"})
+		assert.True(t, errors.Is(err, ErrInvalidAddress))
+	})
+
+	test("create_client_rejects_an_address_with_a_port_above_the_maximum", func(t *testing.T, client Client) {
+		_, err := NewClient(ToUint128(0), []string{"127.0.0.1:99999"})
+		assert.True(t, errors.Is(err, ErrInvalidAddress))
+	})
+
+	test("create_client_rejects_more_addresses_than_replicas", func(t *testing.T, client Client) {
+		_, err := NewClient(ToUint128(0), []string{"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"})
+		assert.True(t, errors.Is(err, ErrAddressLimitExceeded))
+	})
+
+	test("create_client_rejects_an_empty_address", func(t *testing.T, client Client) {
+		_, err := NewClient(ToUint128(0), []string{""})
+		assert.True(t, errors.Is(err, ErrInvalidAddress))
+	})
+
+	test("create_client_rejects_empty_addresses", func(t *testing.T, client Client) {
+		_, err := NewClient(ToUint128(0), []string{",,"})
+		assert.True(t, errors.Is(err, ErrInvalidAddress))
+	})
+
+	// Omitted: "rejects a cluster_id above the maximum"
+	// Reason: requires unbounded integers
+
 	// Suite: generate_ids
 
 	test("generate_ids_generates_monotonically_increasing_ids", func(t *testing.T, client Client) {

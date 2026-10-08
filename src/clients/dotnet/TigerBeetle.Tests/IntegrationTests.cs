@@ -76,35 +76,6 @@ public class IntegrationTests
     }
 
     [TestMethod]
-    public void ConstructorWithEmptyReplicaAddressElement()
-    {
-        try
-        {
-            _ = new Client(0, ",");
-            Assert.Fail();
-        }
-        catch (InitializationException exception)
-        {
-            Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
-        }
-    }
-
-    [TestMethod]
-    public void ConstructorWithInvalidReplicaAddresses()
-    {
-        try
-        {
-            var addresses = string.Join(",", Enumerable.Range(3000, 3100));
-            _ = new Client(0, addresses);
-            Assert.Fail();
-        }
-        catch (InitializationException exception)
-        {
-            Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
-        }
-    }
-
-    [TestMethod]
     public void ConstructorAndFinalizer()
     {
         // No using here, we want to test the finalizer

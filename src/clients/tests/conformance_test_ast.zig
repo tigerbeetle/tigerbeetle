@@ -21,6 +21,8 @@ pub const Step = union(enum) {
     binding: Binding,
     call: Call,
     assertion: Assertion,
+    directive: HarnessDirective,
+    create_client: ClientInitArgs,
 };
 
 pub const Binding = struct {
@@ -62,14 +64,29 @@ pub const FieldReference = struct {
 };
 
 pub const Call = struct {
+    receiver: []const u8,
     name: Name,
     arguments: []const Expression = &.{},
-    concurrency: u32 = 1,
 
-    // NOTE: we're trying to keep the operations in sync with what is defined in
-    // conformance_test_api.zig. I will reevaluate this approach later, for now
-    // it's GoodEnough™.
-    pub const Name = stdx.EnumType(api_decl_names(is_call));
+    pub const Name = std.meta.DeclEnum(api.Client);
+};
+
+pub const ClientInitArgs = struct {
+    cluster_id: []const u8,
+    replica_addresses: ReplicaAddresses,
+
+    pub const ReplicaAddresses = union(enum) {
+        server,
+        literal: []const u8,
+    };
+};
+
+pub const HarnessDirective = union(enum) {
+    sleep_ms: u32,
+    concurrently: struct {
+        n: u32,
+        call: Call,
+    },
 };
 
 pub const Assertion = union(enum) {
@@ -82,9 +99,14 @@ pub const Assertion = union(enum) {
     ascending: []const u8,
     greater_than: FieldComparison,
     fail: struct {
-        call: Call,
+        action: Action,
         client_error: ?ClientError,
     },
+
+    pub const Action = union(enum) {
+        call: Call,
+        create_client: ClientInitArgs,
+    };
 
     pub const FieldComparison = struct {
         actual: FieldReference,
@@ -177,15 +199,6 @@ pub fn api_decl_names(
     return stdx.comptime_slice(names, count);
 }
 
-fn is_call(comptime name: [:0]const u8) bool {
-    if (std.mem.eql(u8, name, "close_client")) return true;
-    if (std.mem.eql(u8, name, "sleep_ms")) return true;
-    for ([_][]const u8{ "create_", "lookup_", "get_", "query_" }) |prefix| {
-        if (std.mem.startsWith(u8, name, prefix)) return true;
-    }
-    return false;
-}
-
 pub fn is_assertion(comptime name: [:0]const u8) bool {
     return std.mem.startsWith(u8, name, "assert_");
 }
@@ -196,5 +209,6 @@ fn is_requirement(comptime name: [:0]const u8) bool {
 
 fn is_record(comptime name: [:0]const u8) bool {
     if (std.mem.eql(u8, name, "ClientError")) return false;
+    if (std.mem.eql(u8, name, "Client")) return false;
     return @TypeOf(@field(api, name)) == type;
 }

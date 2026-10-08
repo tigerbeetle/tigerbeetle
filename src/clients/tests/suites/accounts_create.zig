@@ -1,13 +1,14 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "accepts an empty batch" {
-    const results = ct.create_accounts(.{});
+    const results = client.create_accounts(.{});
 
     ct.assert_empty(results);
 }
 
 test "creates an account" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
     });
 
@@ -15,7 +16,7 @@ test "creates an account" {
 }
 
 test "returns a result per account in a batch" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
         .{ .id = 0, .ledger = 1, .code = 1 },
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
@@ -30,20 +31,20 @@ test "returns a result per account in a batch" {
 
 test "returns exists for a duplicate account" {
     const account = ct.Account{ .id = ct.generate_id(), .ledger = 1, .code = 1 };
-    ct.create_accounts(.{account});
+    client.create_accounts(.{account});
 
-    const results = ct.create_accounts(.{account});
+    const results = client.create_accounts(.{account});
 
     ct.assert_equal(results, .{.{ .status = .exists }});
 }
 
 test "returns exists with a different ledger" {
     const account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1 },
     });
 
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = account_id, .ledger = 2, .code = 1 },
     });
 
@@ -51,7 +52,7 @@ test "returns exists with a different ledger" {
 }
 
 test "rejects a zero id" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = 0, .ledger = 1, .code = 1 },
     });
 
@@ -59,7 +60,7 @@ test "rejects a zero id" {
 }
 
 test "rejects an id of the maximum u128" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.uint128_max, .ledger = 1, .code = 1 },
     });
 
@@ -67,7 +68,7 @@ test "rejects an id of the maximum u128" {
 }
 
 test "rejects a zero ledger" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 0, .code = 1 },
     });
 
@@ -75,7 +76,7 @@ test "rejects a zero ledger" {
 }
 
 test "rejects a zero code" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 0 },
     });
 
@@ -83,7 +84,7 @@ test "rejects a zero code" {
 }
 
 test "rejects a non-zero debits pending" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .debits_pending = 1 },
     });
 
@@ -91,7 +92,7 @@ test "rejects a non-zero debits pending" {
 }
 
 test "rejects a non-zero debits posted" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .debits_posted = 1 },
     });
 
@@ -99,7 +100,7 @@ test "rejects a non-zero debits posted" {
 }
 
 test "rejects a non-zero credits pending" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .credits_pending = 1 },
     });
 
@@ -107,7 +108,7 @@ test "rejects a non-zero credits pending" {
 }
 
 test "rejects a non-zero credits posted" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .credits_posted = 1 },
     });
 
@@ -115,7 +116,7 @@ test "rejects a non-zero credits posted" {
 }
 
 test "rejects mutually exclusive flags" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{
             .id = ct.generate_id(),
             .ledger = 1,
@@ -131,7 +132,7 @@ test "rejects mutually exclusive flags" {
 }
 
 test "rejects a non-zero timestamp" {
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .timestamp = 2 },
     });
 
