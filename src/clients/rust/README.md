@@ -6,11 +6,14 @@ The TigerBeetle client for Rust.
 [![crates.io](https://img.shields.io/crates/v/tigerbeetle)](https://crates.io/crates/tigerbeetle)
 [![docs.rs](https://img.shields.io/docsrs/tigerbeetle)](https://docs.rs/tigerbeetle)
 
+The client must not be newer than the TigerBeetle cluster it connects to, so always pin exact
+versions: `cargo add tigerbeetle@=X.Y.Z`, where `X.Y.Z` is the version of your cluster.
+
 ## Prerequisites
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Rust 1.68+
+* Rust 1.63+
 
 ## Setup
 
@@ -22,11 +25,22 @@ Then create `Cargo.toml` and copy this into it:
 [package]
 name = "tigerbeetle-test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
-[dependencies]
-tigerbeetle.path = "../.."
-futures = "=0.3.31"
+[profile.release]
+# It is *strongly* recommended that Rust applications using TigerBeetle
+# enable overflow checks, because the nature of accounting makes overflow
+# errors catastrophic.
+#
+# Note that the following line enables the checks only for this crate, so
+# overflow checks must always be enabled in the Cargo.toml of the end application.
+overflow-checks = true
+```
+
+Then, install the TigerBeetle client:
+
+```console
+cargo add tigerbeetle
 ```
 
 Now, create `src/main.rs` and copy this into it:
@@ -35,12 +49,36 @@ Now, create `src/main.rs` and copy this into it:
 use tigerbeetle as tb;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    futures::executor::block_on(main_async())
+    block_on(main_async())
 }
 
 async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     println!("hello world");
     Ok(())
+}
+
+/// Minimal async executor for this sample. In a real application, use a proper async runtime.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct ThreadWaker(std::thread::Thread);
+
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    let mut future = Box::pin(future);
+    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => std::thread::park(),
+        }
+    }
 }
 ```
 

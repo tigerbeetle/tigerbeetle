@@ -1,7 +1,9 @@
-use futures::executor::block_on;
 use std::cell::RefCell;
 
 use tigerbeetle as tb;
+
+mod executor;
+use executor::block_on;
 
 mod test_db;
 pub use test_db::*;

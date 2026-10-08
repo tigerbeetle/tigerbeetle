@@ -240,8 +240,10 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
     }
 
     if (languages.contains(.rust)) {
-        // Currently disabled.
-        _ = &build_rust;
+        var dist_dir_rust = try dist_dir.createDirPathOpen(shell.io, "rust", .{});
+        defer dist_dir_rust.close(shell.io);
+
+        try build_rust(shell, info, dist_dir_rust);
     }
 }
 
@@ -792,6 +794,7 @@ fn publish(
             \\  to `{[tag]s}`.
             \\* Node.js: `npm install --save-exact tigerbeetle-node@{[tag]s}`
             \\* Python: `pip install tigerbeetle=={[tag]s}`
+            \\* Rust: `cargo add tigerbeetle@={[tag]s}`
             \\
             \\## Changelog
             \\
@@ -841,8 +844,7 @@ fn publish(
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
     if (languages.contains(.ruby)) try publish_ruby(shell, info);
-    // Currently disabled.
-    _ = &publish_rust;
+    if (languages.contains(.rust)) try publish_rust(shell, info);
 
     if (languages.contains(.zig)) {
         try shell.exec(
@@ -1139,6 +1141,7 @@ fn publish_rust(shell: *Shell, info: VersionInfo) !void {
     if (try is_already_published(shell, ci_rust, info)) return;
 
     const token = try shell.env_get("CRATES_IO_TOKEN");
+    assert(token.len > 0);
 
     try shell.pushd("./src/clients/rust");
     defer shell.popd();
@@ -1178,9 +1181,8 @@ fn publish_rust(shell: *Shell, info: VersionInfo) !void {
         .data = cargo_toml_updated,
     });
 
-    try shell.exec("cargo publish --token {token} --allow-dirty", .{
-        .token = token,
-    });
+    try shell.env.put("CARGO_REGISTRY_TOKEN", token);
+    try shell.exec("cargo publish --allow-dirty", .{});
 }
 
 // Docker is not required and not recommended for running TigerBeetle. A container is published

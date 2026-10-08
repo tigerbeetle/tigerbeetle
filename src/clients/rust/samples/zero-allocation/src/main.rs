@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut transfers: Vec<tb::Transfer> = Vec::with_capacity(batch_size_max);
     let mut transfers_results: Vec<tb::CreateTransferResult> = Vec::with_capacity(batch_size_max);
 
-    futures::executor::block_on(async {
+    block_on(async {
         // Phase 1: create all accounts between which we will transfer funds.
         for n in 0..account_count {
             accounts.push(tb::Account {
@@ -104,4 +104,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         Ok(())
     })
+}
+
+/// Minimal async executor for this sample. In a real application, use a proper async runtime.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct ThreadWaker(std::thread::Thread);
+
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    let mut future = Box::pin(future);
+    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => std::thread::park(),
+        }
+    }
 }
