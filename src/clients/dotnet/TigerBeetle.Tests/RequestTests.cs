@@ -16,7 +16,7 @@ public class RequestTests
             TBOperation.LookupAccounts,
             (byte)99,
             null,
-            PacketStatus.Ok,
+            BatchStatus.Ok,
             delay: 100,
             isAsync: true
         );
@@ -36,7 +36,7 @@ public class RequestTests
             TBOperation.LookupAccounts,
             (byte)TBOperation.LookupAccounts,
             buffer,
-            PacketStatus.Ok,
+            BatchStatus.Ok,
             delay: 100,
             isAsync: true
         );
@@ -49,15 +49,15 @@ public class RequestTests
     }
 
     [TestMethod]
-    public async Task PacketStatusException()
+    public async Task BatchStatusException()
     {
-        var expectedResults = new (PacketStatus, Type)[]
+        var expectedResults = new (BatchStatus, Type)[]
         {
-            new(PacketStatus.TooMuchData, typeof(TooMuchDataException)),
-            new(PacketStatus.ClientEvicted, typeof(ClientEvictedException)),
-            new(PacketStatus.ClientReleaseTooHigh, typeof(ClientReleaseException)),
-            new(PacketStatus.ClientReleaseTooLow, typeof(ClientReleaseException)),
-            new(PacketStatus.ClientClosed, typeof(ClientClosedException)),
+            new(BatchStatus.TooMuchData, typeof(TooMuchDataException)),
+            new(BatchStatus.ClientEvicted, typeof(ClientEvictedException)),
+            new(BatchStatus.ClientReleaseTooHigh, typeof(ClientReleaseException)),
+            new(BatchStatus.ClientReleaseTooLow, typeof(ClientReleaseException)),
+            new(BatchStatus.ClientClosed, typeof(ClientClosedException)),
         };
         foreach (var expected in expectedResults)
         {
@@ -111,7 +111,7 @@ public class RequestTests
                 TBOperation.LookupAccounts,
                 (byte)TBOperation.LookupAccounts,
                 buffer,
-                PacketStatus.Ok,
+                BatchStatus.Ok,
                 delay: 100,
                 isAsync
             );
@@ -138,10 +138,10 @@ public class RequestTests
         private readonly Request<TResult, TBody> request;
         private readonly byte receivedOperation;
         private readonly Memory<byte> buffer;
-        private readonly PacketStatus status;
+        private readonly BatchStatus status;
         private readonly int delay;
 
-        public CallbackSimulator(TBOperation operation, byte receivedOperation, Memory<byte> buffer, PacketStatus status, int delay, bool isAsync)
+        public CallbackSimulator(TBOperation operation, byte receivedOperation, Memory<byte> buffer, BatchStatus status, int delay, bool isAsync)
         {
             unsafe
             {

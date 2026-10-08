@@ -40,7 +40,7 @@ void completion_context_destroy(completion_context_t *ctx);
 // Sends and blocks the current thread until the reply arrives.
 TB_CLIENT_STATUS send_request(
     tb_client_t *client,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     completion_context_t *ctx
 );
 
@@ -50,7 +50,7 @@ long long get_time_ms(void);
 // Completion function, called by tb_client no notify that a request as completed.
 void on_completion(
     uintptr_t context,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
     completion_context_t ctx;
     completion_context_init(&ctx);
 
-    tb_packet_t packet;
+    tb_batch_t batch;
 
     ////////////////////////////////////////////////////////////
     // Submitting a batch of accounts:                        //
@@ -105,23 +105,23 @@ int main(int argc, char **argv) {
     accounts[1].code = 2;
     accounts[1].ledger = 777;
 
-    packet.operation = TB_OPERATION_CREATE_ACCOUNTS; // The operation to execute.
-    packet.data = accounts;                          // The data to be sent.
-    packet.data_size = ACCOUNTS_SIZE;                //
-    packet.user_data = &ctx;                         // User-defined context.
-    packet.status = TB_PACKET_OK;                    // Set when the reply arrives.
+    batch.operation = TB_OPERATION_CREATE_ACCOUNTS; // The operation to execute.
+    batch.data = accounts;                          // The data to be sent.
+    batch.data_size = ACCOUNTS_SIZE;                //
+    batch.user_data = &ctx;                         // User-defined context.
+    batch.status = TB_BATCH_OK;                    // Set when the reply arrives.
 
     printf("Creating accounts...\n");
 
-    TB_CLIENT_STATUS client_status = send_request(&client, &packet, &ctx);
+    TB_CLIENT_STATUS client_status = send_request(&client, &batch, &ctx);
     if (client_status != TB_CLIENT_SUCCESS) {
         printf("Failed to send the request\n");
         exit(-1);
     }
 
-    if (packet.status != TB_PACKET_OK) {
+    if (batch.status != TB_BATCH_OK) {
         // Checking if the request failed:
-        printf("Error calling create_accounts (ret=%d)\n", packet.status);
+        printf("Error calling create_accounts (ret=%d)\n", batch.status);
         exit(-1);
     }
 
@@ -161,15 +161,15 @@ int main(int argc, char **argv) {
             transfers[j].amount = 1;
         }
 
-        packet.operation = TB_OPERATION_CREATE_TRANSFERS; // The operation to execute.
-        packet.data = transfers;                          // The data to be sent.
-        packet.data_size = TRANSFERS_SIZE;                //
-        packet.user_data = &ctx;                          // User-defined context.
-        packet.status = TB_PACKET_OK;                     // Set when the reply arrives.
+        batch.operation = TB_OPERATION_CREATE_TRANSFERS; // The operation to execute.
+        batch.data = transfers;                          // The data to be sent.
+        batch.data_size = TRANSFERS_SIZE;                //
+        batch.user_data = &ctx;                          // User-defined context.
+        batch.status = TB_BATCH_OK;                     // Set when the reply arrives.
 
         long long now = get_time_ms();
 
-        client_status = send_request(&client, &packet, &ctx);
+        client_status = send_request(&client, &batch, &ctx);
         if (client_status != TB_CLIENT_SUCCESS) {
             printf("Failed to send the request\n");
             exit(-1);
@@ -179,9 +179,9 @@ int main(int argc, char **argv) {
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
         total_time_ms += elapsed_ms;
 
-        if (packet.status != TB_PACKET_OK) {
+        if (batch.status != TB_BATCH_OK) {
             // Checking if the request failed:
-            printf("Error calling create_transfers (ret=%d)\n", packet.status);
+            printf("Error calling create_transfers (ret=%d)\n", batch.status);
             exit(-1);
         }
 
@@ -210,22 +210,22 @@ int main(int argc, char **argv) {
     printf("Looking up accounts ...\n");
     tb_uint128_t ids[ACCOUNTS_LEN] = { accounts[0].id, accounts[1].id };
 
-    packet.operation = TB_OPERATION_LOOKUP_ACCOUNTS;
-    packet.data = ids;
-    packet.data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
-    packet.user_data = &ctx;
-    packet.status = TB_PACKET_OK;
+    batch.operation = TB_OPERATION_LOOKUP_ACCOUNTS;
+    batch.data = ids;
+    batch.data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
+    batch.user_data = &ctx;
+    batch.status = TB_BATCH_OK;
 
-    client_status = send_request(&client, &packet, &ctx);
+    client_status = send_request(&client, &batch, &ctx);
     if (client_status != TB_CLIENT_SUCCESS) {
         printf("Failed to send the request\n");
         exit(-1);
     }
 
 
-    if (packet.status != TB_PACKET_OK) {
+    if (batch.status != TB_BATCH_OK) {
         // Checking if the request failed:
-        printf("Error calling lookup_accounts (ret=%d)", packet.status);
+        printf("Error calling lookup_accounts (ret=%d)", batch.status);
         exit(-1);
     }
 
@@ -260,7 +260,7 @@ int main(int argc, char **argv) {
 
 void on_completion(
     uintptr_t context,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
@@ -268,7 +268,7 @@ void on_completion(
     (void)timestamp; // Not used.
 
     // The user_data gives context to a request:
-    completion_context_t *ctx = (completion_context_t*)packet->user_data;
+    completion_context_t *ctx = (completion_context_t*)batch->user_data;
 
     // Signaling the main thread we received the reply:
     pthread_mutex_lock(&ctx->lock);
@@ -283,7 +283,7 @@ void on_completion(
 
 TB_CLIENT_STATUS send_request(
     tb_client_t *client,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     completion_context_t *ctx
 ) {
     // Locks the mutex:
@@ -294,7 +294,7 @@ TB_CLIENT_STATUS send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
+    TB_CLIENT_STATUS client_status = tb_client_submit(client, batch);
     if (client_status == TB_CLIENT_SUCCESS) {
         // Uses a condvar to sync this thread with the callback:
         while (!ctx->completed) {
@@ -343,14 +343,14 @@ long long get_time_ms(void) {
 
 void on_completion(
     uintptr_t context,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     uint64_t timestamp,
     const uint8_t *data,
     uint32_t size
 ) {
     (void)timestamp; // Not used.
     // The user_data gives context to a request:
-    completion_context_t *ctx = (completion_context_t*)packet->user_data;
+    completion_context_t *ctx = (completion_context_t*)batch->user_data;
 
     // Signaling the main thread we received the reply:
     EnterCriticalSection(&ctx->lock);
@@ -365,7 +365,7 @@ void on_completion(
 
 TB_CLIENT_STATUS send_request(
     tb_client_t *client,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     completion_context_t *ctx
 ) {
     // Locks the mutex:
@@ -373,7 +373,7 @@ TB_CLIENT_STATUS send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
+    TB_CLIENT_STATUS client_status = tb_client_submit(client, batch);
     if (client_status == TB_CLIENT_SUCCESS) {
         // Uses a condvar to sync this thread with the callback:
         while (!ctx->completed) {

@@ -9,8 +9,8 @@ const tb = vsr.tigerbeetle;
 /// VSR type mappings: these will always be the same regardless of state machine.
 const mappings_vsr = .{
     .{ exports.tb_operation, "Operation" },
-    .{ exports.tb_packet_status, "PacketStatus" },
-    .{ exports.tb_packet_t, "Packet" },
+    .{ exports.tb_batch_status, "BatchStatus" },
+    .{ exports.tb_batch_t, "Batch" },
     .{ exports.tb_client_t, "Client" },
     .{ exports.tb_init_status, "InitStatus" },
     .{ exports.tb_client_status, "ClientStatus" },
@@ -514,7 +514,7 @@ pub fn main(init: std.process.Init) !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     buffer.print(
         \\# Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
-        \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CPacket),
+        \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CBatch),
         \\                                ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
         \\LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
         \\
@@ -523,7 +523,7 @@ pub fn main(init: std.process.Init) !void {
         \\                ("addresses_ptr", ctypes.c_void_p), ("addresses_len", ctypes.c_uint64)]
         \\
         \\# Initialize a new TigerBeetle client which connects to the addresses provided and
-        \\# completes submitted packets by invoking the callback with the given context.
+        \\# completes submitted batches by invoking the callback with the given context.
         \\tb_client_init = tbclient.tb_client_init
         \\tb_client_init.restype = InitStatus
         \\tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
@@ -536,19 +536,19 @@ pub fn main(init: std.process.Init) !void {
         \\tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),
         \\                                      ctypes.POINTER(InitParameters)]
         \\
-        \\# Closes the client, causing any previously submitted packets to be completed with
-        \\# `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+        \\# Closes the client, causing any previously submitted batches to be completed with
+        \\# `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\# It is undefined behavior to use any functions on the client once deinit is called.
         \\tb_client_deinit = tbclient.tb_client_deinit
         \\tb_client_deinit.restype = ClientStatus
         \\tb_client_deinit.argtypes = [ctypes.POINTER(CClient)]
         \\
-        \\# Submit a packet with its operation, data, and data_size fields set.
+        \\# Submit a batch with its operation, data, and data_size fields set.
         \\# Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
-        \\# packet on the `tb_client` thread (separate from caller's thread).
+        \\# batch on the `tb_client` thread (separate from caller's thread).
         \\tb_client_submit = tbclient.tb_client_submit
         \\tb_client_submit.restype = ClientStatus
-        \\tb_client_submit.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(CPacket)]
+        \\tb_client_submit.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(CBatch)]
         \\
         \\tb_client_register_log_callback = tbclient.tb_client_register_log_callback
         \\tb_client_register_log_callback.restype = RegisterLogCallbackStatus

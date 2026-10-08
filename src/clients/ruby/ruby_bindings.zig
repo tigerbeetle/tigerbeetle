@@ -354,7 +354,7 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
         \\  class ClientClosedError < StandardError
         \\  end
         \\
-        \\  class PacketError < StandardError
+        \\  class BatchError < StandardError
         \\  end
         \\
         \\  class Client

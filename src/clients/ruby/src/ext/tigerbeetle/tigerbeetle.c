@@ -22,7 +22,7 @@ typedef struct rb_tb_request {
     // Set at init, read by callback.
     TB_OPERATION operation;
     uint8_t *send_buf;
-    tb_packet_t packet;
+    tb_batch_t batch;
     // Shared between Ruby thread and callback.
     _Atomic rb_tb_request_state_t state;
     // Written by callback, read by Ruby thread.
@@ -44,11 +44,11 @@ void Init_tigerbeetle(void) {
     rb_eInitError = rb_define_class_under(rb_mTigerBeetle, "InitError", rb_eStandardError);
     rb_eClientClosedError =
         rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
-    VALUE ePacketError = rb_define_class_under(rb_mTigerBeetle, "PacketError", rb_eStandardError);
-    rb_define_class_under(rb_mTigerBeetle, "TooMuchDataError", ePacketError);
-    rb_define_class_under(rb_mTigerBeetle, "ClientEvictedError", ePacketError);
-    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooLowError", ePacketError);
-    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooHighError", ePacketError);
+    VALUE eBatchError = rb_define_class_under(rb_mTigerBeetle, "BatchError", rb_eStandardError);
+    rb_define_class_under(rb_mTigerBeetle, "TooMuchDataError", eBatchError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientEvictedError", eBatchError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooLowError", eBatchError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooHighError", eBatchError);
 
     rb_tb_init_native_client(rb_mTigerBeetle);
 }
@@ -94,7 +94,7 @@ static VALUE rb_tb_request_result(VALUE self) {
     TypedData_Get_Struct(self, rb_tb_request_t, &rb_tb_request_type, req);
 
     VALUE result = Qnil;
-    if (req->status == TB_PACKET_OK) {
+    if (req->status == TB_BATCH_OK) {
         if (req->result_size == 0) {
             result = rb_ary_new();
         } else {
@@ -116,19 +116,19 @@ static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
 
 static void rb_tb_on_completion(
     uintptr_t completion_ctx,
-    tb_packet_t *packet,
+    tb_batch_t *batch,
     uint64_t timestamp,
     const uint8_t *result,
     uint32_t result_size
 ) {
     (void)timestamp;
-    rb_tb_request_t *req = (rb_tb_request_t *)packet->user_data;
+    rb_tb_request_t *req = (rb_tb_request_t *)batch->user_data;
 
     free(req->send_buf);
     req->send_buf = NULL;
-    req->status = packet->status;
+    req->status = batch->status;
 
-    if (packet->status == TB_PACKET_OK) {
+    if (batch->status == TB_BATCH_OK) {
         req->result_size = result_size;
         tb_assert(result != NULL);
 
@@ -283,14 +283,14 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
             rb_jump_tag(serialize_state);
         }
 
-        req->packet.data_size = (uint32_t)send_size;
+        req->batch.data_size = (uint32_t)send_size;
     }
 
-    req->packet.data = req->send_buf;
-    req->packet.operation = (uint8_t)operation;
-    req->packet.user_data = req;
+    req->batch.data = req->send_buf;
+    req->batch.operation = (uint8_t)operation;
+    req->batch.user_data = req;
 
-    TB_CLIENT_STATUS status = tb_client_submit(client, &req->packet);
+    TB_CLIENT_STATUS status = tb_client_submit(client, &req->batch);
     switch(status) {
         case TB_CLIENT_SUCCESS:
             return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
@@ -315,17 +315,17 @@ static VALUE rb_tb_request_id(VALUE self) {
 }
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
-    rb_define_const(mTigerBeetle, "PACKET_OK", RB_INT2NUM(TB_PACKET_OK));
-    rb_define_const(mTigerBeetle, "PACKET_CLIENT_CLOSED", RB_INT2NUM(TB_PACKET_CLIENT_CLOSED));
-    rb_define_const(mTigerBeetle, "PACKET_TOO_MUCH_DATA", RB_INT2NUM(TB_PACKET_TOO_MUCH_DATA));
-    rb_define_const(mTigerBeetle, "PACKET_CLIENT_EVICTED", RB_INT2NUM(TB_PACKET_CLIENT_EVICTED));
+    rb_define_const(mTigerBeetle, "BATCH_OK", RB_INT2NUM(TB_BATCH_OK));
+    rb_define_const(mTigerBeetle, "BATCH_CLIENT_CLOSED", RB_INT2NUM(TB_BATCH_CLIENT_CLOSED));
+    rb_define_const(mTigerBeetle, "BATCH_TOO_MUCH_DATA", RB_INT2NUM(TB_BATCH_TOO_MUCH_DATA));
+    rb_define_const(mTigerBeetle, "BATCH_CLIENT_EVICTED", RB_INT2NUM(TB_BATCH_CLIENT_EVICTED));
     rb_define_const(
-        mTigerBeetle, "PACKET_CLIENT_RELEASE_TOO_LOW", RB_INT2NUM(TB_PACKET_CLIENT_RELEASE_TOO_LOW)
+        mTigerBeetle, "BATCH_CLIENT_RELEASE_TOO_LOW", RB_INT2NUM(TB_BATCH_CLIENT_RELEASE_TOO_LOW)
     );
     rb_define_const(
         mTigerBeetle,
-        "PACKET_CLIENT_RELEASE_TOO_HIGH",
-        RB_INT2NUM(TB_PACKET_CLIENT_RELEASE_TOO_HIGH)
+        "BATCH_CLIENT_RELEASE_TOO_HIGH",
+        RB_INT2NUM(TB_BATCH_CLIENT_RELEASE_TOO_HIGH)
     );
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);

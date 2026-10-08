@@ -178,7 +178,7 @@ StandardError
 StandardError
   TigerBeetle::InitError
   TigerBeetle::ClientClosedError
-  TigerBeetle::PacketError
+  TigerBeetle::BatchError
 ```
 
 ### Logging

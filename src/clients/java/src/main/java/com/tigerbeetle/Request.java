@@ -80,7 +80,7 @@ abstract class Request<TResponse extends Batch> {
 
             }
 
-            switch (PacketStatus.fromValue(status)) {
+            switch (BatchStatus.fromValue(status)) {
                 case Ok:
                     switch (operation) {
                         case CreateAccounts: {
@@ -170,7 +170,7 @@ abstract class Request<TResponse extends Batch> {
                 case InvalidDataSize:
                 case InvalidOperation:
                 default: {
-                    exception = new AssertionError("Unexpected PacketStatus %d", status);
+                    exception = new AssertionError("Unexpected BatchStatus %d", status);
                     break;
                 }
             }

@@ -5,7 +5,7 @@
 
 package com.tigerbeetle;
 
-enum PacketStatus {
+enum BatchStatus {
     Ok((byte) 0),
     TooMuchData((byte) 1),
     ClientEvicted((byte) 2),
@@ -17,11 +17,11 @@ enum PacketStatus {
 
     public final byte value;
 
-    PacketStatus(byte value) {
+    BatchStatus(byte value) {
         this.value = value;
     }
 
-    public static PacketStatus fromValue(byte value) {
+    public static BatchStatus fromValue(byte value) {
         switch (value) {
             case (byte)0: return Ok;
             case (byte)1: return TooMuchData;
@@ -32,7 +32,7 @@ enum PacketStatus {
             case (byte)6: return InvalidOperation;
             case (byte)7: return InvalidDataSize;
             default: throw new IllegalArgumentException(
-                String.format("Invalid PacketStatus value=%d", value));
+                String.format("Invalid BatchStatus value=%d", value));
         }
     }
 }

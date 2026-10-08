@@ -6,8 +6,8 @@ const constants = @import("../constants.zig");
 
 const tb_client = @import("../../src/clients/c/tb_client.zig");
 const Context = tb_client.Context;
-const Packet = tb_client.Packet;
-const PacketStatus = tb_client.PacketStatus;
+const Batch = tb_client.Batch;
+const BatchStatus = tb_client.BatchStatus;
 const InitError = tb_client.InitError;
 const ClientInterface = tb_client.ClientInterface;
 const ClientError = tb_client.ClientError;
@@ -25,7 +25,7 @@ const TestingContext = struct {
     cond: std.Io.Condition = .init,
     reply: ?struct {
         tb_context: usize,
-        tb_packet: *Packet,
+        tb_batch: *Batch,
         timestamp: u64,
         result_size: u32,
     } = null,
@@ -41,13 +41,13 @@ const TestingContext = struct {
 
     pub fn on_complete(
         tb_context: usize,
-        tb_packet: *Packet,
+        tb_batch: *Batch,
         timestamp: u64,
         result: ?[*]const u8,
         result_size: u32,
     ) callconv(.c) void {
         _ = result;
-        var self: *TestingContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
+        var self: *TestingContext = @ptrCast(@alignCast(tb_batch.*.user_data.?));
 
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
@@ -55,7 +55,7 @@ const TestingContext = struct {
         assert(self.reply == null);
         self.reply = .{
             .tb_context = tb_context,
-            .tb_packet = tb_packet,
+            .tb_batch = tb_batch,
             .timestamp = timestamp,
             .result_size = result_size,
         };
@@ -74,7 +74,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     try test_init(gpa, tmp_beetle.port_str);
     try test_client_status(gpa, shell.io, tmp_beetle.port_str);
-    try test_packet_status(gpa, shell.io, tmp_beetle.port_str);
+    try test_batch_status(gpa, shell.io, tmp_beetle.port_str);
 }
 
 // Asserts the validation rules associated with the `init` function.
@@ -123,7 +123,7 @@ fn test_init(gpa: std.mem.Allocator, _: []const u8) !void {
 // Asserts the validation rules associated with the client status.
 fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
     var request: TestingContext = .{ .io = io };
-    var packet: Packet = .{
+    var batch: Batch = .{
         .operation = @intFromEnum(Operation.create_accounts),
         .user_data = &request,
         .data = null,
@@ -134,7 +134,7 @@ fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
 
     // An uninitialized client must return `NotInitialized`.
     var client: ClientInterface = undefined;
-    try testing.expectError(ClientError.NotInitialized, client.submit(&packet));
+    try testing.expectError(ClientError.NotInitialized, client.submit(&batch));
 
     // Initializing the client.
     const cluster_id: u128 = 0;
@@ -152,21 +152,21 @@ fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
     };
 
     // Sanity test to verify that the client is working.
-    try client.submit(&packet);
+    try client.submit(&batch);
     request.wait_pending();
 
     // Deinit the client.
     try client.deinit();
 
     // Cannot submit after deinit.
-    try testing.expectError(ClientError.Closed, client.submit(&packet));
+    try testing.expectError(ClientError.Closed, client.submit(&batch));
 
     // Multiple deinit calls are safe.
     try testing.expectError(ClientError.Closed, client.deinit());
 }
 
-// Asserts the validation rules associated with the "PacketStatus" enum.
-fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
+// Asserts the validation rules associated with the "BatchStatus" enum.
+fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
     var client: ClientInterface = undefined;
     const cluster_id: u128 = 0;
     const tb_context: usize = 42;
@@ -186,9 +186,9 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
             client_interface: *ClientInterface,
             operation: u8,
             request_size: u32,
-        ) !tb_client.PacketStatus {
+        ) !tb_client.BatchStatus {
             var request: TestingContext = .{ .io = client_io };
-            var packet: Packet = .{
+            var batch: Batch = .{
                 .operation = operation,
                 .user_data = &request,
                 .data = &[0]u8{}, // It won't be dereferenced during the tests.
@@ -197,22 +197,22 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
                 .status = .ok,
             };
 
-            try client_interface.submit(&packet);
+            try client_interface.submit(&batch);
             request.wait_pending();
 
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(
-                @intFromPtr(&packet),
-                @intFromPtr(request.reply.?.tb_packet),
+                @intFromPtr(&batch),
+                @intFromPtr(request.reply.?.tb_batch),
             );
 
-            return packet.status;
+            return batch.status;
         }
     }.submit;
 
     // Messages larger than constants.message_body_size_max should return "too_much_data":
-    try std.testing.expectEqual(PacketStatus.too_much_data, try submit(
+    try std.testing.expectEqual(BatchStatus.too_much_data, try submit(
         io,
         &client,
         @intFromEnum(tb_client.Operation.create_transfers),
@@ -221,22 +221,22 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
 
     // All reserved and unknown operations should return "invalid_operation":
     try std.testing.expectEqual(
-        PacketStatus.invalid_operation,
+        BatchStatus.invalid_operation,
         try submit(io, &client, 0, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
-        PacketStatus.invalid_operation,
+        BatchStatus.invalid_operation,
         try submit(io, &client, 1, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
-        PacketStatus.invalid_operation,
+        BatchStatus.invalid_operation,
         try submit(io, &client, std.math.maxInt(u8), @sizeOf(u128)),
     );
 
     // Messages not a multiple of the event size
     // should return "invalid_data_size":
     try std.testing.expectEqual(
-        PacketStatus.invalid_data_size,
+        BatchStatus.invalid_data_size,
         try submit(
             io,
             &client,
@@ -245,7 +245,7 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
         ),
     );
     try std.testing.expectEqual(
-        PacketStatus.invalid_data_size,
+        BatchStatus.invalid_data_size,
         try submit(
             io,
             &client,
@@ -254,7 +254,7 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
         ),
     );
     try std.testing.expectEqual(
-        PacketStatus.invalid_data_size,
+        BatchStatus.invalid_data_size,
         try submit(
             io,
             &client,
@@ -265,7 +265,7 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
 
     // Batches with zero length are valid.
     try std.testing.expectEqual(
-        PacketStatus.ok,
+        BatchStatus.ok,
         try submit(
             io,
             &client,
@@ -276,7 +276,7 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
 
     // Non-batched operations require exactly one event.
     try std.testing.expectEqual(
-        PacketStatus.invalid_data_size,
+        BatchStatus.invalid_data_size,
         try submit(
             io,
             &client,
@@ -285,7 +285,7 @@ fn test_packet_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
         ),
     );
     try std.testing.expectEqual(
-        PacketStatus.invalid_data_size,
+        BatchStatus.invalid_data_size,
         try submit(
             io,
             &client,

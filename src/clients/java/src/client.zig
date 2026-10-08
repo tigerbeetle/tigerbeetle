@@ -106,14 +106,14 @@ const NativeClient = struct {
             return;
         };
 
-        const packet: *tb.Packet = global_allocator.create(tb.Packet) catch {
-            ReflectionHelper.assertion_error_throw(env, "Request could not allocate a packet");
+        const batch: *tb.Batch = global_allocator.create(tb.Batch) catch {
+            ReflectionHelper.assertion_error_throw(env, "Request could not allocate a batch");
             return;
         };
 
         // Holds a global reference to prevent GC before the callback.
         const global_ref = JNIHelper.new_global_reference(env, request_obj);
-        packet.* = .{
+        batch.* = .{
             .user_data = global_ref,
             .operation = operation,
             .data_size = @intCast(send_buffer.len),
@@ -122,9 +122,9 @@ const NativeClient = struct {
             .status = undefined,
         };
 
-        client.submit(packet) catch |err| {
+        client.submit(batch) catch |err| {
             env.delete_global_ref(global_ref);
-            global_allocator.destroy(packet);
+            global_allocator.destroy(batch);
             switch (err) {
                 tb.ClientError.NotInitialized => unreachable,
                 tb.ClientError.Closed => ReflectionHelper.client_closed_exception_throw(env),
@@ -135,7 +135,7 @@ const NativeClient = struct {
     /// Completion callback, always called from the native thread.
     fn on_completion(
         context_ptr: usize,
-        packet: *tb.Packet,
+        batch: *tb.Batch,
         timestamp: u64,
         result: ?[*]const u8,
         result_size: u32,
@@ -146,23 +146,23 @@ const NativeClient = struct {
             JNIThreadCleaner.attach_current_thread_with_cleanup(jvm);
 
         // Retrieves the request instance, and drops the GC reference.
-        assert(packet.user_data != null);
-        const request_obj: jni.JObject = @ptrCast(packet.user_data);
+        assert(batch.user_data != null);
+        const request_obj: jni.JObject = @ptrCast(batch.user_data);
         defer env.delete_global_ref(request_obj);
 
-        // Extract the packet details before freeing it.
-        const packet_operation = packet.operation;
-        const packet_status = packet.status;
-        global_allocator.destroy(packet);
+        // Extract the batch details before freeing it.
+        const batch_operation = batch.operation;
+        const batch_status = batch.status;
+        global_allocator.destroy(batch);
 
-        if (packet_status != .ok) {
+        if (batch_status != .ok) {
             assert(timestamp == 0);
             assert(result == null);
             assert(result_size == 0);
         }
 
         if (result_size > 0) {
-            switch (packet_status) {
+            switch (batch_status) {
                 .ok => if (result) |ptr| {
                     // Copying the reply before returning from the callback.
                     ReflectionHelper.set_reply_buffer(
@@ -178,8 +178,8 @@ const NativeClient = struct {
         ReflectionHelper.end_request(
             env,
             request_obj,
-            packet_operation,
-            packet_status,
+            batch_operation,
+            batch_status,
             timestamp,
         );
     }
@@ -539,22 +539,22 @@ const ReflectionHelper = struct {
     pub fn end_request(
         env: *jni.JNIEnv,
         this_obj: jni.JObject,
-        packet_operation: u8,
-        packet_status: tb.PacketStatus,
+        batch_operation: u8,
+        batch_status: tb.BatchStatus,
         timestamp: u64,
     ) void {
         assert(this_obj != null);
         assert(request_class != null);
         assert(request_end_request_method_id != null);
-        assert((timestamp > 0) == (packet_status == .ok));
+        assert((timestamp > 0) == (batch_status == .ok));
 
         env.call_nonvirtual_void_method(
             this_obj,
             request_class,
             request_end_request_method_id,
             &[_]jni.JValue{
-                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(packet_operation))),
-                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(@intFromEnum(packet_status)))),
+                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(batch_operation))),
+                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(@intFromEnum(batch_status)))),
                 jni.JValue.to_jvalue(@as(jni.JLong, @bitCast(timestamp))),
             },
         );

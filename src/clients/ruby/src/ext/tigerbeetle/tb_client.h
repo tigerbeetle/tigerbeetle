@@ -237,7 +237,7 @@ typedef struct tb_client_t {
 // Struct containing the state of a request submitted through the client.
 // This struct must be "pinned" (not copyable or movable), as its address must remain stable
 // throughout the lifetime of the request.
-typedef struct tb_packet_t {
+typedef struct tb_batch_t {
     void* user_data;
     const void* data;
     uint32_t data_size;
@@ -245,7 +245,7 @@ typedef struct tb_packet_t {
     uint8_t operation;
     uint8_t status;
     uint8_t opaque[64];
-} tb_packet_t;
+} tb_batch_t;
 
 typedef enum TB_OPERATION {
     TB_OPERATION_PULSE = 128,
@@ -260,16 +260,16 @@ typedef enum TB_OPERATION {
     TB_OPERATION_CREATE_TRANSFERS = 147,
 } TB_OPERATION;
 
-typedef enum TB_PACKET_STATUS {
-    TB_PACKET_OK = 0,
-    TB_PACKET_TOO_MUCH_DATA = 1,
-    TB_PACKET_CLIENT_EVICTED = 2,
-    TB_PACKET_CLIENT_RELEASE_TOO_LOW = 3,
-    TB_PACKET_CLIENT_RELEASE_TOO_HIGH = 4,
-    TB_PACKET_CLIENT_CLOSED = 5,
-    TB_PACKET_INVALID_OPERATION = 6,
-    TB_PACKET_INVALID_DATA_SIZE = 7,
-} TB_PACKET_STATUS;
+typedef enum TB_BATCH_STATUS {
+    TB_BATCH_OK = 0,
+    TB_BATCH_TOO_MUCH_DATA = 1,
+    TB_BATCH_CLIENT_EVICTED = 2,
+    TB_BATCH_CLIENT_RELEASE_TOO_LOW = 3,
+    TB_BATCH_CLIENT_RELEASE_TOO_HIGH = 4,
+    TB_BATCH_CLIENT_CLOSED = 5,
+    TB_BATCH_INVALID_OPERATION = 6,
+    TB_BATCH_INVALID_DATA_SIZE = 7,
+} TB_BATCH_STATUS;
 
 typedef enum TB_INIT_STATUS {
     TB_INIT_SUCCESS = 0,
@@ -308,19 +308,19 @@ typedef struct tb_init_parameters_t {
 } tb_init_parameters_t;
 
 // Per-client callback invoked every time a `tb_client_submit` completes or is canceled.
-// Use `packet->userdata` to identify the specific submission.
-// `result` is null iff `packet->status != TB_PACKET_OK`
+// Use `batch->userdata` to identify the specific submission.
+// `result` is null iff `batch->status != TB_BATCH_OK`
 // `result` is only valid for the duration of the callback itself.
 typedef void (*tb_completion_t)(
     uintptr_t userdata,
-    tb_packet_t* packet,
+    tb_batch_t* batch,
     uint64_t timestamp,
     const uint8_t *result, // nullable
     uint32_t result_size
 );
 
 // Initialize a new TigerBeetle client which connects to the addresses provided and
-// completes submitted packets by invoking the callback with the given context.
+// completes submitted batches by invoking the callback with the given context.
 TB_INIT_STATUS tb_client_init(
     tb_client_t *client_out,
     // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -347,18 +347,18 @@ TB_CLIENT_STATUS tb_client_completion_context(
     uintptr_t* completion_ctx_out
 );
 
-// Submit a packet with its `operation`, `data`, and `data_size` fields set.
+// Submit a batch with its `operation`, `data`, and `data_size` fields set.
 // Once completed, `completion_callback` will be invoked with `completion_ctx`
-// and the given packet on the `tb_client` thread (separate from the caller's thread).
+// and the given batch on the `tb_client` thread (separate from the caller's thread).
 // Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
 // interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_submit(
     tb_client_t *client,
-    tb_packet_t *packet
+    tb_batch_t *batch
 );
 
-// Closes the client, causing any previously submitted packets to be completed with
-// `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+// Closes the client, causing any previously submitted batches to be completed with
+// `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
 // Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
 // interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_deinit(

@@ -10,7 +10,7 @@ public final class AccountFilter {
     * Since `getAccountTransfers()` expects only one item, we avoid exposing the `Batch` class externally.
     *
     * This is an ad-hoc feature meant to be replaced by a proper querying API shortly,
-    * therefore, it is not worth the effort to modify the binding generator to emit single-item batchs.
+    * therefore, it is not worth the effort to modify the binding generator to emit single-item batches.
     *
     */
     // @formatter:on

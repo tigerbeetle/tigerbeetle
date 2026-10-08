@@ -33,10 +33,10 @@ test "valid tb_client.h" {
 
         .{ u128, "tb_uint128_t" },
         .{ exports.tb_client_t, "tb_client_t" },
-        .{ exports.tb_packet_t, "tb_packet_t" },
+        .{ exports.tb_batch_t, "tb_batch_t" },
         .{ exports.tb_init_status, "TB_INIT_STATUS" },
         .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
-        .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
+        .{ exports.tb_batch_status, "TB_BATCH_STATUS" },
         .{ exports.tb_operation, "TB_OPERATION" },
         .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
         .{ exports.tb_log_level, "TB_LOG_LEVEL" },

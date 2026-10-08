@@ -9,16 +9,16 @@ namespace TigerBeetle;
 
 internal abstract class NativeRequest
 {
-    private GCHandle? packetHandle = null;
+    private GCHandle? batchHandle = null;
 
     protected unsafe void Submit(NativeClient nativeClient, TBOperation operation, void* data, int len)
     {
-        // Create a handle to the request to ensure it's not GC'd while the packet is submitted.
+        // Create a handle to the request to ensure it's not GC'd while the batch is submitted.
         var requestHandle = GCHandle.Alloc(this, GCHandleType.Normal);
 
-        // Create a handle to the packet itself to keep it pinned in memory for the C client.
-        AssertTrue(packetHandle == null, "Submitting from an already pending NativeRequest");
-        packetHandle = GCHandle.Alloc(new TBPacket
+        // Create a handle to the batch itself to keep it pinned in memory for the C client.
+        AssertTrue(batchHandle == null, "Submitting from an already pending NativeRequest");
+        batchHandle = GCHandle.Alloc(new TBBatch
         {
             userData = GCHandle.ToIntPtr(requestHandle),
             userTag = 0,
@@ -29,38 +29,38 @@ internal abstract class NativeRequest
 
         try
         {
-            nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
+            nativeClient.Submit((TBBatch*)batchHandle.Value.AddrOfPinnedObject());
         }
         catch
         {
             requestHandle.Free();
-            packetHandle.Value.Free();
+            batchHandle.Value.Free();
             throw;
         }
     }
 
-    public static unsafe void OnComplete(TBPacket* packet, ReadOnlySpan<byte> result)
+    public static unsafe void OnComplete(TBBatch* batch, ReadOnlySpan<byte> result)
     {
-        // Extract info from the packet before freeing it.
-        var status = packet->status;
-        var operation = packet->operation;
-        var requestHandle = GCHandle.FromIntPtr(packet->userData);
+        // Extract info from the batch before freeing it.
+        var status = batch->status;
+        var operation = batch->operation;
+        var requestHandle = GCHandle.FromIntPtr(batch->userData);
 
         // Extract the request from the requestHandle.
-        AssertTrue(requestHandle.IsAllocated && requestHandle.Target != null, "Invalid GCHandle given to NativeRequest.Complete packet");
+        AssertTrue(requestHandle.IsAllocated && requestHandle.Target != null, "Invalid GCHandle given to NativeRequest.Complete batch");
         var request = (NativeRequest)requestHandle.Target!;
         requestHandle.Free();
 
-        // Free the packet.
-        AssertTrue(request.packetHandle != null, "NativeRequest completed without a valid packet");
-        AssertTrue((IntPtr)packet == request.packetHandle!.Value.AddrOfPinnedObject(), "Mismatching packet tied to a NativeRequest");
-        request.packetHandle.Value.Free();
-        request.packetHandle = null;
+        // Free the batch.
+        AssertTrue(request.batchHandle != null, "NativeRequest completed without a valid batch");
+        AssertTrue((IntPtr)batch == request.batchHandle!.Value.AddrOfPinnedObject(), "Mismatching batch tied to a NativeRequest");
+        request.batchHandle.Value.Free();
+        request.batchHandle = null;
 
         request.Complete(status, operation, result);
     }
 
-    public abstract void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result);
+    public abstract void Complete(BatchStatus status, byte operation, ReadOnlySpan<byte> result);
 }
 
 internal abstract class Request<TResult, TBody> : NativeRequest
@@ -79,7 +79,7 @@ internal abstract class Request<TResult, TBody> : NativeRequest
         this.Submit(nativeClient, this.operation, body, checked(bodyCount * sizeof(TBody)));
     }
 
-    public override void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result)
+    public override void Complete(BatchStatus status, byte operation, ReadOnlySpan<byte> result)
     {
         TResult[]? array = null;
         Exception? exception = null;
@@ -88,7 +88,7 @@ internal abstract class Request<TResult, TBody> : NativeRequest
         {
             switch (status)
             {
-                case PacketStatus.Ok:
+                case BatchStatus.Ok:
                     unsafe
                     {
                         AssertTrue(
@@ -110,26 +110,26 @@ internal abstract class Request<TResult, TBody> : NativeRequest
                         break;
                     }
 
-                case PacketStatus.TooMuchData:
+                case BatchStatus.TooMuchData:
                     throw new TooMuchDataException();
 
-                case PacketStatus.ClientEvicted:
+                case BatchStatus.ClientEvicted:
                     throw new ClientEvictedException();
 
-                case PacketStatus.ClientReleaseTooLow:
+                case BatchStatus.ClientReleaseTooLow:
                     throw new ClientReleaseException(ClientReleaseException.Reason.ClientReleaseTooLow);
 
-                case PacketStatus.ClientReleaseTooHigh:
+                case BatchStatus.ClientReleaseTooHigh:
                     throw new ClientReleaseException(ClientReleaseException.Reason.ClientReleaseTooHigh);
 
-                case PacketStatus.ClientClosed:
+                case BatchStatus.ClientClosed:
                     throw new ClientClosedException();
 
-                case PacketStatus.InvalidOperation: // Not expected.
-                case PacketStatus.InvalidDataSize: // Not expected.
+                case BatchStatus.InvalidOperation: // Not expected.
+                case BatchStatus.InvalidDataSize: // Not expected.
                 default:
                     // Panic, as this would be an error in the TigerBeetle client.
-                    Environment.FailFast($"Invalid PacketStatus {status}");
+                    Environment.FailFast($"Invalid BatchStatus {status}");
                     break;
             }
         }

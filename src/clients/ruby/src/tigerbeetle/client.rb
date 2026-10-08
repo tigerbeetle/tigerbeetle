@@ -43,7 +43,7 @@ module TigerBeetle
     # each submitted account.
     #
     # @!macro [new] request_errors
-    #   @raise [TigerBeetle::PacketError] if the entire request fails.
+    #   @raise [TigerBeetle::BatchError] if the entire request fails.
     #   @raise [TigerBeetle::TooMuchDataError] if the batch exceeds the request size limit.
     #   @raise [TigerBeetle::ClientEvictedError] if the cluster evicted the client.
     #   @raise [TigerBeetle::ClientReleaseTooLowError] if the client is too old for the cluster.
@@ -106,13 +106,13 @@ module TigerBeetle
 
       status, result = req.result
       case status
-      when PACKET_OK then result
-      when PACKET_CLIENT_CLOSED then raise ClientClosedError
-      when PACKET_TOO_MUCH_DATA then raise TooMuchDataError
-      when PACKET_CLIENT_EVICTED then raise ClientEvictedError
-      when PACKET_CLIENT_RELEASE_TOO_LOW then raise ClientReleaseTooLowError
-      when PACKET_CLIENT_RELEASE_TOO_HIGH then raise ClientReleaseTooHighError
-      else raise PacketError, status
+      when BATCH_OK then result
+      when BATCH_CLIENT_CLOSED then raise ClientClosedError
+      when BATCH_TOO_MUCH_DATA then raise TooMuchDataError
+      when BATCH_CLIENT_EVICTED then raise ClientEvictedError
+      when BATCH_CLIENT_RELEASE_TOO_LOW then raise ClientReleaseTooLowError
+      when BATCH_CLIENT_RELEASE_TOO_HIGH then raise ClientReleaseTooHighError
+      else raise BatchError, status
       end
     end
   end

@@ -65,11 +65,11 @@ impl Client {
     {
         let Completion { shared } = completion;
         shared.prepare::<Operation>(source, target);
-        let packet = shared.prepare_packet::<Operation>();
+        let batch = shared.prepare_batch::<Operation>();
         let remote_arc = Arc::into_raw(Arc::clone(&shared));
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, packet);
+            let status = tbc::tb_client_submit(self.client, batch);
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {
                     // Ownership of remote_arc transferred to the I/O thread.
@@ -221,12 +221,12 @@ pub(crate) struct OpState {
     // Fields drop in declaration order: destroy the payload owner before its backing storage.
     payload: CompletionCell<PayloadOwner, Result<PayloadOwner, Error>>,
     storage: UnsafeCell<PayloadBytes>,
-    packet: UnsafeCell<tbc::tb_packet_t>,
+    batch: UnsafeCell<tbc::tb_batch_t>,
 }
 
 // SAFETY: the completion cell synchronizes ownership and any access to the payload.
 // The I/O thread can read the source until completion; addresses are stable in Arc.
-// Packet is used by the I/O thread after submission and forgotten after completion.
+// Batch is used by the I/O thread after submission and forgotten after completion.
 unsafe impl Send for OpState {}
 unsafe impl Sync for OpState {}
 
@@ -234,13 +234,13 @@ impl OpState {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             payload: CompletionCell::reusable(),
-            packet: UnsafeCell::new(tbc::tb_packet_t {
+            batch: UnsafeCell::new(tbc::tb_batch_t {
                 user_data: ptr::null_mut(),
                 data: ptr::null_mut(),
                 data_size: 0,
                 user_tag: 0xABCD,
                 operation: 0,
-                status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
+                status: tbc::TB_BATCH_STATUS_TB_BATCH_OK,
                 opaque: [0; 64],
             }),
             storage: UnsafeCell::new(PayloadBytes::new()),
@@ -272,26 +272,26 @@ impl OpState {
         }
     }
 
-    fn prepare_packet<Operation: tbc::Operation>(self: &Arc<Self>) -> *mut tbc::tb_packet_t {
+    fn prepare_batch<Operation: tbc::Operation>(self: &Arc<Self>) -> *mut tbc::tb_batch_t {
         self.payload.with_awaiting(|owner| unsafe {
             // Take the pointer only after the source is in its stable Arc allocation since,
-            // for unbatched operations, the packet points directly at, e.g., AccountFilter.
+            // for unbatched operations, the batch points directly at, e.g., AccountFilter.
             let source = &(*PayloadBytes::cast::<Operation>(owner.storage)).source;
             let (source_ptr, source_size) = Operation::source_parts(source);
             let source_size = source_size.try_into().expect("input buffer too large");
 
-            let packet = self.packet.get();
-            *packet = tbc::tb_packet_t {
+            let batch = self.batch.get();
+            *batch = tbc::tb_batch_t {
                 user_data: Arc::as_ptr(self) as *mut c_void,
                 data: source_ptr as *mut c_void,
                 data_size: source_size,
                 user_tag: 0xABCD,
                 operation: Operation::OP_CODE,
-                status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
+                status: tbc::TB_BATCH_STATUS_TB_BATCH_OK,
                 opaque: [0; 64],
             };
 
-            packet
+            batch
         })
     }
 
@@ -302,26 +302,26 @@ impl OpState {
 
 pub(crate) extern "C" fn on_completion(
     context: usize,
-    packet: *mut tbc::tb_packet_t,
+    batch: *mut tbc::tb_batch_t,
     _timestamp: u64,
     result_ptr: *const u8,
     result_len: u32,
 ) {
     unsafe {
-        let status = (*packet).status;
+        let status = (*batch).status;
 
         // This Arc is owned by the I/O thread and freed after typed completion returns.
         // If the calling thread has dropped the future, this will drop OpState as well.
-        let state = Arc::from_raw((*packet).user_data as *const OpState);
+        let state = Arc::from_raw((*batch).user_data as *const OpState);
 
-        (*packet).data = ptr::null_mut();
-        (*packet).user_data = ptr::null_mut();
+        (*batch).data = ptr::null_mut();
+        (*batch).user_data = ptr::null_mut();
 
         assert_eq!(context, COMPLETION_CONTEXT);
-        assert_eq!(packet, state.packet.get());
+        assert_eq!(batch, state.batch.get());
 
         state.payload.complete_with(|owner| {
-            if status != tbc::TB_PACKET_STATUS_TB_PACKET_OK {
+            if status != tbc::TB_BATCH_STATUS_TB_BATCH_OK {
                 return Err(status.into());
             }
             (owner.vtable.complete)(owner.storage, result_ptr, result_len);

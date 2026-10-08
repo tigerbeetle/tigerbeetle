@@ -33,13 +33,13 @@ def test_close_sync():
 
     # Wait until the request is actually in-flight.
     for i in range(0, 10):
-        if len(client._inflight_packets) == 1:
+        if len(client._inflight_batches) == 1:
             break
         time.sleep(0.01)
     else:
         raise AssertionError("thread didn't create a request in time")
 
-    assert len(client._inflight_packets) == 1
+    assert len(client._inflight_batches) == 1
 
     client.close()
     thread.join()
@@ -49,7 +49,7 @@ def test_close_sync():
         raise thread_result[0]
 
     # Closing the client should have resulted in the request being terminated.
-    assert len(client._inflight_packets) == 0
+    assert len(client._inflight_batches) == 0
     assert client._client_key not in tb.ClientSync._clients
 
 def test_close_async():
@@ -69,13 +69,13 @@ async def _test_close_async():
 
     # Wait until the request is actually in-flight.
     for i in range(0, 10):
-        if len(client._inflight_packets) == 1:
+        if len(client._inflight_batches) == 1:
             break
         await asyncio.sleep(0.01)
     else:
         raise AssertionError("thread didn't create a request in time")
 
-    assert len(client._inflight_packets) == 1
+    assert len(client._inflight_batches) == 1
 
     await client.close()
 
@@ -83,5 +83,5 @@ async def _test_close_async():
         lookup_result = await lookup_task
 
     # Closing the client should have resulted in the request being terminated.
-    assert len(client._inflight_packets) == 0
+    assert len(client._inflight_batches) == 0
     assert client._client_key not in tb.ClientSync._clients

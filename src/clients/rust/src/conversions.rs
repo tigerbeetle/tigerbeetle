@@ -40,14 +40,14 @@ impl From<u8> for Error {
         use Error::*;
 
         match other {
-            TB_PACKET_STATUS_TB_PACKET_OK => panic!(),
-            TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA => TooMuchData,
-            TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED => ClientEvicted,
-            TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW => ClientReleaseTooLow,
-            TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH => ClientReleaseTooHigh,
-            TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED => ClientClosed,
-            TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION => InvalidOperation,
-            TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE => InvalidDataSize,
+            TB_BATCH_STATUS_TB_BATCH_OK => panic!(),
+            TB_BATCH_STATUS_TB_BATCH_TOO_MUCH_DATA => TooMuchData,
+            TB_BATCH_STATUS_TB_BATCH_CLIENT_EVICTED => ClientEvicted,
+            TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_LOW => ClientReleaseTooLow,
+            TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_HIGH => ClientReleaseTooHigh,
+            TB_BATCH_STATUS_TB_BATCH_CLIENT_CLOSED => ClientClosed,
+            TB_BATCH_STATUS_TB_BATCH_INVALID_OPERATION => InvalidOperation,
+            TB_BATCH_STATUS_TB_BATCH_INVALID_DATA_SIZE => InvalidDataSize,
             v => panic!("Unknown Error: {v}"),
         }
     }
@@ -59,13 +59,13 @@ impl From<Error> for u8 {
         use Error::*;
 
         match other {
-            TooMuchData => TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA,
-            ClientEvicted => TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED,
-            ClientReleaseTooLow => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW,
-            ClientReleaseTooHigh => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH,
-            ClientClosed => TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED,
-            InvalidOperation => TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION,
-            InvalidDataSize => TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE,
+            TooMuchData => TB_BATCH_STATUS_TB_BATCH_TOO_MUCH_DATA,
+            ClientEvicted => TB_BATCH_STATUS_TB_BATCH_CLIENT_EVICTED,
+            ClientReleaseTooLow => TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_LOW,
+            ClientReleaseTooHigh => TB_BATCH_STATUS_TB_BATCH_CLIENT_RELEASE_TOO_HIGH,
+            ClientClosed => TB_BATCH_STATUS_TB_BATCH_CLIENT_CLOSED,
+            InvalidOperation => TB_BATCH_STATUS_TB_BATCH_INVALID_OPERATION,
+            InvalidDataSize => TB_BATCH_STATUS_TB_BATCH_INVALID_DATA_SIZE,
         }
     }
 }

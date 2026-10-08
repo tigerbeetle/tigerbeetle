@@ -4,8 +4,8 @@ comptime {
     _ = @import("cdc/amqp/protocol.zig");
     _ = @import("cdc/runner.zig");
     _ = @import("clients/c/tb_client.zig");
+    _ = @import("clients/c/tb_client/batch.zig");
     _ = @import("clients/c/tb_client/context.zig");
-    _ = @import("clients/c/tb_client/packet.zig");
     _ = @import("clients/c/tb_client/signal.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
