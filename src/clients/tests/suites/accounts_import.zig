@@ -1,7 +1,8 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "imports accounts with explicit timestamps" {
-    const reference_results = ct.create_accounts(.{
+    const reference_results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
     });
     const reference_result = reference_results[0];
@@ -11,7 +12,7 @@ test "imports accounts with explicit timestamps" {
 
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    const results = ct.create_accounts(.{
+    const results = client.create_accounts(.{
         .{
             .id = account_1_id,
             .ledger = 1,
@@ -33,7 +34,7 @@ test "imports accounts with explicit timestamps" {
         .{ .status = .created },
     });
 
-    const accounts = ct.lookup_accounts(.{ account_1_id, account_2_id });
+    const accounts = client.lookup_accounts(.{ account_1_id, account_2_id });
     ct.assert_equal(accounts, .{
         .{ .id = account_1_id, .flags = .{ .imported = true } },
         .{ .id = account_2_id, .flags = .{ .imported = true } },

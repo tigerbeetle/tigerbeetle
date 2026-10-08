@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigInteger;
-import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -80,39 +79,6 @@ public class IntegrationTest {
         final var replicaAddresses = "";
         try (final var client = new Client(clusterId, replicaAddresses)) {
             fail();
-        }
-    }
-
-    @Test
-    public void testConstructorReplicaAddressesLimitExceeded() throws Throwable {
-        final var replicaAddresses = String.join(",", Collections.nCopies(100, "3000"));
-        try (final var client = new Client(clusterId, replicaAddresses)) {
-            fail();
-        } catch (InitializationException initializationException) {
-            assertEquals(InitializationStatus.AddressLimitExceeded.value,
-                    initializationException.getStatus());
-        }
-    }
-
-    @Test
-    public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
-        final var replicaAddresses = ",,";
-        try (final var client = new Client(clusterId, replicaAddresses)) {
-            fail();
-        } catch (InitializationException initializationException) {
-            assertEquals(InitializationStatus.AddressInvalid.value,
-                    initializationException.getStatus());
-        }
-    }
-
-    @Test
-    public void testConstructorInvalidReplicaAddresses() throws Throwable {
-        final var replicaAddresses = "127.0.0.1:99999";
-        try (final var client = new Client(clusterId, replicaAddresses)) {
-            fail();
-        } catch (InitializationException initializationException) {
-            assertEquals(InitializationStatus.AddressInvalid.value,
-                    initializationException.getStatus());
         }
     }
 

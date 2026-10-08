@@ -26,6 +26,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
+        .requires_empty_address_passthrough => true,
     };
 }
 
@@ -132,6 +133,37 @@ fn emit_step(scope: *Scope, step: ast.Step) !void {
         .binding => |binding| try emit_binding(scope, binding),
         .call => |call| try emit_call(scope, call, .{}),
         .assertion => |assertion| try emit_assertion(scope, assertion),
+        .directive => |directive| try emit_directive(scope, directive),
+        .create_client => |arguments| try emit_create_client(scope, arguments, .success),
+    }
+}
+
+fn emit_directive(scope: *Scope, directive: ast.HarnessDirective) !void {
+    const printer = scope.printer;
+    switch (directive) {
+        .sleep_ms => |ms| {
+            try printer.print_indented("time.Sleep({d} * time.Millisecond)", .{ms});
+        },
+        .concurrently => |concurrently| {
+            try printer.write_indented("var wg sync.WaitGroup");
+            try printer.print_indented("for i := 0; i < {d}; i++ {{", .{concurrently.n});
+            printer.indent();
+            try printer.write_indented("wg.Add(1)");
+            try printer.write_indented("go func() {");
+            printer.indent();
+            try printer.write_indented("defer wg.Done()");
+
+            var goroutine_scope = Scope{ .printer = printer };
+            try emit_invocation(&goroutine_scope, concurrently.call, .{
+                .error_action = .goroutine,
+            });
+
+            printer.dedent();
+            try printer.write_indented("}()");
+            printer.dedent();
+            try printer.write_indented("}");
+            try printer.write_indented("wg.Wait()");
+        },
     }
 }
 
@@ -198,28 +230,6 @@ fn emit_call(
         client_error: ?ast.ClientError = null,
     },
 ) !void {
-    const printer = scope.printer;
-    if (call.concurrency > 1) {
-        assert(options.binding == null);
-        try printer.write_indented("var wg sync.WaitGroup");
-        try printer.print_indented("for i := 0; i < {d}; i++ {{", .{call.concurrency});
-        printer.indent();
-        try printer.write_indented("wg.Add(1)");
-        try printer.write_indented("go func() {");
-        printer.indent();
-        try printer.write_indented("defer wg.Done()");
-
-        var goroutine_scope = Scope{ .printer = printer };
-        try emit_invocation(&goroutine_scope, call, .{ .error_action = .goroutine });
-
-        printer.dedent();
-        try printer.write_indented("}()");
-        printer.dedent();
-        try printer.write_indented("}");
-        try printer.write_indented("wg.Wait()");
-        return;
-    }
-
     try emit_invocation(scope, call, .{
         .binding = options.binding,
         .error_action = if (options.expect_error) .expected else .fatal,
@@ -243,14 +253,6 @@ fn emit_invocation(
         .close_client => {
             assert(options.binding == null);
             try printer.write_indented("client.Close()");
-            return;
-        },
-        .sleep_ms => {
-            assert(options.binding == null);
-            assert(call.arguments.len == 1);
-            try printer.print_indented("time.Sleep({s} * time.Millisecond)", .{
-                call.arguments[0].integer,
-            });
             return;
         },
         else => {},
@@ -307,7 +309,7 @@ fn emit_invocation(
                 try printer.write_indented("})");
             }
         },
-        .close_client, .sleep_ms => unreachable,
+        .close_client => unreachable,
     }
 
     switch (options.error_action) {
@@ -319,16 +321,52 @@ fn emit_invocation(
             printer.dedent();
             try printer.write_indented("}");
         },
-        .expected => if (options.client_error) |client_error| {
-            try printer.print_indented("assert.True(t, errors.Is(err, {s}))", .{
-                go_error_name(client_error),
+        .expected => try emit_expected_error(printer, options.client_error),
+    }
+}
+
+fn emit_expected_error(printer: *Printer, client_error: ?ast.ClientError) !void {
+    if (client_error) |expected| {
+        try printer.print_indented("assert.True(t, errors.Is(err, {s}))", .{
+            go_error_name(expected),
+        });
+        return;
+    }
+    try printer.write_indented("if err == nil {");
+    printer.indent();
+    try printer.write_indented("t.Fatal(\"expected an error\")");
+    printer.dedent();
+    try printer.write_indented("}");
+}
+
+fn emit_create_client(
+    scope: *Scope,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const printer = scope.printer;
+    const cluster_id = try render_uint128(printer, arguments.cluster_id);
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "port",
+        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+    };
+    switch (outcome) {
+        .success => {
+            try printer.print_indented("testClient, err {s} NewClient({s}, []string{{{s}}})", .{
+                scope.error_assign(true),
+                cluster_id,
+                replica_addresses,
             });
-        } else {
-            try printer.write_indented("if err == nil {");
-            printer.indent();
-            try printer.write_indented("t.Fatal(\"expected an error\")");
-            printer.dedent();
-            try printer.write_indented("}");
+            try emit_error_check(printer);
+            try printer.write_indented("testClient.Close()");
+        },
+        .failure => |client_error| {
+            try printer.print_indented("_, err {s} NewClient({s}, []string{{{s}}})", .{
+                scope.error_assign(false),
+                cluster_id,
+                replica_addresses,
+            });
+            try emit_expected_error(printer, client_error);
         },
     }
 }
@@ -337,6 +375,9 @@ fn go_error_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "ErrTooMuchData",
         .client_closed => "ErrClientClosed",
+        .address_invalid => "ErrInvalidAddress",
+        .address_limit_exceeded => "ErrAddressLimitExceeded",
+        .cluster_id_invalid => unreachable,
     };
 }
 
@@ -448,10 +489,15 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
                 comparison.expected.expression.integer,
             });
         },
-        .fail => |failure| try emit_call(scope, failure.call, .{
-            .expect_error = true,
-            .client_error = failure.client_error,
-        }),
+        .fail => |failure| switch (failure.action) {
+            .call => |call| try emit_call(scope, call, .{
+                .expect_error = true,
+                .client_error = failure.client_error,
+            }),
+            .create_client => |arguments| try emit_create_client(scope, arguments, .{
+                .failure = failure.client_error,
+            }),
+        },
     }
 }
 
@@ -565,7 +611,7 @@ fn go_operation_name(name: ast.Call.Name) []const u8 {
         .get_account_balances => "GetAccountBalances",
         .query_accounts => "QueryAccounts",
         .query_transfers => "QueryTransfers",
-        .close_client, .sleep_ms => unreachable,
+        .close_client => unreachable,
     };
 }
 

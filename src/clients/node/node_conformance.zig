@@ -26,6 +26,8 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
         // Amounts are `bigint`s: arbitrary precision, but integral only.
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => false,
+        // The binding rejects an empty `replica_addresses` buffer itself.
+        .requires_empty_address_passthrough => false,
     };
 }
 
@@ -190,6 +192,64 @@ fn emit_step(printer: *Printer, step: ast.Step) !void {
         .binding => |binding| try emit_binding(printer, binding),
         .call => |call| try emit_call(printer, call, .{}),
         .assertion => |assertion| try emit_assertion(printer, assertion),
+        .directive => |directive| try emit_directive(printer, directive),
+        .create_client => |arguments| try emit_create_client(printer, arguments, .success),
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const cluster_id = try render_bigint(printer, arguments.cluster_id);
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "REPLICA_ADDRESSES",
+        .literal => |text| try printer.string_alloc("['{s}']", .{text}),
+    };
+    switch (outcome) {
+        .success => try printer.print_indented(
+            "createClient({{ cluster_id: {s}, replica_addresses: {s} }}).destroy()",
+            .{ cluster_id, replica_addresses },
+        ),
+        .failure => |client_error| {
+            try printer.write_indented("assert.throws(");
+            printer.indent();
+            try printer.write_indented("() => createClient({");
+            printer.indent();
+            try printer.print_indented("cluster_id: {s},", .{cluster_id});
+            try printer.print_indented("replica_addresses: {s},", .{replica_addresses});
+            printer.dedent();
+            try printer.write_indented("}),");
+            if (client_error) |expected| {
+                const message = switch (expected) {
+                    .address_invalid => "Invalid replica address.",
+                    .address_limit_exceeded => "Too many replica addresses.",
+                    .cluster_id_invalid => "cluster_id must fit in 128 bits",
+                    .too_much_data, .client_closed => unreachable,
+                };
+                try printer.print_indented("{{ message: '{s}' }},", .{message});
+            }
+            printer.dedent();
+            try printer.write_indented(")");
+        },
+    }
+}
+
+fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
+    switch (directive) {
+        .sleep_ms => |ms| try printer.print_indented("await sleep_ms({d})", .{ms}),
+        .concurrently => |concurrently| {
+            try printer.print_indented(
+                "const operations = Array.from({{ length: {d} }}, () =>",
+                .{concurrently.n},
+            );
+            printer.indent();
+            try emit_invocation(printer, concurrently.call, .{ .awaited = false });
+            printer.dedent();
+            try printer.write_indented(")");
+            try printer.write_indented("await Promise.all(operations)");
+        },
     }
 }
 
@@ -258,20 +318,7 @@ fn emit_call(
         prefix: []const u8 = "",
     },
 ) !void {
-    if (call.concurrency > 1) {
-        assert(options.prefix.len == 0);
-        try printer.print_indented(
-            "const operations = Array.from({{ length: {d} }}, () =>",
-            .{call.concurrency},
-        );
-        printer.indent();
-        try emit_invocation(printer, call, .{ .awaited = false });
-        printer.dedent();
-        try printer.write_indented(")");
-        try printer.write_indented("await Promise.all(operations)");
-    } else {
-        try emit_invocation(printer, call, .{ .prefix = options.prefix });
-    }
+    try emit_invocation(printer, call, .{ .prefix = options.prefix });
 }
 
 fn emit_invocation(
@@ -287,12 +334,6 @@ fn emit_invocation(
         .close_client => {
             assert(options.prefix.len == 0);
             try printer.write_indented("client.destroy()");
-        },
-        .sleep_ms => {
-            assert(options.prefix.len == 0);
-            assert(call.arguments.len == 1);
-            const ms = try render_expression(printer, call.arguments[0]);
-            try printer.print_indented("{s}sleep_ms({s})", .{ awaited, ms });
         },
         .create_accounts, .create_transfers => {
             if (call.arguments.len == 0) {
@@ -407,24 +448,29 @@ fn emit_assertion(
                 comparison.actual.reference, comparison.actual.field.name, value,
             });
         },
-        .fail => |failure| {
-            try printer.write_indented("await assert.rejects(async (): Promise<void> => {");
-            printer.indent();
-            try emit_invocation(printer, failure.call, .{});
-            printer.dedent();
-            if (failure.client_error) |client_error| {
-                try printer.write_indented("}, (error: unknown): boolean => {");
+        .fail => |failure| switch (failure.action) {
+            .call => |call| {
+                try printer.write_indented("await assert.rejects(async (): Promise<void> => {");
                 printer.indent();
-                try printer.write_indented("assert.ok(error instanceof RequestError)");
-                try printer.print_indented("assert.strictEqual(error.code, ErrorCodes.{s})", .{
-                    node_error_code(client_error),
-                });
-                try printer.write_indented("return true");
+                try emit_invocation(printer, call, .{});
                 printer.dedent();
-                try printer.write_indented("})");
-            } else {
-                try printer.write_indented("})");
-            }
+                if (failure.client_error) |client_error| {
+                    try printer.write_indented("}, (error: unknown): boolean => {");
+                    printer.indent();
+                    try printer.write_indented("assert.ok(error instanceof RequestError)");
+                    try printer.print_indented("assert.strictEqual(error.code, ErrorCodes.{s})", .{
+                        node_error_code(client_error),
+                    });
+                    try printer.write_indented("return true");
+                    printer.dedent();
+                    try printer.write_indented("})");
+                } else {
+                    try printer.write_indented("})");
+                }
+            },
+            .create_client => |arguments| {
+                try emit_create_client(printer, arguments, .{ .failure = failure.client_error });
+            },
         },
     }
 }
@@ -433,6 +479,7 @@ fn node_error_code(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "ERR_TOO_MUCH_DATA",
         .client_closed => "ERR_CLIENT_CLOSED",
+        .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
 }
 

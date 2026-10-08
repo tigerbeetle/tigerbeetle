@@ -1,14 +1,15 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "closes both accounts with a pending closing transfer" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
     });
 
-    const results = ct.create_transfers(.{
+    const results = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -22,7 +23,7 @@ test "closes both accounts with a pending closing transfer" {
 
     ct.assert_equal(results, .{.{ .status = .created }});
 
-    const accounts = ct.lookup_accounts(.{ account_1_id, account_2_id });
+    const accounts = client.lookup_accounts(.{ account_1_id, account_2_id });
     ct.assert_equal(accounts, .{
         .{ .id = account_1_id, .flags = .{ .history = true, .closed = true } },
         .{ .id = account_2_id, .flags = .{ .history = true, .closed = true } },
@@ -33,11 +34,11 @@ test "reopens both accounts when the closing transfer is voided" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
     const closing_transfer_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = closing_transfer_id,
             .debit_account_id = account_1_id,
@@ -49,7 +50,7 @@ test "reopens both accounts when the closing transfer is voided" {
         },
     });
 
-    const results = ct.create_transfers(.{
+    const results = client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -64,7 +65,7 @@ test "reopens both accounts when the closing transfer is voided" {
 
     ct.assert_equal(results, .{.{ .status = .created }});
 
-    const accounts = ct.lookup_accounts(.{ account_1_id, account_2_id });
+    const accounts = client.lookup_accounts(.{ account_1_id, account_2_id });
     ct.assert_equal(accounts, .{
         .{ .id = account_1_id, .flags = .{ .history = true } },
         .{ .id = account_2_id, .flags = .{ .history = true } },

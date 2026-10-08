@@ -32,6 +32,58 @@ def client():
     if client._client_key in tb.ClientSync._clients:
         client.close()
 
+# Suite: create_client
+
+def test_create_client_creates_a_client_from_valid_arguments(client):
+    tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses).close()
+
+def test_create_client_rejects_an_invalid_address(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientSync(
+            cluster_id=0,
+            replica_addresses="not-an-address",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+def test_create_client_rejects_an_address_with_a_port_above_the_maximum(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientSync(
+            cluster_id=0,
+            replica_addresses="127.0.0.1:99999",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+def test_create_client_rejects_more_addresses_than_replicas(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientSync(
+            cluster_id=0,
+            replica_addresses="3001,3002,3003,3004,3005,3006,3007,3008,3009,3010",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_LIMIT_EXCEEDED
+
+def test_create_client_rejects_an_empty_address(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientSync(
+            cluster_id=0,
+            replica_addresses="",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+def test_create_client_rejects_empty_addresses(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientSync(
+            cluster_id=0,
+            replica_addresses=",,",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+def test_create_client_rejects_a_cluster_id_above_the_maximum(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        tb.ClientSync(
+            cluster_id=340282366920938463463374607431768211456,
+            replica_addresses=replica_addresses,
+        )
+
 # Suite: generate_ids
 
 def test_generate_ids_generates_monotonically_increasing_ids(client):
@@ -6455,6 +6507,65 @@ def async_test(case):
     # PEP 362: Stop pytest from treating the test's `client` parameter as a fixture.
     test.__signature__ = inspect.Signature()
     return test
+
+# Suite: create_client
+
+@async_test
+async def test_create_client_creates_a_client_from_valid_arguments_async(client):
+    await tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses).close()
+
+@async_test
+async def test_create_client_rejects_an_invalid_address_async(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientAsync(
+            cluster_id=0,
+            replica_addresses="not-an-address",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+@async_test
+async def test_create_client_rejects_an_address_with_a_port_above_the_maximum_async(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientAsync(
+            cluster_id=0,
+            replica_addresses="127.0.0.1:99999",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+@async_test
+async def test_create_client_rejects_more_addresses_than_replicas_async(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientAsync(
+            cluster_id=0,
+            replica_addresses="3001,3002,3003,3004,3005,3006,3007,3008,3009,3010",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_LIMIT_EXCEEDED
+
+@async_test
+async def test_create_client_rejects_an_empty_address_async(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientAsync(
+            cluster_id=0,
+            replica_addresses="",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+@async_test
+async def test_create_client_rejects_empty_addresses_async(client):
+    with pytest.raises(tb.client.InitError) as error:
+        tb.ClientAsync(
+            cluster_id=0,
+            replica_addresses=",,",
+        )
+    assert error.value.args[0] == tb.InitStatus.ADDRESS_INVALID
+
+@async_test
+async def test_create_client_rejects_a_cluster_id_above_the_maximum_async(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        tb.ClientAsync(
+            cluster_id=340282366920938463463374607431768211456,
+            replica_addresses=replica_addresses,
+        )
 
 # Suite: generate_ids
 

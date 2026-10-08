@@ -1,13 +1,14 @@
 const ct = @import("../conformance_test_api.zig");
+const client = ct.default_client;
 
 test "returns a balance per transfer for a history account" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -26,7 +27,7 @@ test "returns a balance per transfer for a history account" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -41,11 +42,11 @@ test "returns a balance per transfer for a history account" {
 test "returns pending balances for a history account" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -57,7 +58,7 @@ test "returns pending balances for a history account" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -77,7 +78,7 @@ test "pairs each balance with the transfer that produced it" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -87,7 +88,7 @@ test "pairs each balance with the transfer that produced it" {
     const transfer_2_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
     const transfer_4_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_id,
@@ -122,7 +123,7 @@ test "pairs each balance with the transfer that produced it" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -134,7 +135,7 @@ test "pairs each balance with the transfer that produced it" {
         .{ .id = transfer_4_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -164,7 +165,7 @@ test "pairs debit balances with debit transfers" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -172,7 +173,7 @@ test "pairs debit balances with debit transfers" {
 
     const transfer_1_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_id,
@@ -207,7 +208,7 @@ test "pairs debit balances with debit transfers" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true },
@@ -217,7 +218,7 @@ test "pairs debit balances with debit transfers" {
         .{ .id = transfer_3_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true },
@@ -239,7 +240,7 @@ test "pairs credit balances with credit transfers" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -247,7 +248,7 @@ test "pairs credit balances with credit transfers" {
 
     const transfer_2_id = ct.generate_id();
     const transfer_4_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_id,
@@ -282,7 +283,7 @@ test "pairs credit balances with credit transfers" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .credits = true },
@@ -292,7 +293,7 @@ test "pairs credit balances with credit transfers" {
         .{ .id = transfer_4_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .credits = true },
@@ -314,7 +315,7 @@ test "pairs debit balances with debit transfers in reverse order" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -322,7 +323,7 @@ test "pairs debit balances with debit transfers in reverse order" {
 
     const transfer_1_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_id,
@@ -357,7 +358,7 @@ test "pairs debit balances with debit transfers in reverse order" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .reversed = true },
@@ -367,7 +368,7 @@ test "pairs debit balances with debit transfers in reverse order" {
         .{ .id = transfer_1_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .reversed = true },
@@ -389,7 +390,7 @@ test "pairs credit balances with credit transfers in reverse order" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -397,7 +398,7 @@ test "pairs credit balances with credit transfers in reverse order" {
 
     const transfer_2_id = ct.generate_id();
     const transfer_4_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_id,
@@ -432,7 +433,7 @@ test "pairs credit balances with credit transfers in reverse order" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .credits = true, .reversed = true },
@@ -442,7 +443,7 @@ test "pairs credit balances with credit transfers in reverse order" {
         .{ .id = transfer_2_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .credits = true, .reversed = true },
@@ -463,11 +464,11 @@ test "pairs credit balances with credit transfers in reverse order" {
 test "returns balances in reverse order with the reversed flag" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -486,7 +487,7 @@ test "returns balances in reverse order with the reversed flag" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -502,7 +503,7 @@ test "pairs each balance with its transfer in reverse order" {
     const account_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
@@ -512,7 +513,7 @@ test "pairs each balance with its transfer in reverse order" {
     const transfer_2_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
     const transfer_4_id = ct.generate_id();
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_id,
@@ -547,7 +548,7 @@ test "pairs each balance with its transfer in reverse order" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const transfers = client.get_account_transfers(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -559,7 +560,7 @@ test "pairs each balance with its transfer in reverse order" {
         .{ .id = transfer_1_id },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -588,11 +589,11 @@ test "pairs each balance with its transfer in reverse order" {
 test "pages through balances with a timestamp cursor" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -619,7 +620,7 @@ test "pages through balances with a timestamp cursor" {
         },
     });
 
-    const page_1 = ct.get_account_balances(.{
+    const page_1 = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
@@ -632,7 +633,7 @@ test "pages through balances with a timestamp cursor" {
 
     const page_1_last = page_1[1];
     const cursor_1 = page_1_last.timestamp;
-    const page_2 = ct.get_account_balances(.{
+    const page_2 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_1, 1),
         .limit = 2,
@@ -643,7 +644,7 @@ test "pages through balances with a timestamp cursor" {
 
     const page_2_last = page_2[0];
     const cursor_2 = page_2_last.timestamp;
-    const page_3 = ct.get_account_balances(.{
+    const page_3 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_2, 1),
         .limit = 2,
@@ -659,11 +660,11 @@ test "pairs each balance with its transfer across pages" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_1_id,
@@ -690,7 +691,7 @@ test "pairs each balance with its transfer across pages" {
         },
     });
 
-    const transfers_page_1 = ct.get_account_transfers(.{
+    const transfers_page_1 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
@@ -699,7 +700,7 @@ test "pairs each balance with its transfer across pages" {
         .{ .id = transfer_1_id },
         .{ .id = transfer_2_id },
     });
-    const balances_page_1 = ct.get_account_balances(.{
+    const balances_page_1 = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
@@ -716,14 +717,14 @@ test "pairs each balance with its transfer across pages" {
     ct.assert_equal(balance_2.timestamp, transfer_2.timestamp);
 
     const cursor_1 = transfer_2.timestamp;
-    const transfers_page_2 = ct.get_account_transfers(.{
+    const transfers_page_2 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_1, 1),
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
     });
     ct.assert_equal(transfers_page_2, .{.{ .id = transfer_3_id }});
-    const balances_page_2 = ct.get_account_balances(.{
+    const balances_page_2 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_1, 1),
         .limit = 2,
@@ -735,14 +736,14 @@ test "pairs each balance with its transfer across pages" {
     ct.assert_equal(balance_3.timestamp, transfer_3.timestamp);
 
     const cursor_2 = transfer_3.timestamp;
-    const transfers_page_3 = ct.get_account_transfers(.{
+    const transfers_page_3 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_2, 1),
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
     });
     ct.assert_empty(transfers_page_3);
-    const balances_page_3 = ct.get_account_balances(.{
+    const balances_page_3 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(cursor_2, 1),
         .limit = 2,
@@ -754,11 +755,11 @@ test "pairs each balance with its transfer across pages" {
 test "pages through reversed balances with a timestamp cursor" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -785,7 +786,7 @@ test "pages through reversed balances with a timestamp cursor" {
         },
     });
 
-    const page_1 = ct.get_account_balances(.{
+    const page_1 = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -798,7 +799,7 @@ test "pages through reversed balances with a timestamp cursor" {
 
     const page_1_last = page_1[1];
     const cursor_1 = page_1_last.timestamp;
-    const page_2 = ct.get_account_balances(.{
+    const page_2 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_1, 1),
         .limit = 2,
@@ -809,7 +810,7 @@ test "pages through reversed balances with a timestamp cursor" {
 
     const page_2_last = page_2[0];
     const cursor_2 = page_2_last.timestamp;
-    const page_3 = ct.get_account_balances(.{
+    const page_3 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_2, 1),
         .limit = 2,
@@ -825,11 +826,11 @@ test "pairs each balance with its transfer across reversed pages" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const transfer_3_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = transfer_1_id,
             .debit_account_id = account_1_id,
@@ -856,7 +857,7 @@ test "pairs each balance with its transfer across reversed pages" {
         },
     });
 
-    const transfers_page_1 = ct.get_account_transfers(.{
+    const transfers_page_1 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -865,7 +866,7 @@ test "pairs each balance with its transfer across reversed pages" {
         .{ .id = transfer_3_id },
         .{ .id = transfer_2_id },
     });
-    const balances_page_1 = ct.get_account_balances(.{
+    const balances_page_1 = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
@@ -882,14 +883,14 @@ test "pairs each balance with its transfer across reversed pages" {
     ct.assert_equal(balance_2.timestamp, transfer_2.timestamp);
 
     const cursor_1 = transfer_2.timestamp;
-    const transfers_page_2 = ct.get_account_transfers(.{
+    const transfers_page_2 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_1, 1),
         .limit = 2,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
     });
     ct.assert_equal(transfers_page_2, .{.{ .id = transfer_1_id }});
-    const balances_page_2 = ct.get_account_balances(.{
+    const balances_page_2 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_1, 1),
         .limit = 2,
@@ -901,14 +902,14 @@ test "pairs each balance with its transfer across reversed pages" {
     ct.assert_equal(balance_1.timestamp, transfer_1.timestamp);
 
     const cursor_2 = transfer_1.timestamp;
-    const transfers_page_3 = ct.get_account_transfers(.{
+    const transfers_page_3 = client.get_account_transfers(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_2, 1),
         .limit = 2,
         .flags = .{ .debits = true, .credits = true, .reversed = true },
     });
     ct.assert_empty(transfers_page_3);
-    const balances_page_3 = ct.get_account_balances(.{
+    const balances_page_3 = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_max = ct.decrement(cursor_2, 1),
         .limit = 2,
@@ -920,11 +921,11 @@ test "pairs each balance with its transfer across reversed pages" {
 test "returns no balances without the history flag" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1 },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -935,7 +936,7 @@ test "returns no balances without the history flag" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -946,11 +947,11 @@ test "returns no balances without the history flag" {
 
 test "returns no balances for an account with no transfers" {
     const account_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -960,7 +961,7 @@ test "returns no balances for an account with no transfers" {
 }
 
 test "returns no balances for a zero account id" {
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = 0,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -970,7 +971,7 @@ test "returns no balances for a zero account id" {
 }
 
 test "returns no balances for a default filter" {
-    const balances = ct.get_account_balances(.{});
+    const balances = client.get_account_balances(.{});
 
     ct.assert_empty(balances);
 }
@@ -978,11 +979,11 @@ test "returns no balances for a default filter" {
 test "returns no balances for a zero limit" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -993,7 +994,7 @@ test "returns no balances for a zero limit" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 0,
         .flags = .{ .debits = true, .credits = true },
@@ -1005,11 +1006,11 @@ test "returns no balances for a zero limit" {
 test "returns no balances when the timestamp range is inverted" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -1019,7 +1020,7 @@ test "returns no balances when the timestamp range is inverted" {
             .code = 1,
         },
     });
-    const matched = ct.get_account_balances(.{
+    const matched = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
         .flags = .{ .debits = true, .credits = true },
@@ -1027,7 +1028,7 @@ test "returns no balances when the timestamp range is inverted" {
     const balance = matched[0];
     const balance_timestamp = balance.timestamp;
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = ct.increment(balance_timestamp, 1),
         .timestamp_max = ct.decrement(balance_timestamp, 1),
@@ -1041,11 +1042,11 @@ test "returns no balances when the timestamp range is inverted" {
 test "returns no balances for a timestamp minimum of u64 max" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -1055,7 +1056,7 @@ test "returns no balances for a timestamp minimum of u64 max" {
             .code = 1,
         },
     });
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = 18446744073709551615,
         .limit = 10,
@@ -1068,11 +1069,11 @@ test "returns no balances for a timestamp minimum of u64 max" {
 test "returns no balances for a timestamp maximum of u64 max" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -1082,7 +1083,7 @@ test "returns no balances for a timestamp maximum of u64 max" {
             .code = 1,
         },
     });
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_max = 18446744073709551615,
         .limit = 10,
@@ -1095,11 +1096,11 @@ test "returns no balances for a timestamp maximum of u64 max" {
 test "returns no balances for an inverted timestamp range at u64 max" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -1109,7 +1110,7 @@ test "returns no balances for an inverted timestamp range at u64 max" {
             .code = 1,
         },
     });
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .timestamp_min = 18446744073709551614,
         .timestamp_max = 1,
@@ -1123,11 +1124,11 @@ test "returns no balances for an inverted timestamp range at u64 max" {
 test "returns no balances without the debits or credits flag" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
-    ct.create_accounts(.{
+    client.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
     });
-    ct.create_transfers(.{
+    client.create_transfers(.{
         .{
             .id = ct.generate_id(),
             .debit_account_id = account_1_id,
@@ -1138,7 +1139,7 @@ test "returns no balances without the debits or credits flag" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const balances = client.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 10,
     });
@@ -1147,7 +1148,7 @@ test "returns no balances without the debits or credits flag" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail_with(ct.get_account_balances(.{
+    ct.assert_fail_with(client.get_account_balances(.{
         .account_id = ct.generate_id(),
         .limit = 10000,
         .flags = .{ .debits = true, .credits = true },

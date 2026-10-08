@@ -6,12 +6,6 @@ class TestClientLifecycle < Minitest::Test
     @tb_address = ENV.fetch("TB_ADDRESS", "3000")
   end
 
-  def test_double_close
-    client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)
-    client.close
-    client.close
-  end
-
   def test_open_closes_after_block
     client = nil
     TigerBeetle::Client.open(cluster_id: 0, replica_addresses: @tb_address) do |c|
@@ -31,14 +25,6 @@ class TestClientLifecycle < Minitest::Test
     end
 
     assert_raises(TigerBeetle::ClientClosedError) { client.lookup_accounts([1]) }
-  end
-
-  def test_invalid_address_raises
-    err = assert_raises(TigerBeetle::InitError) do
-      TigerBeetle::Client.new(cluster_id: 0, replica_addresses: "not-an-address")
-    end
-
-    assert_equal("Init error: address_invalid", err.message)
   end
 
   def test_replica_addresses_must_be_a_string

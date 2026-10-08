@@ -26,6 +26,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
+        .requires_empty_address_passthrough => true,
     };
 }
 
@@ -146,6 +147,79 @@ fn emit_step(printer: *Printer, step: ast.Step, variant: ClientVariant) !void {
         .binding => |binding| try emit_binding(printer, binding, variant),
         .call => |call| try emit_call(printer, call, variant, .{}),
         .assertion => |assertion| try emit_assertion(printer, assertion, variant),
+        .directive => |directive| try emit_directive(printer, directive, variant),
+        .create_client => |arguments| try emit_create_client(printer, arguments, .success),
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const construction = try printer.string_alloc("new Client({s}, new string[] {{ {s} }})", .{
+        try render_uint128(printer, arguments.cluster_id),
+        switch (arguments.replica_addresses) {
+            .server => "server.Address",
+            .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+        },
+    });
+    switch (outcome) {
+        .success => try printer.print_indented("{s}.Dispose();", .{construction}),
+        .failure => |client_error| {
+            const status: ?[]const u8 = if (client_error) |expected| switch (expected) {
+                .address_invalid => "AddressInvalid",
+                .address_limit_exceeded => "AddressLimitExceeded",
+                .too_much_data, .client_closed, .cluster_id_invalid => unreachable,
+            } else null;
+            try printer.print_indented("{s}Assert.ThrowsException<InitializationException>(", .{
+                if (status == null) "" else "var exception = ",
+            });
+            printer.indent();
+            try printer.print_indented("() => {s}", .{construction});
+            printer.dedent();
+            try printer.write_indented(");");
+            if (status) |name| {
+                try printer.print_indented(
+                    "Assert.AreEqual(InitializationStatus.{s}, exception.Status);",
+                    .{name},
+                );
+            }
+        },
+    }
+}
+
+fn emit_directive(
+    printer: *Printer,
+    directive: ast.HarnessDirective,
+    variant: ClientVariant,
+) !void {
+    switch (directive) {
+        .sleep_ms => |ms| try printer.print_indented("Thread.Sleep({d});", .{ms}),
+        .concurrently => |concurrently| {
+            try printer.print_indented("var tasks = new Task[{d}];", .{concurrently.n});
+            try printer.write_indented("for (var index = 0; index < tasks.Length; index++)");
+            try printer.write_indented("{");
+            printer.indent();
+            switch (variant) {
+                .synchronous => try emit_invocation(printer, concurrently.call, variant, .{
+                    .prefix = "tasks[index] = Task.Run(() => ",
+                    .suffix = ");",
+                    .awaited = false,
+                }),
+                .asynchronous => try emit_invocation(printer, concurrently.call, variant, .{
+                    .prefix = "tasks[index] = ",
+                    .suffix = ";",
+                    .awaited = false,
+                }),
+            }
+            printer.dedent();
+            try printer.write_indented("}");
+            try printer.write_indented(switch (variant) {
+                .synchronous => "Task.WhenAll(tasks).Wait();",
+                .asynchronous => "await Task.WhenAll(tasks);",
+            });
+        },
     }
 }
 
@@ -226,32 +300,6 @@ fn emit_call(
         awaited: bool = true,
     },
 ) !void {
-    if (call.concurrency > 1) {
-        assert(options.prefix.len == 0);
-        try printer.print_indented("var tasks = new Task[{d}];", .{call.concurrency});
-        try printer.write_indented("for (var index = 0; index < tasks.Length; index++)");
-        try printer.write_indented("{");
-        printer.indent();
-        switch (variant) {
-            .synchronous => try emit_invocation(printer, call, variant, .{
-                .prefix = "tasks[index] = Task.Run(() => ",
-                .suffix = ");",
-                .awaited = false,
-            }),
-            .asynchronous => try emit_invocation(printer, call, variant, .{
-                .prefix = "tasks[index] = ",
-                .suffix = ";",
-                .awaited = false,
-            }),
-        }
-        printer.dedent();
-        try printer.write_indented("}");
-        try printer.write_indented(switch (variant) {
-            .synchronous => "Task.WhenAll(tasks).Wait();",
-            .asynchronous => "await Task.WhenAll(tasks);",
-        });
-        return;
-    }
     try emit_invocation(printer, call, variant, .{
         .prefix = options.prefix,
         .suffix = options.suffix,
@@ -280,14 +328,6 @@ fn emit_invocation(
     switch (call.name) {
         .close_client => {
             try printer.print_indented("{s}client.Close(){s}", .{ options.prefix, options.suffix });
-        },
-        .sleep_ms => {
-            assert(options.prefix.len == 0);
-            assert(call.arguments.len == 1);
-            try printer.print_indented("Thread.Sleep({s}){s}", .{
-                call.arguments[0].integer,
-                options.suffix,
-            });
         },
         .create_accounts, .create_transfers => {
             const record_type = if (call.name == .create_accounts) "Account" else "Transfer";
@@ -442,20 +482,25 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
                 ),
             });
         },
-        .fail => |failure| {
-            const client_error = failure.client_error orelse unreachable;
-            const prefix = try printer.string_alloc("{s}<{s}>(() => ", .{
-                switch (variant) {
-                    .synchronous => "Assert.ThrowsException",
-                    .asynchronous => "await Assert.ThrowsExceptionAsync",
-                },
-                dotnet_exception_name(client_error),
-            });
-            try emit_call(printer, failure.call, variant, .{
-                .prefix = prefix,
-                .suffix = ");",
-                .awaited = false,
-            });
+        .fail => |failure| switch (failure.action) {
+            .call => |call| {
+                const client_error = failure.client_error orelse unreachable;
+                const prefix = try printer.string_alloc("{s}<{s}>(() => ", .{
+                    switch (variant) {
+                        .synchronous => "Assert.ThrowsException",
+                        .asynchronous => "await Assert.ThrowsExceptionAsync",
+                    },
+                    dotnet_exception_name(client_error),
+                });
+                try emit_call(printer, call, variant, .{
+                    .prefix = prefix,
+                    .suffix = ");",
+                    .awaited = false,
+                });
+            },
+            .create_client => |arguments| {
+                try emit_create_client(printer, arguments, .{ .failure = failure.client_error });
+            },
         },
     }
 }
@@ -464,6 +509,7 @@ fn dotnet_exception_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "TooMuchDataException",
         .client_closed => "ClientClosedException",
+        .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
 }
 
@@ -582,7 +628,7 @@ fn dotnet_operation_name(name: ast.Call.Name) []const u8 {
         .get_account_balances => "GetAccountBalances",
         .query_accounts => "QueryAccounts",
         .query_transfers => "QueryTransfers",
-        .close_client, .sleep_ms => unreachable,
+        .close_client => unreachable,
     };
 }
 

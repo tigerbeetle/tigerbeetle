@@ -90,6 +90,65 @@ function test(name: string, fn: (client: Client) => Promise<void>) {
   tests.push({ name, fn })
 }
 
+// Suite: create_client
+
+test('create_client_creates_a_client_from_valid_arguments', async (client) => {
+  createClient({ cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES }).destroy()
+})
+
+test('create_client_rejects_an_invalid_address', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 0n,
+      replica_addresses: ['not-an-address'],
+    }),
+    { message: 'Invalid replica address.' },
+  )
+})
+
+test('create_client_rejects_an_address_with_a_port_above_the_maximum', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 0n,
+      replica_addresses: ['127.0.0.1:99999'],
+    }),
+    { message: 'Invalid replica address.' },
+  )
+})
+
+test('create_client_rejects_more_addresses_than_replicas', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 0n,
+      replica_addresses: ['3001,3002,3003,3004,3005,3006,3007,3008,3009,3010'],
+    }),
+    { message: 'Too many replica addresses.' },
+  )
+})
+
+// Omitted: "rejects an empty address"
+// Reason: requires empty address passthrough
+
+test('create_client_rejects_empty_addresses', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 0n,
+      replica_addresses: [',,'],
+    }),
+    { message: 'Invalid replica address.' },
+  )
+})
+
+test('create_client_rejects_a_cluster_id_above_the_maximum', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 340282366920938463463374607431768211456n,
+      replica_addresses: REPLICA_ADDRESSES,
+    }),
+    { message: 'cluster_id must fit in 128 bits' },
+  )
+})
+
 // Suite: generate_ids
 
 test('generate_ids_generates_monotonically_increasing_ids', async (client) => {
