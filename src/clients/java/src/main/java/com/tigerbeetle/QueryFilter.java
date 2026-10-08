@@ -11,7 +11,7 @@ public final class QueryFilter {
     * exposing the `Batch` class externally.
     *
     * This is an ad-hoc feature meant to be replaced by a proper querying API shortly,
-    * therefore, it is not worth the effort to modify the binding generator to emit single-item batchs.
+    * therefore, it is not worth the effort to modify the binding generator to emit single-item batches.
     *
     */
     // @formatter:on

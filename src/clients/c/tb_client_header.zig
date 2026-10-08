@@ -232,7 +232,7 @@ pub fn main(init: std.process.Init) !void {
         \\);
         \\
         \\// Initialize a new TigerBeetle client which connects to the addresses provided and
-        \\// completes submitted batchs by invoking the callback with the given context.
+        \\// completes submitted batches by invoking the callback with the given context.
         \\TB_INIT_STATUS tb_client_init(
         \\    tb_client_t *client_out,
         \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -269,7 +269,7 @@ pub fn main(init: std.process.Init) !void {
         \\    tb_batch_t *batch
         \\);
         \\
-        \\// Closes the client, causing any previously submitted batchs to be completed with
+        \\// Closes the client, causing any previously submitted batches to be completed with
         \\// `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
         \\// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.

@@ -133,7 +133,7 @@ class Client:
         self._client_key = Client._counter.increment()
         self._client = bindings.CClient()
 
-        self._inflight_batchs: dict[int, InflightBatch] = {}
+        self._inflight_batches: dict[int, InflightBatch] = {}
 
         # ctypes needs a reference to keep this alive through the FFI call. Having it as a temporary
         # within the call _does not_ work.
@@ -187,7 +187,7 @@ class Client:
         self: Client = Client._clients[completion_ctx]
 
         batch = ctypes.cast(batch, ctypes.POINTER(bindings.CBatch))
-        inflight_batch = self._inflight_batchs[batch[0].user_data]
+        inflight_batch = self._inflight_batches[batch[0].user_data]
         if inflight_batch.on_completion is None:
             # Can't use tb_assert here, as mypy complains later that it might be None.
             raise TypeError("inflight_batch.on_completion not set")
@@ -238,7 +238,7 @@ class ClientSync(Client, bindings.StateMachineMixin):
     def _submit(self, operation: bindings.Operation, operations: list[Any],
                 c_event_type: Any, c_result_type: Any) -> Any:
         inflight_batch = self._acquire_batch(operation, operations, c_event_type, c_result_type)
-        self._inflight_batchs[inflight_batch.batch.user_data] = inflight_batch
+        self._inflight_batches[inflight_batch.batch.user_data] = inflight_batch
 
         inflight_batch.on_completion = self._on_completion
         inflight_batch.on_completion_context = CompletionContextSync(event=threading.Event())
@@ -247,7 +247,7 @@ class ClientSync(Client, bindings.StateMachineMixin):
         if client_state == bindings.ClientStatus.SUCCESS:
             inflight_batch.on_completion_context.event.wait()
 
-        del self._inflight_batchs[inflight_batch.batch.user_data]
+        del self._inflight_batches[inflight_batch.batch.user_data]
 
         if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
@@ -267,7 +267,7 @@ class ClientSync(Client, bindings.StateMachineMixin):
         if client_state == bindings.ClientStatus.CLOSED:
             return
 
-        tb_assert(len(self._inflight_batchs) == 0)
+        tb_assert(len(self._inflight_batches) == 0)
         del Client._clients[self._client_key]
 
     def __enter__(self) -> Self:
@@ -299,7 +299,7 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
     async def _submit(self, operation: bindings.Operation, operations: Any,
                       c_event_type: Any, c_result_type: Any) -> Any:
         inflight_batch = self._acquire_batch(operation, operations, c_event_type, c_result_type)
-        self._inflight_batchs[inflight_batch.batch.user_data] = inflight_batch
+        self._inflight_batches[inflight_batch.batch.user_data] = inflight_batch
 
         inflight_batch.on_completion = self._on_completion
         inflight_batch.on_completion_context = CompletionContextAsync(
@@ -311,7 +311,7 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         if client_state == bindings.ClientStatus.SUCCESS:
             await inflight_batch.on_completion_context.event.wait()
 
-        del self._inflight_batchs[inflight_batch.batch.user_data]
+        del self._inflight_batches[inflight_batch.batch.user_data]
 
         if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
@@ -335,16 +335,16 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         # the client needs to stick around until that's done.
         #
         # This isn't a problem for ClientSync, but ClientAsync invokes the callbacks using
-        # call_soon_threadsafe(), so wait for the event to fire on all pending batchs.
+        # call_soon_threadsafe(), so wait for the event to fire on all pending batches.
         all_events = []
-        for batch in self._inflight_batchs.values():
+        for batch in self._inflight_batches.values():
             if not isinstance(batch.on_completion_context, CompletionContextAsync):
                 raise AssertionError()
             all_events.append(batch.on_completion_context.event.wait())
 
         await asyncio.gather(*all_events)
 
-        tb_assert(len(self._inflight_batchs) == 0)
+        tb_assert(len(self._inflight_batches) == 0)
         del Client._clients[self._client_key]
 
     async def __aenter__(self) -> Self:

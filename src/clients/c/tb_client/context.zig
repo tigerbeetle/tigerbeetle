@@ -491,7 +491,7 @@ pub fn ContextType(
             }
         }
 
-        /// Cancel the current inflight request (and the entire batched linked list of batchs),
+        /// Cancel the current inflight request (and the entire batched linked list of batches),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
             assert(thread_caller == .io);
@@ -509,7 +509,7 @@ pub fn ContextType(
             }
         }
 
-        /// Calls the user callback when a batch (the entire batched linked list of batchs)
+        /// Calls the user callback when a batch (the entire batched linked list of batches)
         /// is canceled due to the client being either evicted or shutdown.
         fn batch_cancel(self: *Context, batch_list: *Batch) void {
             assert(thread_caller == .io);
@@ -623,7 +623,7 @@ pub fn ContextType(
             };
         }
 
-        /// Sends the batch (the entire batched linked list of batchs) through the vsr client.
+        /// Sends the batch (the entire batched linked list of batches) through the vsr client.
         /// Always called by the io thread.
         fn batch_send(self: *Context, batch_list: *Batch) void {
             assert(thread_caller == .io);
@@ -711,9 +711,9 @@ pub fn ContextType(
             maybe(self.batch_size_limit == null);
 
             // Prevents IO thread starvation under heavy client load.
-            // Process only the minimal number of batchs for the next pending request.
+            // Process only the minimal number of batches for the next pending request.
             const enqueued_count = self.pending.count();
-            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid batchs.
+            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid batches.
             for (0..safety_limit) |_| {
                 const batch: *Batch = pop: {
                     self.interface.locker.lock();

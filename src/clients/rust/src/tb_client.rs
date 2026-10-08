@@ -694,7 +694,7 @@ impl<const N: usize> Default for Reserved<N> {
 
 extern "C" {
     // Initialize a new TigerBeetle client which connects to the addresses provided and
-    // completes submitted batchs by invoking the callback with the given context.
+    // completes submitted batches by invoking the callback with the given context.
     pub fn tb_client_init(
         client_out: *mut tb_client_t,
         // 128-bit unsigned integer represented as a 16-byte little-endian array.
@@ -727,7 +727,7 @@ extern "C" {
         batch: *mut tb_batch_t,
     ) -> TB_CLIENT_STATUS;
 
-    // Closes the client, causing any previously submitted batchs to be completed with
+    // Closes the client, causing any previously submitted batches to be completed with
     // `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
     // It is undefined behavior to use any functions on the client once deinit is called.
     pub fn tb_client_deinit(

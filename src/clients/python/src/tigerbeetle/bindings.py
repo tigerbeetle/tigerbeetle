@@ -654,7 +654,7 @@ class InitParameters(ctypes.Structure):
                 ("addresses_ptr", ctypes.c_void_p), ("addresses_len", ctypes.c_uint64)]
 
 # Initialize a new TigerBeetle client which connects to the addresses provided and
-# completes submitted batchs by invoking the callback with the given context.
+# completes submitted batches by invoking the callback with the given context.
 tb_client_init = tbclient.tb_client_init
 tb_client_init.restype = InitStatus
 tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
@@ -667,7 +667,7 @@ tb_client_init_parameters.restype = ClientStatus
 tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),
                                       ctypes.POINTER(InitParameters)]
 
-# Closes the client, causing any previously submitted batchs to be completed with
+# Closes the client, causing any previously submitted batches to be completed with
 # `TB_BATCH_CLIENT_CLOSED` before freeing any allocated client resources from init.
 # It is undefined behavior to use any functions on the client once deinit is called.
 tb_client_deinit = tbclient.tb_client_deinit
