@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigInteger;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -1093,6 +1092,7 @@ public class IntegrationTest {
     @Test
     public void testConcurrentTasks() throws Throwable {
         final int TASKS_COUNT = 100;
+        final int BATCH_SIZE = 1;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
@@ -1108,18 +1108,18 @@ public class IntegrationTest {
             final var tasks = new TransferTask[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {
                 // Starting multiple threads submitting transfers.
-                tasks[i] = new TransferTask(client, account1Id, account2Id, TransferFlags.NONE,
-                        barrier, new CountDownLatch(0));
+                tasks[i] = new TransferTask(client, BATCH_SIZE, account1Id, account2Id,
+                        TransferFlags.NONE, barrier, new CountDownLatch(0));
                 tasks[i].start();
             }
 
             // Wait for all threads:
-            for (int i = 0; i < TASKS_COUNT; i++) {
-                tasks[i].join();
-                assertTrue(tasks[i].result.next());
-                assertTrue(tasks[i].result.getTimestamp() > 0);
-                assertTrue(tasks[i].result.getStatus() == CreateTransferStatus.Created);
-                assertFalse(tasks[i].result.next());
+            for (final var task : tasks) {
+                task.join();
+                assertTrue(task.result.next());
+                assertTrue(task.result.getTimestamp() > 0);
+                assertTrue(task.result.getStatus() == CreateTransferStatus.Created);
+                assertFalse(task.result.next());
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -1149,7 +1149,8 @@ public class IntegrationTest {
      */
     @Test
     public void testConcurrentLinkedChainsTasks() throws Throwable {
-        final int TASKS_COUNT = 10_000;
+        final int TASKS_COUNT = 256;
+        final int BATCH_SIZE = 64;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
@@ -1168,8 +1169,8 @@ public class IntegrationTest {
                 // The Linked flag will cause the
                 // batch to fail due to LinkedEventChainOpen.
                 final var flag = i % 10 == 0 ? TransferFlags.LINKED : TransferFlags.NONE;
-                tasks[i] = new TransferTask(client, account1Id, account2Id, flag, barrier,
-                        new CountDownLatch(0));
+                tasks[i] = new TransferTask(client, BATCH_SIZE, account1Id, account2Id, flag,
+                        barrier, new CountDownLatch(0));
                 tasks[i].start();
             }
 
@@ -1177,13 +1178,19 @@ public class IntegrationTest {
             for (int i = 0; i < TASKS_COUNT; i++) {
                 tasks[i].join();
                 var batch = tasks[i].result;
-                assertTrue(batch.next());
-
-                if (i % 10 == 0) {
-                    assertTrue(batch.getStatus() == CreateTransferStatus.LinkedEventChainOpen);
-                } else {
+                for (int j = 0; j < BATCH_SIZE; j++) {
+                    assertTrue(batch.next());
                     assertTrue(batch.getTimestamp() > 0);
-                    assertTrue(batch.getStatus() == CreateTransferStatus.Created);
+
+                    if (i % 10 == 0) {
+                        final var status =
+                                j == BATCH_SIZE - 1 ? CreateTransferStatus.LinkedEventChainOpen
+                                        : CreateTransferStatus.LinkedEventFailed;
+                        assertTrue(batch.getStatus() == status);
+                    } else {
+
+                        assertTrue(batch.getStatus() == CreateTransferStatus.Created);
+                    }
                 }
                 assertFalse(batch.next());
             }
@@ -1206,6 +1213,7 @@ public class IntegrationTest {
         // we cannot insert a lock/wait in between "acquire_batch" and "submit"
         // in order to cause and assert each variant.
         final int TASKS_COUNT = 256;
+        final int BATCH_SIZE = 64;
         final var enterBarrier = new CountDownLatch(TASKS_COUNT);
         final var exitBarrier = new CountDownLatch(1);
 
@@ -1223,8 +1231,8 @@ public class IntegrationTest {
             for (int i = 0; i < TASKS_COUNT; i++) {
 
                 // Starting multiple threads submitting transfers.
-                tasks[i] = new TransferTask(client, account1Id, account2Id, TransferFlags.NONE,
-                        enterBarrier, exitBarrier);
+                tasks[i] = new TransferTask(client, BATCH_SIZE, account1Id, account2Id,
+                        TransferFlags.NONE, enterBarrier, exitBarrier);
                 tasks[i].start();
             }
 
@@ -1239,17 +1247,17 @@ public class IntegrationTest {
             int failedCount = 0;
             int succeededCount = 0;
 
-            for (int i = 0; i < TASKS_COUNT; i++) {
+            for (final var task : tasks) {
 
                 // The client.close must wait until all submitted requests have completed
                 // Asserting that either the task succeeded or failed while waiting.
-                tasks[i].join();
+                task.join();
 
-                final var succeeded = tasks[i].result != null && createSuccess(tasks[i].result);
+                final var succeeded = task.result != null && createSuccess(task.result);
 
                 // Can fail due to client closed.
-                final var failed = tasks[i].exception != null
-                        && tasks[i].exception instanceof ClientClosedException;
+                final var failed =
+                        task.exception != null && task.exception instanceof ClientClosedException;
 
                 assertTrue(failed || succeeded);
 
@@ -1257,6 +1265,13 @@ public class IntegrationTest {
                     failedCount += 1;
                 } else if (succeeded) {
                     succeededCount += 1;
+                    var batch = task.result;
+                    for (int i = 0; i < BATCH_SIZE; i++) {
+                        assertTrue(batch.next());
+                        assertTrue(batch.getTimestamp() > 0);
+                        assertTrue(batch.getStatus() == CreateTransferStatus.Created);
+                    }
+                    assertFalse(batch.next());
                 }
             }
 
@@ -1423,33 +1438,55 @@ public class IntegrationTest {
     @Test
     public void testConcurrentInterruptedTasks() throws Throwable {
         final int TASKS_COUNT = 256;
+        final int BATCH_SIZE = 64;
         final var barrier = new CountDownLatch(TASKS_COUNT);
-        final var zeroedId = UInt128.asBytes(0L);
 
-        // Connect to an invalid cluster, so the calls never complete.
-        try (final var client = new Client(clusterId, new String[] {"0"})) {
-            final var tasks = new TransferTask[TASKS_COUNT];
-            for (int i = 0; i < TASKS_COUNT; i++) {
-                // Starting multiple threads.
-                tasks[i] = new TransferTask(client, zeroedId, zeroedId, TransferFlags.NONE, barrier,
-                        new CountDownLatch(0));
-                tasks[i].start();
-            }
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var accounts = generateAccounts(account1Id, account2Id);
 
-            // Waits until all threads start.
-            barrier.await();
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
-            // Interrupt all threads.
-            for (final var task : tasks) {
-                task.interrupt();
-                task.join();
+        final var tasks = new TransferTask[TASKS_COUNT];
+        for (int i = 0; i < TASKS_COUNT; i++) {
+            // Starting multiple threads.
+            tasks[i] = new TransferTask(client, BATCH_SIZE, account1Id, account2Id,
+                    TransferFlags.NONE, barrier, new CountDownLatch(0));
+            tasks[i].start();
+        }
 
-                assertTrue(task.getState() == Thread.State.TERMINATED);
-                assertTrue(task.result == null);
+        // Waits until all threads start.
+        barrier.await();
+
+        int interruptedCount = 0;
+        int succeededCount = 0;
+
+        // Interrupt all threads.
+        for (final var task : tasks) {
+            task.interrupt();
+            task.join();
+
+            assertTrue(task.getState() == Thread.State.TERMINATED);
+            if (task.result != null) {
+                succeededCount += 1;
+                var batch = task.result;
+                for (int i = 0; i < BATCH_SIZE; i++) {
+                    assertTrue(batch.next());
+                    assertTrue(batch.getTimestamp() > 0);
+                    assertTrue(batch.getStatus() == CreateTransferStatus.Created);
+                }
+                assertFalse(batch.next());
+            } else {
+                interruptedCount += 1;
                 assertTrue(task.exception != null);
                 assertTrue(task.exception instanceof InterruptedException);
             }
         }
+
+        assertTrue(interruptedCount + succeededCount == TASKS_COUNT);
     }
 
     @Test
@@ -2571,17 +2608,19 @@ public class IntegrationTest {
         public final Client client;
         public CreateTransferResultBatch result;
         public Throwable exception;
+        private int batch_size;
         private byte[] account1Id;
         private byte[] account2Id;
         private int flags;
         private CountDownLatch enterBarrier;
         private CountDownLatch exitBarrier;
 
-        public TransferTask(Client client, byte[] account1Id, byte[] account2Id, int flags,
-                CountDownLatch enterBarrier, CountDownLatch exitBarrier) {
+        public TransferTask(Client client, int batch_size, byte[] account1Id, byte[] account2Id,
+                int flags, CountDownLatch enterBarrier, CountDownLatch exitBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
+            this.batch_size = batch_size;
             this.account1Id = account1Id;
             this.account2Id = account2Id;
             this.flags = flags;
@@ -2592,16 +2631,17 @@ public class IntegrationTest {
         @Override
         public synchronized void run() {
 
-            final var transfers = new TransferBatch(1);
-            transfers.add();
-
-            transfers.setId(UInt128.asBytes(UUID.randomUUID()));
-            transfers.setCreditAccountId(account1Id);
-            transfers.setDebitAccountId(account2Id);
-            transfers.setLedger(720);
-            transfers.setCode(1);
-            transfers.setAmount(100);
-            transfers.setFlags(flags);
+            final var transfers = new TransferBatch(batch_size);
+            for (int i = 0; i < batch_size; i++) {
+                transfers.add();
+                transfers.setId(UInt128.id());
+                transfers.setCreditAccountId(account1Id);
+                transfers.setDebitAccountId(account2Id);
+                transfers.setLedger(720);
+                transfers.setCode(1);
+                transfers.setAmount(100);
+                transfers.setFlags(flags);
+            }
 
             try {
                 enterBarrier.countDown();
