@@ -3,6 +3,16 @@
 Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes and critical issues!
 
+## TigerBeetle 0.17.10
+
+Released: 2026-10-09
+
+Note: This release fixes the Go, Rust, and Ruby clients on macOS 27+, wherein
+the builds for applications atop these clients would fail. The root cause for
+this is that Zig builds the tb_client static library in a format incompatible
+with macOS 27+. This is fixed in Zig 0.17: https://codeberg.org/ziglang/zig/pulls/35984,
+but this release includes a workaround for the issue until TigerBeetle upgrades to 0.17.
+
 ## TigerBeetle 0.17.9
 
 Released: 2026-07-03

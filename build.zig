@@ -1509,7 +1509,7 @@ fn build_tb_client(
             .platform = platform,
             .file_name = shared_lib.out_filename,
             .lazy_path = all_platforms.addCopyFile(
-                shared_lib.getEmittedBin(),
+                emitted_bin_aligned(b, shared_lib),
                 b.pathJoin(&.{ platform.target(), shared_lib.out_filename }),
             ),
         }) catch @panic("OOM");
@@ -1534,6 +1534,20 @@ fn build_tb_client(
         .all_platforms = all_platforms.getDirectory(),
         .per_platform = per_platform.items,
     };
+}
+
+// TODO(Zig): fixed in Zig 0.17.0: https://codeberg.org/ziglang/zig/pulls/35984
+// Zig <=0.16.0 doesn't 8-byte align the members of Mach-O archives and Apple's ld rejects them.
+// Use LLVM's archiver to properly align them through `zig ar`.
+fn emitted_bin_aligned(b: *std.Build, lib: *std.Build.Step.Compile) std.Build.LazyPath {
+    if (!lib.isStaticLibrary() or lib.rootModuleTarget().os.tag != .macos) {
+        return lib.getEmittedBin();
+    }
+    // q: append, c: create the archive without warning, L: add the members of an input archive.
+    const zig_ar = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "qcL", "--format=darwin" });
+    const archive = zig_ar.addOutputFileArg(lib.out_filename);
+    zig_ar.addFileArg(lib.getEmittedBin());
+    return archive;
 }
 
 fn build_rust_client(
@@ -1577,7 +1591,10 @@ fn build_rust_client(
         static_lib.pie = true;
         static_lib.linkLibC();
 
-        step_clients_rust.dependOn(&b.addInstallFile(static_lib.getEmittedBin(), b.pathJoin(&.{
+        step_clients_rust.dependOn(&b.addInstallFile(emitted_bin_aligned(
+            b,
+            static_lib,
+        ), b.pathJoin(&.{
             "../src/clients/rust/assets/lib/",
             platform.target(),
             static_lib.out_filename,
@@ -1669,7 +1686,7 @@ fn build_go_client(
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         step_clients_go.dependOn(&b.addInstallFile(
-            lib.getEmittedBin(),
+            emitted_bin_aligned(b, lib),
             b.fmt("../src/clients/go/native/{s}_{s}.{s}", .{
                 file_name,
                 platform.go_target(),
@@ -2024,7 +2041,7 @@ fn build_c_client(
                 lib.linkSystemLibrary("advapi32");
             }
 
-            step_clients_c.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+            step_clients_c.dependOn(&b.addInstallFile(emitted_bin_aligned(b, lib), b.pathJoin(&.{
                 "../src/clients/c/lib/",
                 platform.target(),
                 lib.out_filename,
