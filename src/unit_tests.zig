@@ -1,5 +1,6 @@
 comptime {
     _ = @import("aof.zig");
+    _ = @import("archive_align.zig");
     _ = @import("cdc/amqp.zig");
     _ = @import("cdc/amqp/protocol.zig");
     _ = @import("cdc/runner.zig");
