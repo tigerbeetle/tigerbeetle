@@ -24,6 +24,11 @@ const fixtures = @import("testing/fixtures.zig");
 const StateMachineReferenceType = @import("./state_machine/reference_model.zig").StateMachineReferenceType;
 const MiB = stdx.MiB;
 
+const Ratio = stdx.PRNG.Ratio;
+const ratio = stdx.PRNG.ratio;
+
+const log = std.log.scoped(.state_machine_fuzz);
+
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var world: World = undefined;
     try world.init(gpa);
@@ -45,7 +50,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     defer gpa.free(reply_buffer);
 
     var prng = stdx.PRNG.from_seed(args.seed);
-    const options = options_swarm(&prng);
+    const options = Options.swarm(&prng);
 
     // TODO: extend the options swarm to time and queries.
     // - think about which constallations would provoke some of the findings
@@ -166,40 +171,40 @@ const World = struct {
     const StateMachineReference = StateMachineReferenceType(1000, 1000);
     const StateMachine = vsr.state_machine.StateMachineType(Storage);
 
-    fn init(ctx: *World, gpa: std.mem.Allocator) !void {
-        ctx.storage = try fixtures.init_storage(gpa, .{ .size = 512 * MiB });
-        errdefer ctx.storage.deinit(gpa);
+    fn init(world: *World, gpa: std.mem.Allocator) !void {
+        world.storage = try fixtures.init_storage(gpa, .{ .size = 512 * MiB });
+        errdefer world.storage.deinit(gpa);
 
-        try fixtures.storage_format(gpa, &ctx.storage, .{
+        try fixtures.storage_format(gpa, &world.storage, .{
             .replica_count = 1,
         });
 
-        ctx.time_sim = fixtures.init_time(.{});
+        world.time_sim = fixtures.init_time(.{});
 
-        ctx.trace = try fixtures.init_tracer(gpa, ctx.time_sim.interface(), .{});
-        errdefer ctx.trace.deinit(gpa);
+        world.trace = try fixtures.init_tracer(gpa, world.time_sim.interface(), .{});
+        errdefer world.trace.deinit(gpa);
 
-        ctx.superblock = try fixtures.init_superblock(gpa, &ctx.storage, .{
+        world.superblock = try fixtures.init_superblock(gpa, &world.storage, .{
             .storage_size_limit = 256 * MiB,
         });
-        errdefer ctx.superblock.deinit(gpa);
+        errdefer world.superblock.deinit(gpa);
 
-        fixtures.open_superblock(&ctx.superblock);
+        fixtures.open_superblock(&world.superblock);
 
-        ctx.grid = try fixtures.init_grid(gpa, &ctx.trace, &ctx.superblock, .{
+        world.grid = try fixtures.init_grid(gpa, &world.trace, &world.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = StateMachine.Forest
                 .compaction_blocks_released_per_pipeline_max(),
         });
-        errdefer ctx.grid.deinit(gpa);
+        errdefer world.grid.deinit(gpa);
 
-        fixtures.open_grid(&ctx.grid);
+        fixtures.open_grid(&world.grid);
 
         const batch_size_limit = 30 * @max(@sizeOf(tb.Account), @sizeOf(tb.Transfer));
         assert(batch_size_limit <= constants.message_body_size_max);
-        try ctx.state_machine.init(
+        try world.state_machine.init(
             gpa,
-            ctx.time_sim.interface(),
-            &ctx.grid,
+            world.time_sim.interface(),
+            &world.grid,
             .{
                 .batch_size_limit = batch_size_limit,
                 .lsm_forest_compaction_block_count = StateMachine.Forest.Options
@@ -212,9 +217,9 @@ const World = struct {
                 .aof_recovery = false,
             },
         );
-        errdefer ctx.state_machine.deinit(gpa);
+        errdefer world.state_machine.deinit(gpa);
 
-        ctx.state_machine_open();
+        world.state_machine_open();
     }
 
     pub fn deinit(ctx: *World, allocator: std.mem.Allocator) void {
@@ -370,21 +375,28 @@ const Options = struct {
     transfer_id_max: u128,
     account_mutation_probability: MutationProbability(tb.Account),
     transfer_mutation_probability: MutationProbability(tb.Transfer),
-};
+    repeat_probability: Ratio,
+    repeats_seed: u64,
 
-fn options_swarm(prng: *stdx.PRNG) Options {
-    var operation_weights = fuzz.random_enum_weights(prng, World.StateMachine.Operation);
-    // Keep both creates enabled while swarming the surrounding operations.
-    operation_weights.create_accounts = prng.range_inclusive(u64, 100, 1000);
-    operation_weights.create_transfers = prng.range_inclusive(u64, 100, 1000);
-    return .{
-        .operation_weights = operation_weights,
-        .account_id_max = prng.range_inclusive(u128, 1, 256),
-        .transfer_id_max = prng.range_inclusive(u128, 1, 256),
-        .account_mutation_probability = mutation_probability_swarm(prng, tb.Account),
-        .transfer_mutation_probability = mutation_probability_swarm(prng, tb.Transfer),
-    };
-}
+    fn swarm(prng: *stdx.PRNG) Options {
+        var operation_weights = fuzz.random_enum_weights(prng, World.StateMachine.Operation);
+        // Keep both creates enabled while swarming the surrounding operations.
+        operation_weights.create_accounts = prng.range_inclusive(u64, 100, 1000);
+        operation_weights.create_transfers = prng.range_inclusive(u64, 100, 1000);
+        return .{
+            .operation_weights = operation_weights,
+            .account_id_max = prng.range_inclusive(u128, 1, 256),
+            .transfer_id_max = prng.range_inclusive(u128, 1, 256),
+            .account_mutation_probability = mutation_probability_swarm(prng, tb.Account),
+            .transfer_mutation_probability = mutation_probability_swarm(prng, tb.Transfer),
+            .repeats_seed = prng.int(u64),
+            .repeat_probability = ratio(
+                prng.int_inclusive(u8, 80),
+                100,
+            ),
+        };
+    }
+};
 
 fn MutationProbability(comptime Event: type) type {
     return std.enums.EnumFieldStruct(std.meta.FieldEnum(Event), stdx.PRNG.Ratio, null);
@@ -393,10 +405,10 @@ fn MutationProbability(comptime Event: type) type {
 fn mutation_probability_swarm(prng: *stdx.PRNG, comptime Event: type) MutationProbability(Event) {
     var probability: MutationProbability(Event) = undefined;
     inline for (comptime std.meta.fieldNames(Event)) |field| {
-        @field(probability, field) = .{
-            .numerator = prng.int_inclusive(u8, 30),
-            .denominator = 100,
-        };
+        @field(probability, field) = ratio(
+            prng.int_inclusive(u8, 30),
+            100,
+        );
     }
     return probability;
 }
@@ -446,21 +458,36 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
     const transfers = stdx.bytes_as_slice(.inexact, tb.Transfer, buffer);
     const count = prng.int_inclusive(u32, @intCast(transfers.len));
     for (transfers[0..count]) |*transfer| {
-        transfer.* = std.mem.zeroes(tb.Transfer);
-        transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
-        transfer.debit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
-        transfer.credit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
-        // References are independent of flags and of whether the referenced event exists.
-        transfer.pending_id = if (prng.boolean())
-            0
-        else
-            prng.range_inclusive(u128, 1, options.transfer_id_max);
-        transfer.amount = 1;
-        transfer.ledger = 1;
-        transfer.code = 1;
-        mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, transfer);
+        if (prng.chance(options.repeat_probability)) {
+            var prng_low_cardinality = stdx.PRNG.from_seed(
+                prng.int_inclusive(u64, 10) ^ options.repeats_seed,
+            );
+            build_transfer(&prng_low_cardinality, options, transfer);
+            if (prng.chance(ratio(1, 10))) {
+                const transfer_bytes = std.mem.asBytes(transfer);
+                transfer_bytes[prng.index(transfer_bytes)] ^= prng.bit(u8);
+            }
+        } else {
+            build_transfer(prng, options, transfer);
+        }
     }
     return count * @sizeOf(tb.Transfer);
+}
+
+fn build_transfer(prng: *stdx.PRNG, options: *const Options, transfer: *tb.Transfer) void {
+    transfer.* = std.mem.zeroes(tb.Transfer);
+    transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
+    transfer.debit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
+    transfer.credit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
+    // References are independent of flags and of whether the referenced event exists.
+    transfer.pending_id = if (prng.boolean())
+        0
+    else
+        prng.range_inclusive(u128, 1, options.transfer_id_max);
+    transfer.amount = 1;
+    transfer.ledger = 1;
+    transfer.code = 1;
+    mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, transfer);
 }
 
 fn build_batch(
@@ -643,7 +670,7 @@ test "create_accounts options swarm coverage" {
     var covered = std.EnumArray(tb.CreateAccountStatus, bool).initFill(false);
     for (0..100) |seed| {
         var prng = stdx.PRNG.from_seed(seed);
-        const options = options_swarm(&prng);
+        const options = Options.swarm(&prng);
         var model: StateMachineReferenceType(800, 1) = .{};
         for (0..100) |_| {
             var accounts: [8]tb.Account = undefined;
@@ -676,7 +703,7 @@ test "create_transfers options swarm" {
 
     for (0..1_000) |seed| {
         var prng = stdx.PRNG.from_seed(seed);
-        const options = options_swarm(&prng);
+        const options = Options.swarm(&prng);
         var model: StateMachineReferenceType(400, 400) = .{};
         for (0..100) |_| {
             var accounts: [4]tb.Account = undefined;
@@ -696,9 +723,8 @@ test "create_transfers options swarm" {
         }
     }
 
-    inline for (@typeInfo(tb.CreateTransferStatus.Ordered).@"enum".fields) |field| {
-        const status: tb.CreateTransferStatus.Ordered = @enumFromInt(field.value);
-        std.debug.print("{s} \n", .{field.name});
+    for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
+        // const status: tb.CreateTransferStatus.Ordered = @enumFromInt(field.value);
         // Those are the ones we don't hit currently.
         // TODO: need to tweak the swarm.
         switch (status) {
@@ -711,10 +737,6 @@ test "create_transfers options swarm" {
                 continue;
             },
             .exceeds_pending_transfer_amount => {
-                assert(covered.get(status) == false);
-                continue;
-            },
-            .exists => {
                 assert(covered.get(status) == false);
                 continue;
             },
@@ -790,20 +812,23 @@ test "create_transfers options swarm" {
                 assert(covered.get(status) == false);
                 continue;
             },
-            .pending_transfer_has_different_credit_account_id => {
-                assert(covered.get(status) == false);
-                continue;
-            },
-            .pending_transfer_has_different_debit_account_id => {
-                assert(covered.get(status) == false);
-                continue;
-            },
+            // .pending_transfer_has_different_credit_account_id => {
+            //     assert(covered.get(status) == false);
+            //     continue;
+            // },
+            //  .pending_transfer_has_different_debit_account_id => {
+            //     assert(covered.get(status) == false);
+            //     continue;
+            // },
             .pending_transfer_has_different_ledger => {
                 assert(covered.get(status) == false);
                 continue;
             },
             else => {},
         }
-        try std.testing.expect(covered.get(status));
+        if (!covered.get(status)) {
+            log.err("uncovered: {}", .{status});
+            return error.TestFailed;
+        }
     }
 }
