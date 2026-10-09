@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Signal = @import("./signal.zig").Signal;
-const IO = @import("../../../io.zig").IO;
+const IO = @import("../../../io.zig").ClientIO;
 const stdx = @import("stdx");
 const fuzz = @import("../../../testing/fuzz.zig");
 

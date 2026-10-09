@@ -105,7 +105,10 @@ pub fn MessageBusType(comptime IO: type) type {
             options: Options,
         ) !MessageBus {
             switch (process_id) {
-                .replica => assert(options.clients_limit.? > 0),
+                .replica => {
+                    assert(options.clients_limit.? > 0);
+                    assert(IO != vsr.io.ClientIO);
+                },
                 .client => assert(options.clients_limit == null),
             }
 

@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 
 const vsr = @import("../tb_client.zig").vsr;
 const TimeOS = stdx.TimeOS;
-const IO = vsr.io.IO;
+const IO = vsr.io.ClientIO;
 
 const Atomic = std.atomic.Value;
 
@@ -145,7 +145,8 @@ pub const Signal = struct {
 
         switch (state) {
             .running => unreachable, // Multiple racing calls to on_signal().
-            .waiting => unreachable, // on_signal() called without transitioning to a waking state.
+            // on_signal() called without transitioning to a waking state.
+            .waiting => unreachable,
             .notified => unreachable, // Not possible due to CAS semantics.
             .shutdown => unreachable, // Shutdown is a final state.
         }

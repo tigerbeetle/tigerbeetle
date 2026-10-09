@@ -112,7 +112,7 @@ pub const IO = struct {
         while (now.ns < deadline.ns) : (now = self.time.monotonic()) {
             // If there are callbacks ready to run, don't wait in the kernel: the callbacks may
             // queue more work, which should be submitted as soon as possible.
-            const block_ns = if (self.completed.count() == 0) deadline.ns -| now.ns else 0;
+            const block_ns = if (self.completed.count() == 0) deadline.ns - now.ns else 0;
 
             try self.flush_submissions(@intCast(block_ns));
             try self.flush_completions(0);
@@ -1345,7 +1345,7 @@ pub const IO = struct {
             Context.on_read,
             completion,
             event,
-            std.mem.asBytes(&Context.buffer),
+            std.mem.asBytes(&Context.buffer), // Context.buffer acts as global variable.
             0, // eventfd reads must always start from 0 offset.
         );
     }
