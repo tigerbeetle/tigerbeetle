@@ -142,94 +142,74 @@
 //! results returned is 8189**.
 //!
 //! If the server returns a full batch for a range query, then further results
-//! can be paged by incrementing `timeout_max` to one greater than the highest
-//! timeout returned in the previous batch, and issuing a new query with
-//! otherwise the same filter. This process can be repeated until the server
-//! returns a partial batch.
+//! can be paged by setting `timestamp_min` to one greater than the last timestamp
+//! returned (or `timestamp_max` to one less for reverse queries), and issuing a new
+//! query with otherwise the same filter. Repeat until the server returns a partial
+//! batch or the timestamp range is exhausted.
 //!
 //! [`get_account_transfers`]: Client::get_account_transfers
 //! [`get_account_balances`]: Client::get_account_balances
 //! [`query_accounts`]: Client::query_accounts
 //! [`query_transfers`]: Client::query_transfers
 //!
-//! Here is an example of paging to get started with:
+//! Here is an example of paging to get started with. The callback borrows each page
+//! from a reusable buffer and may receive an empty final page:
 //!
 //! ```no_run
 //! use tigerbeetle as tb;
-//! use futures::{stream, Stream};
 //!
-//! fn get_account_transfers_paged(
+//! // This example uses a callback, but could be implemented as an async stream as well.
+//! async fn get_account_transfers_paged(
 //!     client: &tb::Client,
-//!     event: tb::AccountFilter,
-//! ) -> impl Stream<Item = std::result::Result<Vec<tb::Transfer>, tb::Error>> + '_ {
-//!     assert!(
-//!         event.limit > 1,
-//!         "paged queries should use an explicit limit"
-//!     );
+//!     mut filter: tb::AccountFilter,
+//!     mut page_callback: impl FnMut(&[tb::Transfer]),
+//! ) -> Result<(), tb::Error> {
+//!     assert!(filter.limit > 0, "paged queries should use an explicit limit");
+//!     let is_reverse = (filter.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
+//!     let mut completion = tb::Completion::new();
+//!     let mut page = Vec::new();
 //!
-//!     enum State {
-//!         Start,
-//!         Continue(u64),
-//!         End,
-//!     }
-//!
-//!     let is_reverse = (event.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
-//!
-//!     futures::stream::unfold(State::Start, move |state| async move {
-//!         let event = match state {
-//!             State::Start => event,
-//!             State::Continue(timestamp_begin) => {
-//!                 if !is_reverse {
-//!                     tb::AccountFilter {
-//!                         timestamp_min: timestamp_begin,
-//!                         ..event
-//!                     }
-//!                 } else {
-//!                     tb::AccountFilter {
-//!                         timestamp_max: timestamp_begin,
-//!                         ..event
-//!                     }
-//!                 }
-//!             }
-//!             State::End => return None,
-//!         };
-//!         let result = client
-//!             .get_account_transfers(event)
-//!             .await;
-//!         match result {
-//!             Ok(result_next) => {
-//!                 let result_len = u32::try_from(result_next.len()).expect("u32");
-//!                 let must_page = result_len == event.limit;
-//!                 if must_page {
-//!                     let timestamp_first = result_next.first().expect("item").timestamp;
-//!                     let timestamp_last = result_next.last().expect("item").timestamp;
-//!                     let (timestamp_begin_next, should_continue) = if !is_reverse {
-//!                         assert!(timestamp_first < timestamp_last);
-//!                         let timestamp_begin_next = timestamp_last.checked_add(1).expect("overflow");
-//!                         assert_ne!(timestamp_begin_next, u64::MAX);
-//!                         let should_continue =
-//!                             timestamp_begin_next <= event.timestamp_max || event.timestamp_max == 0;
-//!                         (timestamp_begin_next, should_continue)
-//!                     } else {
-//!                         assert!(timestamp_first > timestamp_last);
-//!                         let timestamp_begin_next = timestamp_last.checked_sub(1).expect("overflow");
-//!                         assert_ne!(timestamp_begin_next, 0);
-//!                         let should_continue =
-//!                             timestamp_begin_next >= event.timestamp_min || event.timestamp_min == 0;
-//!                         (timestamp_begin_next, should_continue)
-//!                     };
-//!                     if should_continue {
-//!                         Some((Ok(result_next), State::Continue(timestamp_begin_next)))
-//!                     } else {
-//!                         Some((Ok(result_next), State::End))
-//!                     }
-//!                 } else {
-//!                     Some((Ok(result_next), State::End))
-//!                 }
-//!             }
-//!             Err(error) => Some((Err(error), State::End)),
+//!     loop {
+//!         page.clear(); // Keep the allocation, but replace the previous page's results.
+//!         (completion, filter, page) = client
+//!             .get_account_transfers_reusable(completion, filter, page)
+//!             .await?;
+//!         page_callback(&page);
+//!         if page.len() < filter.limit as usize {
+//!             break;
 //!         }
-//!     })
+//!
+//!         let timestamp = page.last().unwrap().timestamp;
+//!         if is_reverse {
+//!             if timestamp <= filter.timestamp_min.max(1) {
+//!                 break;
+//!             }
+//!             filter.timestamp_max = timestamp - 1;
+//!         } else {
+//!             if filter.timestamp_max != 0 && timestamp >= filter.timestamp_max {
+//!                 break;
+//!             }
+//!             filter.timestamp_min = timestamp + 1;
+//!         }
+//!     }
+//!     Ok(())
+//! }
+//!
+//! async fn example(client: &tb::Client, account_id: u128) -> Result<(), tb::Error> {
+//!     let mut transfers = Vec::new();
+//!     get_account_transfers_paged(
+//!         client,
+//!         tb::AccountFilter {
+//!             account_id,
+//!             limit: 1000,
+//!             flags: tb::AccountFilterFlags::Debits | tb::AccountFilterFlags::Credits,
+//!             ..Default::default()
+//!         },
+//!         |page| transfers.extend_from_slice(page),
+//!     )
+//!     .await?;
+//!     // Process `transfers` here...
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -291,14 +271,17 @@
 //! # Use in non-async codebases
 //!
 //! The TigerBeetle client is async-only, but if you're working in a synchronous
-//! codebase, you can use something like [`futures::executor::block_on`] to run async operations
-//! to completion.
+//! codebase, you can use the `block_on` function of an async runtime, such as
+//! [`futures::executor::block_on`] or [`tokio::runtime::Runtime::block_on`], to run async
+//! operations to completion.
 //!
 //! [`futures::executor::block_on`]: https://docs.rs/futures/latest/futures/executor/fn.block_on.html
+//! [`tokio::runtime::Runtime::block_on`]: https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.block_on
 //!
 //! ```no_run
-//! use futures::executor::block_on;
 //! use tigerbeetle as tb;
+//! # // Stand-in for e.g. `futures::executor::block_on`.
+//! # fn block_on<F: std::future::Future>(_future: F) -> F::Output { unimplemented!() }
 //!
 //! fn synchronous_function() -> Result<(), Box<dyn std::error::Error>> {
 //!     block_on(async {

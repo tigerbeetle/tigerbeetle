@@ -1,10 +1,9 @@
 use std::sync::{Arc, Barrier};
 
-use futures::executor::block_on;
-use futures::pin_mut;
-use futures::{Stream, StreamExt};
-
 use tigerbeetle as tb;
+
+mod executor;
+use executor::block_on;
 
 mod test_db;
 pub use test_db::*;
@@ -698,13 +697,14 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
     panic!("unexpected all transactions succeeded");
 }
 
-/// Query multiple transfers for a single account, with paging.
+/// Query multiple transfers for a single account, call `page_callback` for each page.
+/// The callback borrows the reusable page buffer and may receive an empty final page.
 ///
 /// This handles the case where there are too many results to fit into
 /// a single batch, by making multiple sequential queries, incrementing
 /// the timestamp range (or decrementing for reverse queries).
 ///
-/// The [`AccountFilter`]'s `limit` field should be set to greater than 1
+/// The [`AccountFilter`]'s `limit` field should be set to greater than 0
 /// to set the page size. `limit` must be less than or equal to the build-time
 /// configuration of the TigerBeetle server's batch size (default 8189).
 ///
@@ -712,76 +712,45 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
 //
 // NB: This is a runnable version of an example in the crate docs.
 // Try to keep them in sync.
-fn get_account_transfers_paged(
+//
+// This example uses a callback, but could be implemented as an async stream as well.
+async fn get_account_transfers_paged(
     client: &tb::Client,
-    event: tb::AccountFilter,
-) -> impl Stream<Item = std::result::Result<Vec<tb::Transfer>, tb::Error>> + '_ {
+    mut filter: tb::AccountFilter,
+    mut page_callback: impl FnMut(&[tb::Transfer]),
+) -> std::result::Result<(), tb::Error> {
     assert!(
-        event.limit > 1,
+        filter.limit > 0,
         "paged queries should use an explicit limit"
     );
+    let is_reverse = (filter.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
+    let mut completion = tb::Completion::new();
+    let mut page = Vec::new();
 
-    enum State {
-        Start,
-        Continue(u64),
-        End,
-    }
-
-    let is_reverse = (event.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
-
-    futures::stream::unfold(State::Start, move |state| async move {
-        let event = match state {
-            State::Start => event,
-            State::Continue(timestamp_begin) => {
-                if !is_reverse {
-                    tb::AccountFilter {
-                        timestamp_min: timestamp_begin,
-                        ..event
-                    }
-                } else {
-                    tb::AccountFilter {
-                        timestamp_max: timestamp_begin,
-                        ..event
-                    }
-                }
-            }
-            State::End => return None,
-        };
-        let result = client.get_account_transfers(event).await;
-        match result {
-            Ok(result_next) => {
-                let result_len = u32::try_from(result_next.len()).expect("u32");
-                let must_page = result_len == event.limit;
-                if must_page {
-                    let timestamp_first = result_next.first().expect("item").timestamp;
-                    let timestamp_last = result_next.last().expect("item").timestamp;
-                    let (timestamp_begin_next, should_continue) = if !is_reverse {
-                        assert!(timestamp_first < timestamp_last);
-                        let timestamp_begin_next = timestamp_last.checked_add(1).expect("overflow");
-                        assert_ne!(timestamp_begin_next, u64::MAX);
-                        let should_continue =
-                            timestamp_begin_next <= event.timestamp_max || event.timestamp_max == 0;
-                        (timestamp_begin_next, should_continue)
-                    } else {
-                        assert!(timestamp_first > timestamp_last);
-                        let timestamp_begin_next = timestamp_last.checked_sub(1).expect("overflow");
-                        assert_ne!(timestamp_begin_next, 0);
-                        let should_continue =
-                            timestamp_begin_next >= event.timestamp_min || event.timestamp_min == 0;
-                        (timestamp_begin_next, should_continue)
-                    };
-                    if should_continue {
-                        Some((Ok(result_next), State::Continue(timestamp_begin_next)))
-                    } else {
-                        Some((Ok(result_next), State::End))
-                    }
-                } else {
-                    Some((Ok(result_next), State::End))
-                }
-            }
-            Err(error) => Some((Err(error), State::End)),
+    loop {
+        page.clear(); // Keep the allocation, but replace the previous page's results.
+        (completion, filter, page) = client
+            .get_account_transfers_reusable(completion, filter, page)
+            .await?;
+        page_callback(&page);
+        if page.len() < filter.limit as usize {
+            break;
         }
-    })
+
+        let timestamp = page.last().unwrap().timestamp;
+        if is_reverse {
+            if timestamp <= filter.timestamp_min.max(1) {
+                break;
+            }
+            filter.timestamp_max = timestamp - 1;
+        } else {
+            if filter.timestamp_max != 0 && timestamp >= filter.timestamp_max {
+                break;
+            }
+            filter.timestamp_min = timestamp + 1;
+        }
+    }
+    Ok(())
 }
 
 struct PagingTestParams {
@@ -853,7 +822,9 @@ fn paging_forward() -> Result<()> {
     let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
-    let query_results = get_account_transfers_paged(
+    let mut batches = 0;
+    let mut transfer_count = 0;
+    block_on(get_account_transfers_paged(
         &client,
         tb::AccountFilter {
             account_id: test_params.account_id1,
@@ -861,18 +832,11 @@ fn paging_forward() -> Result<()> {
             flags: tb::AccountFilterFlags::Debits,
             ..Default::default()
         },
-    );
-
-    pin_mut!(query_results);
-
-    let mut batches = 0;
-    let mut transfer_count = 0;
-
-    while let Some(query_results) = block_on(query_results.next()) {
-        let query_results = query_results?;
-        batches += 1;
-        transfer_count += query_results.len();
-    }
+        |page| {
+            batches += 1;
+            transfer_count += page.len();
+        },
+    ))?;
 
     assert!(batches > 1);
     assert_eq!(transfer_count, test_params.transfer_count);
@@ -885,7 +849,9 @@ fn paging_reverse() -> Result<()> {
     let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
-    let query_results = get_account_transfers_paged(
+    let mut batches = 0;
+    let mut transfer_count = 0;
+    block_on(get_account_transfers_paged(
         &client,
         tb::AccountFilter {
             account_id: test_params.account_id1,
@@ -893,18 +859,11 @@ fn paging_reverse() -> Result<()> {
             flags: tb::AccountFilterFlags::Debits | tb::AccountFilterFlags::Reversed,
             ..Default::default()
         },
-    );
-
-    pin_mut!(query_results);
-
-    let mut batches = 0;
-    let mut transfer_count = 0;
-
-    while let Some(query_results) = block_on(query_results.next()) {
-        let query_results = query_results?;
-        batches += 1;
-        transfer_count += query_results.len();
-    }
+        |page| {
+            batches += 1;
+            transfer_count += page.len();
+        },
+    ))?;
 
     assert!(batches > 1);
     assert_eq!(transfer_count, test_params.transfer_count);

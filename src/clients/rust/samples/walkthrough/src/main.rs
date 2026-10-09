@@ -4,7 +4,7 @@
 use tigerbeetle as tb;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    futures::executor::block_on(main_async())
+    block_on(main_async())
 }
 
 async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
@@ -485,5 +485,29 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     // section:imports
     Ok(())
+}
+
+/// Minimal async executor for this sample. In a real application, use a proper async runtime.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct ThreadWaker(std::thread::Thread);
+
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    let mut future = Box::pin(future);
+    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => std::thread::park(),
+        }
+    }
 }
 // endsection:imports

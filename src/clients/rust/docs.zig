@@ -15,10 +15,13 @@ pub const RustDocs = Docs{
     \\
     \\[![crates.io](https://img.shields.io/crates/v/tigerbeetle)](https://crates.io/crates/tigerbeetle)
     \\[![docs.rs](https://img.shields.io/docsrs/tigerbeetle)](https://docs.rs/tigerbeetle)
+    \\
+    \\The client must not be newer than the TigerBeetle cluster it connects to, so always pin exact
+    \\versions: `cargo add tigerbeetle@=X.Y.Z`, where `X.Y.Z` is the version of your cluster.
     ,
 
     .prerequisites =
-    \\* Rust 1.68+
+    \\* Rust 1.63+
     ,
 
     .project_file_name = "Cargo.toml",
@@ -26,16 +29,21 @@ pub const RustDocs = Docs{
     \\[package]
     \\name = "tigerbeetle-test"
     \\version = "0.1.0"
-    \\edition = "2024"
+    \\edition = "2021"
     \\
-    \\[dependencies]
-    \\tigerbeetle.path = "../.."
-    \\futures = "=0.3.31"
+    \\[profile.release]
+    \\# It is *strongly* recommended that Rust applications using TigerBeetle
+    \\# enable overflow checks, because the nature of accounting makes overflow
+    \\# errors catastrophic.
+    \\#
+    \\# Note that the following line enables the checks only for this crate, so
+    \\# overflow checks must always be enabled in the Cargo.toml of the end application.
+    \\overflow-checks = true
     ,
 
     .test_file_name = "main",
 
-    .install_commands = "",
+    .install_commands = "cargo add tigerbeetle",
 
     .run_commands = "cargo run",
 

@@ -13,6 +13,7 @@ categories = ["finance", "database"]
 rust-version = "1.63"
 # Need to do this to pick up the assets directory and exclude zig files
 include = [
+  "LICENSE",
   "build.rs",
   "src/*.rs",
   "assets/tb_client.h",
@@ -28,7 +29,3 @@ include = [
 # this crate. In other words, overflow checks must be enabled in the
 # Cargo.toml of the end application.
 overflow-checks = true
-
-[dev-dependencies]
-futures = { version = "=0.3.31", default-features = false, features = ["executor"] }
-

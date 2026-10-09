@@ -2,8 +2,14 @@ const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
 
-const Shell = @import("stdx").Shell;
+const stdx = @import("stdx");
+const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
+
+const MiB = stdx.MiB;
+
+// crates.io rejects uploads larger than this.
+const crates_io_upload_size_max = 10 * MiB;
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
@@ -40,6 +46,19 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("cargo run", .{});
     }
+
+    // verify that packaging works and result fits in crates.io limit,
+    // also apply `--allow-dirty` like we do in release.zig
+    try shell.exec("cargo package --allow-dirty", .{});
+    const crate_path = "target/package/tigerbeetle-0.0.0.crate";
+    const crate_size = (try shell.cwd.statFile(shell.io, crate_path, .{})).size;
+    if (crate_size > crates_io_upload_size_max) {
+        log.err("crate too large for crates.io: size={} max={}", .{
+            crate_size,
+            crates_io_upload_size_max,
+        });
+        return error.CrateTooLarge;
+    }
 }
 
 fn file_contains(
@@ -68,9 +87,66 @@ fn file_contains(
 pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
 }) !void {
-    _ = shell;
     _ = gpa;
-    _ = options;
+
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
+
+    const published_url = try shell.fmt(
+        "https://static.crates.io/crates/tigerbeetle/tigerbeetle-{s}.crate",
+        .{options.release},
+    );
+    const published_crate = try shell.fmt("{s}/published.crate", .{tmp_dir});
+    const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
+    try shell.cwd.createDirPath(shell.io, published_dir);
+
+    // Multiple attempts in case of network errors.
+    const attempts_max = 5;
+    const crate_published = for (0..attempts_max) |attempt| {
+        break shell.http_get(
+            published_url,
+            .{ .response_body_size_max = crates_io_upload_size_max },
+        ) catch |err| {
+            log.warn("crate package download failed. Attempt={}, {}", .{ attempt, err });
+            continue;
+        };
+    } else return error.DownloadAttemptsExceeded;
+
+    try shell.cwd.writeFile(shell.io, .{
+        .sub_path = published_crate,
+        .data = crate_published,
+    });
+
+    const local_path_relative = try shell.fmt(
+        "zig-out/dist/rust/tigerbeetle-{s}.crate",
+        .{options.release},
+    );
+    const local_crate = try shell.cwd.realPathFileAlloc(
+        shell.io,
+        local_path_relative,
+        shell.arena.allocator(),
+    );
+    const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
+    try shell.cwd.createDirPath(shell.io, local_dir);
+
+    // Archive metadata might differ, so we extract and diff the files themselves.
+    try shell.exec(
+        "tar --extract --gzip --file {crate} --directory {dir}",
+        .{ .crate = published_crate, .dir = published_dir },
+    );
+    try shell.exec(
+        "tar --extract --gzip --file {crate} --directory {dir}",
+        .{ .crate = local_crate, .dir = local_dir },
+    );
+
+    // - `.cargo_vcs_info.json` records the git state of the checkout used for packaging
+    // - `Cargo.lock` depends on the local registry state while packaging and is ignored by users
+    try shell.exec(
+        \\diff --recursive
+        \\  --exclude=.cargo_vcs_info.json
+        \\  --exclude=Cargo.lock
+        \\  {published} {local}
+    , .{ .published = published_dir, .local = local_dir });
 }
 
 pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
@@ -87,7 +163,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     try shell.exec("cargo init --name test_tigerbeetle", .{});
 
     for (0..9) |_| {
-        if (shell.exec("cargo add tigerbeetle@{release}", .{
+        if (shell.exec("cargo add tigerbeetle@={release}", .{
             .release = options.release,
         })) {
             break;
@@ -98,15 +174,13 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
         }
     } else {
-        shell.exec("cargo add tigerbeetle@{release}", .{
+        shell.exec("cargo add tigerbeetle@={release}", .{
             .release = options.release,
         }) catch |err| {
             log.err("package is not available on crates.io", .{});
             return err;
         };
     }
-
-    try shell.exec("cargo add futures@0.3", .{});
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
