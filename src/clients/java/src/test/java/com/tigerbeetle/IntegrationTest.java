@@ -1265,13 +1265,7 @@ public class IntegrationTest {
                     failedCount += 1;
                 } else if (succeeded) {
                     succeededCount += 1;
-                    var batch = task.result;
-                    for (int i = 0; i < BATCH_SIZE; i++) {
-                        assertTrue(batch.next());
-                        assertTrue(batch.getTimestamp() > 0);
-                        assertTrue(batch.getStatus() == CreateTransferStatus.Created);
-                    }
-                    assertFalse(batch.next());
+                    assertTrue(createSuccess(task.result));
                 }
             }
 
@@ -1472,13 +1466,7 @@ public class IntegrationTest {
             assertTrue(task.getState() == Thread.State.TERMINATED);
             if (task.result != null) {
                 succeededCount += 1;
-                var batch = task.result;
-                for (int i = 0; i < BATCH_SIZE; i++) {
-                    assertTrue(batch.next());
-                    assertTrue(batch.getTimestamp() > 0);
-                    assertTrue(batch.getStatus() == CreateTransferStatus.Created);
-                }
-                assertFalse(batch.next());
+                assertTrue(createSuccess(task.result));
             } else {
                 interruptedCount += 1;
                 assertTrue(task.exception != null);
