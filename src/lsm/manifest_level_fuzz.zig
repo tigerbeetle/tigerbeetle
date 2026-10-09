@@ -230,6 +230,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             table_count_max_tree,
         );
         pub const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
+        gpa: std.mem.Allocator,
         pool: NodePool,
         level: ManifestLevel,
         buffer: TableBuffer,
@@ -239,6 +240,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
 
         pub fn init(gpa: std.mem.Allocator, prng: *stdx.PRNG) !Environment {
             var env: Environment = undefined;
+            env.gpa = gpa;
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +
                 ManifestLevel.Tables.node_count_max;
@@ -248,11 +250,11 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             try env.level.init(gpa, &env.pool);
             errdefer env.level.deinit(gpa, &env.pool);
 
-            env.buffer = TableBuffer.init(gpa);
-            errdefer env.buffer.deinit();
+            env.buffer = .empty;
+            errdefer env.buffer.deinit(gpa);
 
-            env.tables = TableBuffer.init(gpa);
-            errdefer env.tables.deinit();
+            env.tables = .empty;
+            errdefer env.tables.deinit(gpa);
 
             env.prng = prng;
             env.snapshot = 1; // the first snapshot is reserved.
@@ -260,8 +262,8 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         }
 
         pub fn deinit(env: *Environment, gpa: std.mem.Allocator) !void {
-            env.tables.deinit();
-            env.buffer.deinit();
+            env.tables.deinit(gpa);
+            env.buffer.deinit(gpa);
             env.level.deinit(gpa, &env.pool);
             env.pool.deinit(gpa);
         }
@@ -290,7 +292,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
 
                 while (insert_amount > 0) : (insert_amount -= 1) {
                     const table = env.generate_non_overlapping_table(key);
-                    try env.buffer.append(table);
+                    try env.buffer.append(env.gpa, table);
                     key = table.key_max;
                 }
             }
@@ -321,7 +323,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
                     assert(env.tables.items[index].key_min > table.key_max);
                 }
 
-                try env.tables.insert(index, table.*);
+                try env.tables.insert(env.gpa, index, table.*);
             }
         }
 
@@ -496,11 +498,11 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         /// TODO: This clears removed tables in O(n).
         fn purge_removed_tables(env: *Environment) !void {
             assert(env.buffer.items.len == 0);
-            try env.buffer.ensureTotalCapacity(env.tables.items.len);
+            try env.buffer.ensureTotalCapacity(env.gpa, env.tables.items.len);
 
             for (env.tables.items) |*table| {
                 if (table.address == 0) continue;
-                try env.buffer.append(table.*);
+                try env.buffer.append(env.gpa, table.*);
             }
 
             std.mem.swap(TableBuffer, &env.buffer, &env.tables);

@@ -30,7 +30,7 @@ There must also be a designated control account.
 As you can see below, this account will never actually take control of the target account's funds,
 but we will set up simultaneous transfers in and out of the control account to apply the limit.
 
-This account must have the opposite limit applied as the target account:
+This account must have the opposite limit to the one applied to the target account:
 
 - [`flags.credits_must_not_exceed_debits`](../../reference/account.md#flagscredits_must_not_exceed_debits)
   if the target account has a [credit balance](../data-modeling.md#credit-balances)

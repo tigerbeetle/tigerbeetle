@@ -286,6 +286,7 @@ pub const AccountingAuditor = struct {
         }
     };
 
+    gpa: std.mem.Allocator,
     prng: *stdx.PRNG,
     options: Options,
 
@@ -371,9 +372,9 @@ pub const AccountingAuditor = struct {
             @intCast(options.transfers_pending_max),
         );
 
-        var pending_expiries = PendingExpiryQueue.init(gpa, {});
-        errdefer pending_expiries.deinit();
-        try pending_expiries.ensureTotalCapacity(options.transfers_pending_max);
+        var pending_expiries: PendingExpiryQueue = .empty;
+        errdefer pending_expiries.deinit(gpa);
+        try pending_expiries.ensureTotalCapacity(gpa, options.transfers_pending_max);
 
         var in_flight = InFlightQueue{};
         errdefer in_flight.deinit(gpa);
@@ -388,6 +389,7 @@ pub const AccountingAuditor = struct {
         @memset(creates_delivered, 0);
 
         return .{
+            .gpa = gpa,
             .prng = prng,
             .options = options,
             .accounts = accounts,
@@ -406,7 +408,7 @@ pub const AccountingAuditor = struct {
         gpa.free(self.creates_delivered);
         gpa.free(self.creates_sent);
         self.in_flight.deinit(gpa);
-        self.pending_expiries.deinit();
+        self.pending_expiries.deinit(gpa);
         self.pending_transfers.deinit(gpa);
         gpa.free(self.query_intersections);
         gpa.free(self.accounts_state);
@@ -462,7 +464,7 @@ pub const AccountingAuditor = struct {
         var expired_count: u32 = 0;
         while (self.pending_expiries.peek()) |expiration| {
             if (timestamp < expiration.expires_at) break;
-            defer _ = self.pending_expiries.remove();
+            defer _ = self.pending_expiries.pop();
 
             // Ignore the transfer if it was already posted/voided.
             const pending_transfer =
@@ -740,7 +742,7 @@ pub const AccountingAuditor = struct {
                         .credit_account_index = cr_index,
                         .query_intersection_index = transfer.code - 1,
                     });
-                    self.pending_expiries.add(.{
+                    self.pending_expiries.push(self.gpa, .{
                         .transfer_id = transfer.id,
                         .transfer_timestamp = timestamp,
                         .expires_at = timestamp + transfer.timeout_ns(),

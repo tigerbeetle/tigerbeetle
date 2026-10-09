@@ -86,8 +86,8 @@ pub const TimeOS = struct {
         //
         // https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
         // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
-        const qpc = os.windows.QueryPerformanceCounter();
-        const qpf = os.windows.QueryPerformanceFrequency();
+        const qpc = stdx.windows.QueryPerformanceCounter();
+        const qpf = stdx.windows.QueryPerformanceFrequency();
 
         // 10Mhz (1 qpc tick every 100ns) is a common QPF on modern systems.
         // We can optimize towards this by converting to ns via a single multiply.
@@ -134,9 +134,9 @@ pub const TimeOS = struct {
         //
         // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC, see
         // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
-        const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.BOOTTIME) catch {
-            @panic("CLOCK_BOOTTIME required");
-        };
+        var ts: posix.timespec = undefined;
+        const rc = std.os.linux.clock_gettime(posix.CLOCK.BOOTTIME, &ts);
+        if (std.os.linux.errno(rc) != .SUCCESS) @panic("CLOCK_BOOTTIME required");
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
@@ -169,7 +169,9 @@ pub const TimeOS = struct {
 
     fn realtime_unix() i64 {
         assert(is_darwin or is_linux);
-        const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.REALTIME) catch unreachable;
+        var ts: posix.timespec = undefined;
+        const rc = system.clock_gettime(posix.CLOCK.REALTIME, &ts);
+        if (posix.errno(rc) != .SUCCESS) unreachable;
         return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
     }
 };
@@ -179,8 +181,8 @@ test "TimeOS monotonic smoke" {
     const time = time_os.interface();
     const instant_1 = time.monotonic();
     const instant_2 = time.monotonic();
-    assert(instant_1.elapsed(instant_1).ns == 0);
-    assert(instant_1.elapsed(instant_2).ns >= 0);
+    assert(instant_1.until(instant_1).ns == 0);
+    assert(instant_1.until(instant_2).ns >= 0);
 }
 
 test "TimeOS realtime smoke" {
@@ -302,7 +304,7 @@ pub const Timer = struct {
     pub fn read(self: *Timer) stdx.Duration {
         const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
-        return self.started.elapsed(current);
+        return self.started.until(current);
     }
 
     /// Resets the timer.

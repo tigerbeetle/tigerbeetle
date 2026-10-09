@@ -166,7 +166,7 @@ test "signal" {
 
         fn run_test() !void {
             var self: Context = .{
-                .io = try IO.init(32, 0),
+                .io = try IO.init(std.testing.io, 32, 0),
                 .main_thread_id = std.Thread.getCurrentId(),
                 .signal = undefined,
             };
@@ -195,14 +195,14 @@ test "signal" {
             assert(self.count == events_count);
 
             // Make sure at least some time has passed.
-            const elapsed = timer.elapsed(time.monotonic());
+            const elapsed = timer.until(time.monotonic());
             assert(elapsed.ns >= delay);
         }
 
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
             while (self.signal.status() != .shutdown_completed) {
-                std.time.sleep(delay + 1);
+                std.Io.sleep(std.testing.io, .fromNanoseconds(delay + 1), .awake) catch {};
 
                 // Triggering the event:
                 self.signal.notify();

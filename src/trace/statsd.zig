@@ -24,6 +24,7 @@ const packet_size_max = 1400;
 /// message. Since this is calculated at comptime, that means there's a bug in the calculation
 /// logic.
 const statsd_line_size_max = line_size_max: {
+    @setEvalBranchQuota(2_000_000);
     // For each type of event, build a payload containing the maximum possible values for that
     // event. This is essentially maxInt for unsigned integer payloads, minInt for signed integer
     // payloads, and the longest enum tag name for enum payloads.
@@ -60,28 +61,28 @@ const statsd_line_size_max = line_size_max: {
     }
 
     var buffer: [packet_size_max]u8 = undefined;
-    var buffer_stream = std.io.fixedBufferStream(&buffer);
-    const buffer_writer = buffer_stream.writer();
+    var buffer_stream = std.Io.Writer.fixed(&buffer);
+    const buffer_writer = &buffer_stream;
 
     var line_size_max: u32 = 0;
     for (events_metric) |event| {
-        buffer_stream.reset();
+        buffer_stream.end = 0;
         format_metric(
             buffer_writer,
             .{ .metric = .{ .aggregate = event } },
             .{ .cluster = std.math.maxInt(u128), .replica = constants.members_max - 1 },
         ) catch unreachable;
-        line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
+        line_size_max = @max(line_size_max, buffer_stream.end);
     }
     for (events_timing) |event| {
         for (std.enums.values(TimingStat)) |stat| {
-            buffer_stream.reset();
+            buffer_stream.end = 0;
             format_metric(
                 buffer_writer,
                 .{ .timing = .{ .aggregate = event, .stat = stat } },
                 .{ .cluster = std.math.maxInt(u128), .replica = constants.members_max - 1 },
             ) catch unreachable;
-            line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
+            line_size_max = @max(line_size_max, buffer_stream.end);
         }
     }
     break :line_size_max line_size_max;
@@ -125,7 +126,7 @@ pub const StatsD = struct {
     send_completions: [packet_count_max]IO.Completion = undefined,
     send_in_flight_count: u32 = 0,
 
-    log_buffer: ?std.ArrayListUnmanaged(u8) = null,
+    log_buffer: ?std.ArrayList(u8) = null,
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
@@ -140,11 +141,17 @@ pub const StatsD = struct {
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
-        const address_std = address.to_std();
+        var address_posix: std.Io.Threaded.PosixAddress = undefined;
+        const address_size = std.Io.Threaded.addressToPosix(&address.to_std(), &address_posix);
         // 'Connect' the UDP socket, so we can just send() to it normally.
-        try std.posix.connect(socket, &address_std.any, address_std.getOsSockLen());
+        try stdx.posix.connect(socket, &address_posix.any, address_size);
 
-        log.info("{}: sending statsd metrics to {}", .{ process_id, address });
+        log.info("{f}: sending statsd metrics to {s}{{ .ip = {f}, .port = {} }}", .{
+            process_id,
+            @typeName(stdx.SocketAddress),
+            address.ip,
+            address.port,
+        });
 
         return .{
             .process_id = process_id,
@@ -167,7 +174,7 @@ pub const StatsD = struct {
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
-        const log_buffer = try std.ArrayListUnmanaged(u8).initCapacity(
+        const log_buffer = try std.ArrayList(u8).initCapacity(
             allocator,
             packet_count_max * packet_size_max,
         );
@@ -202,7 +209,7 @@ pub const StatsD = struct {
     ) error{ Busy, UnknownProcess }!u32 {
         const cluster, const replica = switch (self.process_id) {
             .unknown => {
-                log.err("{}: process id unknown; skipping emit", .{self.process_id});
+                log.err("{f}: process id unknown; skipping emit", .{self.process_id});
                 return error.UnknownProcess;
             },
             .replica => |replica| .{ replica.cluster, replica.replica },
@@ -217,7 +224,7 @@ pub const StatsD = struct {
         //
         // This is also a load-bearing check: see send_callback().
         if (self.send_in_flight_count != 0) {
-            log.err("{}: {} / {} packets still in flight; skipping emit", .{
+            log.err("{f}: {} / {} packets still in flight; skipping emit", .{
                 self.process_id,
                 self.send_in_flight_count,
                 packet_count_max,
@@ -232,7 +239,7 @@ pub const StatsD = struct {
 
         if (self.implementation == .udp and self.implementation.udp.send_callback_error_count > 0) {
             log.warn(
-                "{}: failed to send {} packets",
+                "{f}: failed to send {} packets",
                 .{ self.process_id, self.implementation.udp.send_callback_error_count },
             );
             self.implementation.udp.send_callback_error_count = 0;
@@ -240,8 +247,8 @@ pub const StatsD = struct {
 
         var send_ready: u32 = 0;
         var send_sizes = stdx.BoundedArrayType(u32, packet_count_max){};
-        var send_stream = std.io.fixedBufferStream(self.send_buffer);
-        const send_writer = send_stream.writer();
+        var send_stream = std.Io.Writer.fixed(self.send_buffer);
+        const send_writer = &send_stream;
         inline for (.{ events_metric, events_timing }) |events| {
             for (events) |event_new_maybe| {
                 const event_new = event_new_maybe orelse continue;
@@ -258,25 +265,25 @@ pub const StatsD = struct {
                 };
 
                 for (stats) |stat| {
-                    const send_position_before = send_stream.getPos() catch unreachable;
+                    const send_position_before = send_stream.end;
                     format_metric(send_writer, stat, .{
                         .cluster = cluster,
                         .replica = replica,
                     }) catch |err| switch (err) {
                         // This shouldn't ever happen, but don't allow metrics to kill the system.
-                        error.NoSpaceLeft => {
-                            log.err("{}: insufficient buffer space", .{self.process_id});
+                        error.WriteFailed => {
+                            log.err("{f}: insufficient buffer space", .{self.process_id});
                             break;
                         },
                     };
 
-                    const send_position_after = send_stream.getPos() catch unreachable;
+                    const send_position_after = send_stream.end;
                     const send_size: u32 = @intCast(send_position_after - send_position_before);
                     assert(send_size > 0);
                     if (send_ready + send_size > packet_size_max) {
                         assert(send_ready > 0);
                         if (send_sizes.full()) {
-                            log.err("{}: insufficient packet count", .{self.process_id});
+                            log.err("{f}: insufficient packet count", .{self.process_id});
                             break;
                         } else {
                             send_sizes.push(send_ready);
@@ -290,7 +297,7 @@ pub const StatsD = struct {
         }
         if (send_ready > 0) {
             if (send_sizes.full()) {
-                log.err("{}: insufficient packet count", .{self.process_id});
+                log.err("{f}: insufficient packet count", .{self.process_id});
             } else {
                 send_sizes.push(send_ready);
             }
@@ -300,7 +307,7 @@ pub const StatsD = struct {
         for (send_sizes.const_slice()) |send_size| {
             if (self.send_in_flight_count >= self.send_completions.len) {
                 // This shouldn't ever happen, but don't allow metrics to kill the system.
-                log.err("{}: insufficient packets to emit any metrics", .{self.process_id});
+                log.err("{f}: insufficient packets to emit any metrics", .{self.process_id});
                 return 0;
             }
             const completion = &self.send_completions[self.send_in_flight_count];
@@ -356,7 +363,7 @@ fn format_metric(
     writer: anytype,
     stat: Stat,
     options: struct { cluster: u128, replica: u8 },
-) error{NoSpaceLeft}!void {
+) std.Io.Writer.Error!void {
     const stat_name = switch (stat) {
         inline else => |stat_data| @tagName(stat_data.aggregate.event),
     };
@@ -441,7 +448,7 @@ fn struct_size_max(StructOrVoid: type) StructOrVoid {
         switch (type_info) {
             .int => @field(output, field.name) = std.math.maxInt(field.type),
             .@"enum" => @field(output, field.name) =
-                std.enums.nameCast(field.type, enum_size_max(field.type)),
+                @field(field.type, enum_size_max(field.type)),
             else => @compileError("unsupported type"),
         }
     }

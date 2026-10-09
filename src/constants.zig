@@ -140,7 +140,7 @@ pub const address = config.process.address;
 
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
-    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    _ = std.Io.net.Ip4Address.parse(address, 0) catch unreachable;
     _ = @as(u16, port);
 }
 

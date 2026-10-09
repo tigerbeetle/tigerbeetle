@@ -1,7 +1,9 @@
 const std = @import("std");
 const stdx = @import("stdx");
-const os = std.os;
-const posix = std.posix;
+const os = struct {
+    const windows = stdx.windows;
+};
+const posix = stdx.posix;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
@@ -21,6 +23,10 @@ pub const IO = struct {
     pub const dsync_all = true;
 
     iocp: os.windows.HANDLE,
+
+    /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
+    io_std: std.Io,
+
     time: TimeOS = .{},
     io_pending: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
@@ -29,7 +35,7 @@ pub const IO = struct {
 
     stats: common.Stats = .{},
 
-    pub fn init(entries: u12, flags: u32) !IO {
+    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
 
@@ -42,7 +48,7 @@ pub const IO = struct {
             0,
             0,
         );
-        return IO{ .iocp = iocp };
+        return IO{ .iocp = iocp, .io_std = io_std };
     }
 
     pub fn deinit(self: *IO) void {
@@ -71,7 +77,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
-            timer.elapsed(self.time.monotonic()).ns;
+            timer.until(self.time.monotonic()).ns;
 
         const Callback = struct {
             fn on_timeout(
@@ -171,7 +177,7 @@ pub const IO = struct {
                 .completion = completion,
             });
         }
-        const elapsed = timer.elapsed(self.time.monotonic());
+        const elapsed = timer.until(self.time.monotonic());
         self.stats.window.time_callbacks.ns += elapsed.ns;
     }
 
@@ -234,11 +240,12 @@ pub const IO = struct {
                 overlapped: Overlapped,
                 listen_socket: socket_t,
                 client_socket: ?socket_t,
-                addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
+                addr_buffer: [(@sizeOf(common.PosixAddress) + 16) * 2]u8 align(4),
             },
             connect: struct {
                 socket: socket_t,
-                address: std.net.Address,
+                address: common.PosixAddress,
+                address_size: posix.socklen_t,
                 overlapped: Overlapped,
                 pending: bool,
             },
@@ -282,7 +289,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime op_tag: std.meta.Tag(Completion.Operation),
-        op_data: std.meta.TagPayload(Completion.Operation, op_tag),
+        op_data: @FieldType(Completion.Operation, @tagName(op_tag)),
         comptime OperationImpl: type,
     ) void {
         const Callback = struct {
@@ -387,8 +394,8 @@ pub const IO = struct {
                             op.client_socket.?,
                             &op.addr_buffer,
                             0,
-                            @sizeOf(std.net.Address) + 16,
-                            @sizeOf(std.net.Address) + 16,
+                            @sizeOf(common.PosixAddress) + 16,
+                            @sizeOf(common.PosixAddress) + 16,
                             &sync_bytes_read,
                             &op.overlapped.raw,
                         );
@@ -406,12 +413,11 @@ pub const IO = struct {
                     // Return the socket if we succeed in accepting.
                     if (rc != os.windows.FALSE) {
                         // Enables getsockopt, setsockopt, getsockname, getpeername.
-                        _ = os.windows.ws2_32.setsockopt(
+                        try posix.setsockopt(
                             op.client_socket.?,
                             os.windows.ws2_32.SOL.SOCKET,
                             os.windows.ws2_32.SO.UPDATE_ACCEPT_CONTEXT,
-                            null,
-                            0,
+                            std.mem.asBytes(&op.listen_socket),
                         );
 
                         return op.client_socket.?;
@@ -467,6 +473,8 @@ pub const IO = struct {
         socket: socket_t,
         address: stdx.SocketAddress,
     ) void {
+        var address_posix: common.PosixAddress = undefined;
+        const address_size = common.address_to_posix(address, &address_posix);
         self.submit(
             context,
             callback,
@@ -474,7 +482,8 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address.to_std(),
+                .address = address_posix,
+                .address_size = address_size,
                 .overlapped = undefined,
                 .pending = false,
             },
@@ -497,11 +506,14 @@ pub const IO = struct {
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY).
                         const inaddr_any: [4]u8 = @splat(0);
-                        const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
+                        const bind_addr: common.PosixAddress = .{ .in = .{
+                            .port = 0,
+                            .addr = @bitCast(inaddr_any),
+                        } };
                         posix.bind(
                             op.socket,
                             &bind_addr.any,
-                            bind_addr.getOsSockLen(),
+                            @sizeOf(@FieldType(common.PosixAddress, "in")),
                         ) catch |err| switch (err) {
                             error.AccessDenied => unreachable,
                             error.SymLinkLoop => unreachable,
@@ -521,7 +533,7 @@ pub const IO = struct {
                             SendBufLen: os.windows.DWORD,
                             BytesSent: *os.windows.DWORD,
                             Overlapped: *os.windows.OVERLAPPED,
-                        ) callconv(os.windows.WINAPI) os.windows.BOOL;
+                        ) callconv(.winapi) os.windows.BOOL;
 
                         // Find the ConnectEx function by dynamically looking it up on the socket.
                         // TODO: use `os.windows.loadWinsockExtensionFunction` once the function
@@ -559,7 +571,7 @@ pub const IO = struct {
                         break :blk (connect_ex)(
                             op.socket,
                             &op.address.any,
-                            op.address.getOsSockLen(),
+                            op.address_size,
                             null,
                             0,
                             &transferred,
@@ -1232,9 +1244,9 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !fd_t {
-        const dir = try std.fs.cwd().openDir(dir_path, .{});
-        return dir.fd;
+    pub fn open_dir(io: *IO, dir_path: []const u8) !fd_t {
+        const dir = try std.Io.Dir.cwd().openDir(io.io_std, dir_path, .{});
+        return dir.handle;
     }
 
     pub const fd_t = posix.fd_t;
@@ -1368,7 +1380,7 @@ pub const IO = struct {
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         if (purpose == .format) {
-            log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+            log.info("allocating {Bi}...", .{size});
             fs_allocate(handle, size) catch {
                 log.warn("file system failed to preallocate the file memory", .{});
                 log.info("allocating by writing to the last sector of the file instead...", .{});
@@ -1466,38 +1478,42 @@ pub const IO = struct {
         }
     }
 
-    pub const PReadError = posix.PReadError;
+    pub const PReadError = std.Io.File.ReadPositionalError;
 
-    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
-        return common.aof_blocking_write_all(fd, buffer);
+    pub fn aof_blocking_write_all(
+        io: *IO,
+        fd: fd_t,
+        buffer: []const u8,
+    ) std.Io.File.Writer.Error!void {
+        return common.aof_blocking_write_all(io.io_std, fd, buffer);
     }
 
-    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(fd, buffer, offset);
+    pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
     }
 
-    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(fd);
+    pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(io.io_std, fd);
     }
 
-    pub fn aof_blocking_stat(_: *IO, path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
-        return common.aof_blocking_stat(path);
+    pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
+        return common.aof_blocking_stat(io.io_std, path);
     }
 
-    pub fn aof_blocking_fstat(_: *IO, fd: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
-        return common.aof_blocking_fstat(fd);
+    pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
+        return common.aof_blocking_fstat(io.io_std, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
-        const dir_fd = try IO.open_dir(dir_path);
+        const dir_fd = try io.open_dir(dir_path);
         defer io.aof_blocking_close(dir_fd);
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
     }
 };
 
@@ -1575,10 +1591,10 @@ pub fn windows_open_file(
         .MaximumLength = path_len_bytes,
         .Buffer = @constCast(sub_path_w.ptr),
     };
-    var attr = os.windows.OBJECT_ATTRIBUTES{
-        .Length = @sizeOf(os.windows.OBJECT_ATTRIBUTES),
-        .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(sub_path_w)) null else options.dir,
-        .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
+    var attr = os.windows.OBJECT.ATTRIBUTES{
+        .Length = @sizeOf(os.windows.OBJECT.ATTRIBUTES),
+        .RootDirectory = if (std.fs.path.isAbsoluteWindowsWtf16(sub_path_w)) null else options.dir,
+        .Attributes = .{ .CASE_INSENSITIVE = false }, // Note we do not use OBJ_CASE_INSENSITIVE.
         .ObjectName = &nt_name,
         .SecurityDescriptor = if (options.sa) |ptr| ptr.lpSecurityDescriptor else null,
         .SecurityQualityOfService = null,
@@ -1597,14 +1613,14 @@ pub fn windows_open_file(
     while (true) {
         const rc = os.windows.ntdll.NtCreateFile(
             &result,
-            options.access_mask,
+            @bitCast(options.access_mask),
             &attr,
             &io,
             null,
-            os.windows.FILE_ATTRIBUTE_NORMAL,
-            options.share_access,
-            options.creation,
-            flags | file_flags,
+            .{ .NORMAL = true },
+            @bitCast(options.share_access),
+            @enumFromInt(options.creation),
+            @bitCast(flags | file_flags),
             null,
             0,
         );
@@ -1634,7 +1650,7 @@ pub fn windows_open_file(
                 // call has failed. There is not really a sane way to handle
                 // this other than retrying the creation after the OS finishes
                 // the deletion.
-                std.time.sleep(std.time.ns_per_ms);
+                os.windows.kernel32.Sleep(1);
                 continue;
             },
             else => return os.windows.unexpectedStatus(rc),

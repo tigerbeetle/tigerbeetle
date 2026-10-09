@@ -129,8 +129,11 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             packet: Packet,
             path: Path,
         };
-        const Recorded = std.ArrayListUnmanaged(RecordedPacket);
+        const Recorded = std.ArrayList(RecordedPacket);
 
+        const packet_fmt = if (@typeInfo(Packet) == .pointer) "{f}" else "{}";
+
+        allocator: std.mem.Allocator,
         options: PacketSimulatorOptions,
         vtable: VTable,
         prng: stdx.PRNG,
@@ -163,15 +166,15 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             errdefer allocator.free(links);
 
             for (links, 0..) |*link, i| {
-                errdefer for (links[0..i]) |*l| l.queue.deinit();
+                errdefer for (links[0..i]) |*l| l.queue.deinit(allocator);
 
                 link.* = .{
                     .queue = std.PriorityQueue(LinkPacket, void, LinkPacket.less_than)
-                        .init(allocator, {}),
+                        .initContext({}),
                 };
-                try link.queue.ensureTotalCapacity(options.path_maximum_capacity);
+                try link.queue.ensureTotalCapacity(allocator, options.path_maximum_capacity);
             }
-            errdefer for (links) |*link| link.queue.deinit();
+            errdefer for (links) |*link| link.queue.deinit(allocator);
 
             var recorded = try Recorded.initCapacity(allocator, options.recorded_count_max);
             errdefer recorded.deinit(allocator);
@@ -185,6 +188,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             for (auto_partition_nodes, 0..) |*node, i| node.* = @intCast(i);
 
             return PacketSimulator{
+                .allocator = allocator,
                 .options = options,
                 .vtable = vtable,
                 .prng = stdx.PRNG.from_seed(options.seed),
@@ -205,7 +209,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     self.packet_deinit(link_packet.packet);
                 }
 
-                link.queue.deinit();
+                link.queue.deinit(allocator);
             }
 
             while (self.recorded.pop()) |recorded_packet| {
@@ -221,7 +225,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         /// Drop all pending packets.
         pub fn link_clear(self: *PacketSimulator, path: Path) void {
             const link = &self.links[self.path_index(path)];
-            while (link.queue.removeOrNull()) |link_packet| {
+            while (link.queue.pop()) |link_packet| {
                 self.packet_deinit(link_packet.packet);
             }
             assert(link.queue.count() == 0);
@@ -282,7 +286,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn clog_for(self: *PacketSimulator, path: Path, duration: Duration) void {
             self.links[self.path_index(path)].clogged_till =
                 self.tick_instant().add(duration);
-            log.debug("Path path.source={} path.target={} clogged for {}", .{
+            log.debug("Path path.source={} path.target={} clogged for {f}", .{
                 path.source,
                 path.target,
                 duration,
@@ -370,7 +374,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     const queue = &self.links[self.path_index(path)].queue;
                     if (queue.peek()) |link_packet| {
                         if (link_packet.ready_at.ns <= self.tick_instant().ns) {
-                            _ = queue.remove();
+                            _ = queue.pop().?;
                             self.submit_packet_finish(path, link_packet);
                             self.packet_deinit(link_packet.packet);
                             advanced = true;
@@ -427,10 +431,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const queue = &self.links[self.path_index(path)].queue;
             const queue_count = queue.count();
             if (queue_count + 1 > self.options.path_maximum_capacity) {
-                const link_packet = queue.removeIndex(self.prng.index(queue.items));
+                const link_packet = queue.popIndex(self.prng.index(queue.items));
                 defer self.packet_deinit(link_packet.packet);
 
-                log.warn("submit_packet: {} reached capacity, dropped packet: {}", .{
+                log.warn("submit_packet: {} reached capacity, dropped packet: " ++ packet_fmt, .{
                     path,
                     if (@typeInfo(Packet) == .pointer)
                         link_packet.packet.header
@@ -439,7 +443,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 });
             }
 
-            queue.add(.{
+            queue.push(self.allocator, .{
                 .ready_at = self.tick_instant().add(self.packet_delay(packet, path)),
                 .packet = packet,
             }) catch unreachable;
@@ -459,7 +463,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const command = self.packet_command(link_packet.packet);
             if (self.links[self.path_index(path)].should_drop(link_packet.packet, command)) {
                 log.warn(
-                    "dropped packet (different partitions): from={} to={}: {}",
+                    "dropped packet (different partitions): from={} to={}: " ++ packet_fmt,
                     .{
                         path.source,
                         path.target,
@@ -473,7 +477,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
 
             if (self.should_drop()) {
-                log.warn("dropped packet from={} to={}: {}", .{
+                log.warn("dropped packet from={} to={}: " ++ packet_fmt, .{
                     path.source,
                     path.target,
                     if (@typeInfo(Packet) == .pointer)

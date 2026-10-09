@@ -1,15 +1,16 @@
 const std = @import("std");
 
-pub fn main() !void {
-    var args = std.process.args();
+pub fn main(init: std.process.Init) !void {
+    var args = init.minimal.args.iterate();
     _ = args.skip();
 
     var file_buffer: [150 * 1024]u8 = undefined;
-    var stdout = std.io.getStdOut().writer();
+    var stdout_writer = std.Io.File.stdout().writerStreaming(init.io, &.{});
+    const stdout = &stdout_writer.interface;
 
     while (args.next()) |page_path| {
         const html_path = args.next().?;
-        const html = try read_file(std.fs.cwd(), html_path, &file_buffer);
+        const html = try read_file(init.io, std.Io.Dir.cwd(), html_path, &file_buffer);
 
         // Clear links following h1 tags.
         var clear_h1_link = false;
@@ -62,7 +63,7 @@ fn rewrite_link(link: []const u8, page_path: []const u8, writer: anytype) !void 
     else
         try std.fs.path.resolvePosix(allocator, &.{ page_path, base });
     if (std.mem.eql(u8, path, ".")) path = "";
-    path = std.mem.trimRight(u8, path, "/");
+    path = std.mem.trimEnd(u8, path, "/");
 
     const slug = try path2slug(allocator, path);
     if (fragment) |frag| {
@@ -162,8 +163,8 @@ const AttributeIterator = struct {
     }
 };
 
-fn read_file(dir: std.fs.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
-    const result = try dir.readFile(path, page_buffer);
+fn read_file(io: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
+    const result = try dir.readFile(io, path, page_buffer);
     if (result.len == page_buffer.len) return error.FileToLarge;
     return result;
 }

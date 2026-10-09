@@ -42,6 +42,7 @@ pub const Runner = struct {
         );
     };
 
+    time: Time,
     io: IO,
     idle_completion: IO.Completion = undefined,
     idle_interval: stdx.Duration,
@@ -111,6 +112,7 @@ pub const Runner = struct {
     pub fn init(
         self: *Runner,
         allocator: std.mem.Allocator,
+        io_std: std.Io,
         time: Time,
         options: struct {
             /// TigerBeetle cluster ID.
@@ -214,6 +216,7 @@ pub const Runner = struct {
             .progress_tracker_queue = progress_tracker_queue_owned,
             .locker_queue = locker_queue_owned,
             .connected = .{},
+            .time = time,
             .io = undefined,
             .producer = .idle,
             .consumer = .idle,
@@ -244,7 +247,7 @@ pub const Runner = struct {
             .flush_timeout_ticks = @divExact(30 * std.time.ms_per_s, constants.tick_ms),
         };
 
-        self.io = try IO.init(32, 0);
+        self.io = try IO.init(io_std, 32, 0);
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(allocator, .client);
@@ -255,7 +258,7 @@ pub const Runner = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.crypto_u128(),
+                .id = stdx.crypto_u128(io_std),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
@@ -528,7 +531,7 @@ pub const Runner = struct {
                                             progress_tracker.release.value)
                                         {
                                             fatal("The last event was published using a newer " ++
-                                                "release (event={} current={}).", .{
+                                                "release (event={f} current={f}).", .{
                                                 progress_tracker.release,
                                                 vsr.constants.config.process.release,
                                             });
@@ -915,7 +918,7 @@ pub const Runner = struct {
                     .immediate = false,
                     .properties = .{
                         .delivery_mode = .persistent,
-                        .timestamp = @intCast(std.time.milliTimestamp()),
+                        .timestamp = self.time.realtime().to_seconds(),
                         .headers = progress_tracker.header(),
                     },
                     .body = null,
@@ -961,7 +964,7 @@ pub const Runner = struct {
         self.vsr_client_timeout.tick();
         if (self.vsr_client_timeout.fired()) {
             const timeout: stdx.Duration = .ms(self.vsr_client_timeout.ticks * constants.tick_ms);
-            fatal("Timed out: no reply from the TigerBeetle cluster within {}.", .{timeout});
+            fatal("Timed out: no reply from the TigerBeetle cluster within {f}.", .{timeout});
         }
     }
 };
@@ -1111,7 +1114,7 @@ const Metrics = struct {
                 );
                 log.info("{s}: p0={}ms mean={}ms p100={}ms " ++
                     "event_count={} throughput={} op/s " ++
-                    "last timestamp={} ({})", .{
+                    "last timestamp={} ({f})", .{
                     @tagName(field),
                     summary.duration_min.?.to_ms(),
                     @divFloor(summary.duration_sum.to_ms(), summary.count),
@@ -1260,15 +1263,15 @@ const ProgressTrackerMessage = struct {
                 fn write(context: *const anyopaque, encoder: *amqp.Encoder.TableEncoder) void {
                     const message: *const ProgressTrackerMessage = @ptrCast(@alignCast(context));
                     var release_buffer: [
-                        std.fmt.count("{}", vsr.Release.from(.{
+                        std.fmt.count("{f}", .{vsr.Release.from(.{
                             .major = std.math.maxInt(u16),
                             .minor = std.math.maxInt(u8),
                             .patch = std.math.maxInt(u8),
-                        }))
+                        })})
                     ]u8 = undefined;
                     encoder.put("release", .{ .string = std.fmt.bufPrint(
                         &release_buffer,
-                        "{}",
+                        "{f}",
                         .{message.release},
                     ) catch unreachable });
                     encoder.put("timestamp", .{ .int64 = @intCast(message.timestamp) });
@@ -1324,16 +1327,18 @@ pub const Message = struct {
     pub const content_type = "application/json";
 
     pub const json_string_size_max = size: {
-        var counting_writer = std.io.countingWriter(std.io.null_writer);
-        std.json.stringify(
+        @setEvalBranchQuota(100_000);
+        var buffer: [64]u8 = undefined;
+        var counting_writer: std.Io.Writer.Discarding = .init(&buffer);
+        std.json.Stringify.value(
             worse_case(Message),
             stringify_options,
-            counting_writer.writer(),
+            &counting_writer.writer,
         ) catch unreachable;
-        break :size counting_writer.bytes_written;
+        break :size counting_writer.fullCount();
     };
 
-    const stringify_options = std.json.StringifyOptions{
+    const stringify_options = std.json.Stringify.Options{
         .whitespace = .minified,
         .emit_nonportable_numbers_as_strings = true,
     };
@@ -1455,12 +1460,12 @@ pub const Message = struct {
             .write = &struct {
                 fn write(context: *const anyopaque, buffer: []u8) usize {
                     const message: *const Message = @ptrCast(@alignCast(context));
-                    var fbs = std.io.fixedBufferStream(buffer);
-                    std.json.stringify(message, .{
+                    var writer = std.Io.Writer.fixed(buffer);
+                    std.json.Stringify.value(message, .{
                         .whitespace = .minified,
                         .emit_nonportable_numbers_as_strings = true,
-                    }, fbs.writer()) catch unreachable;
-                    return fbs.pos;
+                    }, &writer) catch unreachable;
+                    return writer.end;
                 }
             }.write,
         };

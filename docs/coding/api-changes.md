@@ -20,7 +20,7 @@ The previous API for [`create_accounts`](../reference/requests/create_accounts.m
 failed events, returning a _sparse array_ of results. Each result included the `index` of the
 failed element within the event batch and the corresponding error code. Successfully created
 events were not returned by the TigerBeetle cluster, and the application could safely assume
-them as `ok`.
+they were `ok`.
 
 While this approach prioritized saving network bandwidth by omitting results for the common
 _happy path_, it didn’t provide enough information about the outcome.
@@ -108,7 +108,7 @@ The operations [`query_accounts`](../reference/requests/query_accounts.md),
 Along with the new result types, some client libraries have changed the API to be more
 idiomatic, for naming consistency, or even due to bug fixes in the previous API.
 
-See below is a list of API changes specific to each client library:
+Below is a list of API changes specific to each client library:
 
 <details><summary><b>.NET</b></summary>
 
@@ -226,8 +226,8 @@ The TigerBeetle Go Client `0.17.0` introduced the following breaking changes:
   were renamed to <code>CreateAccount<b>Status</b></code> and
   <code>CreateTransfer<b>Status</b></code>.
 
-  The enum values `AccountOK` and `TransferOK`, were replaced by the new status codes
-  `AccountCreated` and `TransferCreated`, which indicates the event was successfully
+  The enum values `AccountOK` and `TransferOK` were replaced by the new status codes
+  `AccountCreated` and `TransferCreated`, which indicate the event was successfully
   created by the operation.
 
   |Type       |Before                                 | After                                   |
@@ -373,7 +373,7 @@ The TigerBeetle Java Client `0.17.0` introduced the following breaking changes:
   The `PacketStatus` enum is now internal and the `RequestException` was removed.
 
   All operations throw `ClientClosedException` instead of `IllegalStateException`
-  if the client is  closed.
+  if the client is closed.
 
   |Type       |Before                                 | After                                   |
   |-----------|---------------------------------------|-----------------------------------------|
@@ -605,7 +605,7 @@ For more details, please refer to the
 
 ### Oldest supported client version is `0.16.4`
 
-Please make sure that all of your clients are running on at `0.16.4` or newer before upgrading to this release!
+Please make sure that all of your clients are running `0.16.4` or newer before upgrading to this release!
 
 ## [0.16.4](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.16.4)
 

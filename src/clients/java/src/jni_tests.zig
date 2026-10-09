@@ -2,6 +2,7 @@
 ///! using the JNI Invocation API.
 const std = @import("std");
 const assert = std.debug.assert;
+const stdx = @import("stdx");
 const jni = @import("jni.zig");
 const testing = std.testing;
 
@@ -1700,7 +1701,7 @@ test "JNI: primitive arrays" {
 }
 
 const get_testing_env = struct {
-    var init = std.once(jvm_create);
+    var init = stdx.once(jvm_create);
     var env: *JNIEnv = undefined;
 
     fn jvm_create() void {

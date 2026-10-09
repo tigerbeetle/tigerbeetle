@@ -47,7 +47,7 @@ In financial accounting, there are 5 main types of accounts:
     <https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/conceptual-framework-for-financial-reporting.pdf>
 
 As mentioned above, the type of account depends on whose perspective you are doing the accounting
-from. In those examples, the loan you have from the bank is liability for you, because you owe the
+from. In those examples, the loan you have from the bank is a liability for you, because you owe the
 amount to the bank. However, that same loan is an asset from the bank's perspective. In contrast,
 the money in your bank account is an asset for you but it is a liability for the bank.
 

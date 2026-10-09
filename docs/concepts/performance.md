@@ -8,7 +8,7 @@ TigerBeetle is designed specifically for [OLTP](./oltp.md) workloads.
 
 The prevailing paradigm for OLGP is interactive transactions, where business-logic lives in
 the application, and the job of the database is to send the data to the application, holding the
-locks while the data is being processed. This works for mixed read-write workload with low
+locks while the data is being processed. This works for mixed read-write workloads with low
 contention, but fails for highly-contended OLTP workloads --- locks over the network are very
 expensive!
 

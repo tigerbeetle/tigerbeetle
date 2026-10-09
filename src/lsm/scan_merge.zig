@@ -10,28 +10,57 @@ const Direction = @import("../direction.zig").Direction;
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const ZigZagMergeIteratorType = @import("zig_zag_merge.zig").ZigZagMergeIteratorType;
 const ScanType = @import("scan_builder.zig").ScanType;
+const ScanBuilderConfigType = @import("scan_builder.zig").ScanBuilderConfigType;
 const Pending = error{Pending};
 
 /// Union ∪ operation over an array of non-specialized `Scan` instances.
 /// At a high level, this is an ordered iterator over the set-union of the timestamps of
 /// each of the component Scans.
-pub fn ScanMergeUnionType(comptime Groove: type, comptime Storage: type) type {
-    return ScanMergeType(Groove, Storage, .merge_union);
+pub fn ScanMergeUnionType(
+    comptime Storage: type,
+    comptime Forest: type,
+    comptime scan_config: ScanBuilderConfigType(Forest),
+) type {
+    return ScanMergeType(
+        Storage,
+        Forest,
+        scan_config,
+        .merge_union,
+    );
 }
 
 /// Intersection ∩ operation over an array of non-specialized `Scan` instances.
-pub fn ScanMergeIntersectionType(comptime Groove: type, comptime Storage: type) type {
-    return ScanMergeType(Groove, Storage, .merge_intersection);
+pub fn ScanMergeIntersectionType(
+    comptime Storage: type,
+    comptime Forest: type,
+    comptime scan_config: ScanBuilderConfigType(Forest),
+) type {
+    return ScanMergeType(
+        Storage,
+        Forest,
+        scan_config,
+        .merge_intersection,
+    );
 }
 
 /// Difference (minus) operation over two non-specialized `Scan` instances.
-pub fn ScanMergeDifferenceType(comptime Groove: type, comptime Storage: type) type {
-    return ScanMergeType(Groove, Storage, .merge_intersection);
+pub fn ScanMergeDifferenceType(
+    comptime Storage: type,
+    comptime Forest: type,
+    comptime scan_config: ScanBuilderConfigType(Forest),
+) type {
+    return ScanMergeType(
+        Storage,
+        Forest,
+        scan_config,
+        .merge_intersection,
+    );
 }
 
 fn ScanMergeType(
-    comptime Groove: type,
     comptime Storage: type,
+    comptime Forest: type,
+    comptime scan_config: ScanBuilderConfigType(Forest),
     comptime merge: enum {
         merge_union,
         merge_intersection,
@@ -40,7 +69,7 @@ fn ScanMergeType(
 ) type {
     return struct {
         const ScanMerge = @This();
-        const Scan = ScanType(Groove, Storage);
+        const Scan = ScanType(Storage, Forest, scan_config);
 
         pub const Callback = *const fn (context: *Scan.Context, self: *ScanMerge) void;
 
