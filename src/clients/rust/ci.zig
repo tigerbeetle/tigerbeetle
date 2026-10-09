@@ -100,10 +100,18 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
     try shell.cwd.createDirPath(shell.io, published_dir);
 
-    const crate_published = try shell.http_get(
-        published_url,
-        .{ .response_body_size_max = crates_io_upload_size_max },
-    );
+    // Multiple attempts in case of network errors.
+    const attempts_max = 5;
+    const crate_published = for (0..attempts_max) |attempt| {
+        break shell.http_get(
+            published_url,
+            .{ .response_body_size_max = crates_io_upload_size_max },
+        ) catch |err| {
+            log.warn("crate package download failed. Attempt={}, {}", .{ attempt, err });
+            continue;
+        };
+    } else return error.DownloadAttemptsExceeded;
+
     try shell.cwd.writeFile(shell.io, .{
         .sub_path = published_crate,
         .data = crate_published,
@@ -121,7 +129,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
     try shell.cwd.createDirPath(shell.io, local_dir);
 
-    // archive metada might differ, so extract and diff files themselves
+    // Archive metadata might differ, so we extract and diff the files themselves.
     try shell.exec(
         "tar --extract --gzip --file {crate} --directory {dir}",
         .{ .crate = published_crate, .dir = published_dir },

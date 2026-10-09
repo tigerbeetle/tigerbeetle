@@ -213,7 +213,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language == language_requested or language_requested == null) and
-            language != .ruby) // TODO Remove when Ruby client is published.
+            language != .ruby and // TODO Remove when Ruby client is published.
+            language != .rust) // Rust isn't published yet.
         {
             const ci = @field(LanguageCI, @tagName(language));
 
