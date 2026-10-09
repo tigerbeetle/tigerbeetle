@@ -1260,6 +1260,9 @@ pub const MultiversionOS = struct {
                 " upgrade (or downgrade) the binary", .{
                 release,
             });
+            log.debug("release_execute: available releases: {f}", .{
+                Release.format_slice(self.releases_bundled.slice()),
+            });
             @panic("release not available");
         }
 
