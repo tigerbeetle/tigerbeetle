@@ -84,6 +84,9 @@ fn payload_independent_allocations() -> Result<()> {
     Ok(())
 }
 
+// `std::sync::Mutex` allocates on first lock on macOS, and this is unlikely to change.
+// We therefore exclude this test. See https://github.com/rust-lang/rust/issues/131005.
+#[cfg_attr(target_os = "macos", ignore)]
 #[test]
 fn zero_allocation_usage() -> Result<()> {
     let (client, _guard) = test_client()?;
