@@ -65,8 +65,11 @@ const VersionInfo = struct {
     commit_timestamp: stdx.InstantUnix,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args_original: CLIArgs) !void {
     _ = gpa;
+
+    var cli_args = cli_args_original;
+    cli_args.language = .go;
 
     const languages = if (cli_args.language) |language|
         LanguageSet.initOne(language)
@@ -126,7 +129,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(release.value >
         (try multiversion.Release.parse(first_multiversion_release)).value);
 
-    const version_info = VersionInfo{
+    var version_info = VersionInfo{
         .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release.triple()),
         .release_triple_client_min = @import("vsr_options").release_client_min,
         .tag = try shell.fmt(
@@ -144,7 +147,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // Typically GitHub tag matches the release triple in the binary exactly. For exceptional
     // hot-fix releases, the tag can be different. To make a hot-fix release, set the tag manually
     // here and remove the assert.
-    assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    // assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    version_info.tag = "0.17.9-1";
 
     log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.commit_sha });
     if (!std.mem.eql(u8, version_info.release_triple, version_info.tag)) {
@@ -873,7 +877,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
 
     assert(try shell.dir_exists("zig-out/dist/go"));
 
-    if (try is_already_published(shell, ci_go, info)) return;
+    // if (try is_already_published(shell, ci_go, info)) return;
 
     const token = try shell.env_get("TIGERBEETLE_GO_PAT");
     try shell.exec(
