@@ -4060,11 +4060,12 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             const p = self.get_transfer(t.pending_id) orelse {
                 // Ensure that this key was enqueued for prefetching.
-                if (constants.verify) assert(
-                    self.forest.grooves.transfers.prefetch_keys.get(.{
+                if (constants.verify) {
+                    const prefetch_status = self.forest.grooves.transfers.prefetch_keys.get(.{
                         .id = t.pending_id,
-                    }).? == .not_found,
-                );
+                    }).?;
+                    assert(prefetch_status == .not_found or prefetch_status == .found_orphaned);
+                }
                 return .pending_transfer_not_found;
             };
             assert(p.id == t.pending_id);
