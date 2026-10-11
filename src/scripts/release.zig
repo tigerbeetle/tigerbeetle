@@ -71,7 +71,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     const languages = if (cli_args.language) |language|
         LanguageSet.initOne(language)
     else
-        LanguageSet.initFull();
+        LanguageSet.initMany(&.{ Language.go, Language.ruby });
 
     if (cli_args.devhub) {
         if (cli_args.language == null or cli_args.language.? != .zig) {
@@ -126,7 +126,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(release.value >
         (try multiversion.Release.parse(first_multiversion_release)).value);
 
-    const version_info = VersionInfo{
+    var version_info = VersionInfo{
         .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release.triple()),
         .release_triple_client_min = @import("vsr_options").release_client_min,
         .tag = try shell.fmt(
@@ -144,7 +144,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // Typically GitHub tag matches the release triple in the binary exactly. For exceptional
     // hot-fix releases, the tag can be different. To make a hot-fix release, set the tag manually
     // here and remove the assert.
-    assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    // assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    version_info.tag = "0.17.10";
 
     log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.commit_sha });
     if (!std.mem.eql(u8, version_info.release_triple, version_info.tag)) {
@@ -699,7 +700,7 @@ fn publish(
         var it = std.mem.splitScalar(u8, tags_exiting, '\n');
         while (it.next()) |tag_existing| {
             assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
-            if (std.mem.eql(u8, tag_existing, info.release_triple)) {
+            if (std.mem.eql(u8, tag_existing, info.tag)) {
                 tag_exists = true;
             }
             if (std.mem.eql(u8, tag_existing, info.tag_multiversion)) {
@@ -873,7 +874,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
 
     assert(try shell.dir_exists("zig-out/dist/go"));
 
-    if (try is_already_published(shell, ci_go, info)) return;
+    // if (try is_already_published(shell, ci_go, info)) return;
 
     const token = try shell.env_get("TIGERBEETLE_GO_PAT");
     try shell.exec(
