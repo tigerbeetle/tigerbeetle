@@ -18,7 +18,7 @@ pub const RustDocs = Docs{
     ,
 
     .prerequisites =
-    \\* Rust 1.68+
+    \\* Rust 1.63+
     ,
 
     .project_file_name = "Cargo.toml",
@@ -26,7 +26,7 @@ pub const RustDocs = Docs{
     \\[package]
     \\name = "tigerbeetle-test"
     \\version = "0.1.0"
-    \\edition = "2024"
+    \\edition = "2021"
     \\
     \\[dependencies]
     \\tigerbeetle.path = "../.."

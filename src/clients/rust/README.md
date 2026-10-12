@@ -10,7 +10,7 @@ The TigerBeetle client for Rust.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Rust 1.68+
+* Rust 1.63+
 
 ## Setup
 
@@ -22,7 +22,7 @@ Then create `Cargo.toml` and copy this into it:
 [package]
 name = "tigerbeetle-test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 tigerbeetle.path = "../.."
