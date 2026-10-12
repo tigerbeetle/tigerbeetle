@@ -153,8 +153,8 @@ fn SegmentedArrayBaseType(
             for (array.nodes[0..array.node_count]) |node| {
                 node_pool.release(@ptrCast(@alignCast(node.?)));
             }
-            allocator.free(array.nodes);
-            allocator.free(array.indexes);
+            allocator.destroy(array.nodes);
+            allocator.destroy(array.indexes);
         }
 
         pub fn reset(array: *SegmentedArray, node_pool: *NodePool) void {
@@ -1079,6 +1079,7 @@ fn FuzzContextType(
             .unsorted => SegmentedArrayType(T, TestPool, element_count_max, options),
         };
 
+        gpa: std.mem.Allocator,
         prng: *stdx.PRNG,
 
         pool: TestPool,
@@ -1095,6 +1096,7 @@ fn FuzzContextType(
             prng: *stdx.PRNG,
         ) !void {
             context.* = .{
+                .gpa = allocator,
                 .prng = prng,
 
                 .pool = undefined,
@@ -1108,16 +1110,16 @@ fn FuzzContextType(
             context.array = try TestArray.init(allocator);
             errdefer context.array.deinit(allocator, &context.pool);
 
-            context.reference = std.ArrayList(T).init(allocator);
-            errdefer context.reference.deinit();
-            try context.reference.ensureTotalCapacity(element_count_max);
+            context.reference = .empty;
+            errdefer context.reference.deinit(allocator);
+            try context.reference.ensureTotalCapacity(allocator, element_count_max);
         }
 
         fn deinit(context: *FuzzContext, allocator: std.mem.Allocator) void {
             context.array.deinit(allocator, &context.pool);
             context.pool.deinit(allocator);
 
-            context.reference.deinit();
+            context.reference.deinit(allocator);
         }
 
         fn run(context: *FuzzContext) !void {
@@ -1201,13 +1203,21 @@ fn FuzzContextType(
 
                     context.array.insert_elements(&context.pool, index, buffer[0..count]);
                     // TODO the standard library could use an AssumeCapacity variant of this.
-                    context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
+                    context.reference.insertSlice(
+                        context.gpa,
+                        index,
+                        buffer[0..count],
+                    ) catch unreachable;
                 },
                 .sorted => {
                     for (buffer[0..count]) |value| {
                         const index_actual = context.array.insert_element(&context.pool, value);
                         const index_expect = context.reference_index(key_from_value(&value));
-                        context.reference.insert(index_expect, value) catch unreachable;
+                        context.reference.insert(
+                            context.gpa,
+                            index_expect,
+                            value,
+                        ) catch unreachable;
                         try std.testing.expectEqual(index_expect, index_actual);
                     }
                 },
@@ -1229,7 +1239,7 @@ fn FuzzContextType(
 
             context.array.remove_elements(&context.pool, index, count);
 
-            context.reference.replaceRange(index, count, &[0]T{}) catch unreachable;
+            context.reference.replaceRange(context.gpa, index, count, &[0]T{}) catch unreachable;
 
             context.removes += count;
 
@@ -1245,7 +1255,7 @@ fn FuzzContextType(
             context.prng.fill(mem.asBytes(&element));
 
             context.array.insert_elements(&context.pool, insert_index, &.{element});
-            context.reference.insert(insert_index, element) catch unreachable;
+            context.reference.insert(context.gpa, insert_index, element) catch unreachable;
 
             context.inserts += 1;
 
@@ -1258,7 +1268,7 @@ fn FuzzContextType(
             const remove_index = context.array.absolute_index_for_cursor(context.array.last());
 
             context.array.remove_elements(&context.pool, remove_index, 1);
-            context.reference.replaceRange(remove_index, 1, &[0]T{}) catch unreachable;
+            context.reference.replaceRange(context.gpa, remove_index, 1, &[0]T{}) catch unreachable;
 
             context.removes += 1;
 

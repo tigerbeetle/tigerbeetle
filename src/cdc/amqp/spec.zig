@@ -793,12 +793,12 @@ pub const ClientMethod = union(ClientMethod.Tag) {
 
     pub fn decode(header: MethodHeader, decoder: *Decoder) Decoder.Error!ClientMethod {
         @setEvalBranchQuota(10_000);
-        const tag = std.meta.intToEnum(Tag, @as(u32, @bitCast(header))) catch {
+        const tag = std.enums.fromInt(Tag, @as(u32, @bitCast(header))) orelse {
             return error.Unexpected;
         };
         const value: ClientMethod = switch (tag) {
             inline else => |tag_comptime| value: {
-                const Method = std.meta.TagPayload(ClientMethod, tag_comptime);
+                const Method = @FieldType(ClientMethod, @tagName(tag_comptime));
                 break :value @unionInit(
                     ClientMethod,
                     @tagName(tag_comptime),

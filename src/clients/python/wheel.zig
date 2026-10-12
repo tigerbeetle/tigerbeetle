@@ -125,46 +125,52 @@ pub fn make(
     const arena = shell.arena.allocator();
     const dos_timestamp = stdx.Shell.unix_to_dos_timestamp(commit_timestamp);
 
-    if (std.fs.path.dirname(output_path)) |path| try shell.cwd.makePath(path);
-    const output_file = try shell.cwd.createFile(output_path, .{});
-    defer output_file.close();
+    if (std.fs.path.dirname(output_path)) |path| try shell.cwd.createDirPath(shell.io, path);
+    const output_file = try shell.cwd.createFile(shell.io, output_path, .{});
+    defer output_file.close(shell.io);
 
-    var buffered_writer = std.io.bufferedWriter(output_file.writer());
-    const writer = buffered_writer.writer();
+    var output_file_write_buffer: [4096]u8 = undefined;
+    var output_file_writer = output_file.writer(shell.io, &output_file_write_buffer);
+    const writer = &output_file_writer.interface;
 
-    var metadata_buffer = std.ArrayList(u8).init(arena);
+    var metadata_buffer: std.ArrayList(u8) = .empty;
     for (metadata(tag)) |metadata_kv| {
         if (metadata_kv.name_wheel) |name_wheel| {
-            try metadata_buffer.writer().print("{s}: {s}\n", .{ name_wheel, metadata_kv.value });
+            try metadata_buffer.print(arena, "{s}: {s}\n", .{ name_wheel, metadata_kv.value });
         }
     }
 
     // "Alternatively, the distribution’s description may instead be provided in the message
     // body (i.e., after a completely blank line following the headers, with no indentation or
     // other special formatting necessary)."
-    try metadata_buffer.writer().print("\n", .{});
-    try metadata_buffer.appendSlice(readme);
+    try metadata_buffer.print(arena, "\n", .{});
+    try metadata_buffer.appendSlice(arena, readme);
 
-    var package_dir = try shell.cwd.openDir("src/tigerbeetle", .{ .iterate = true });
-    defer package_dir.close();
+    var package_dir = try shell.cwd.openDir(shell.io, "src/tigerbeetle", .{ .iterate = true });
+    defer package_dir.close(shell.io);
 
     var walker = try package_dir.walk(arena);
     defer walker.deinit();
 
-    var file_paths = std.ArrayList([]const u8).init(arena);
-    while (try walker.next()) |entry| {
+    var file_paths: std.ArrayList([]const u8) = .empty;
+    while (try walker.next(shell.io)) |entry| {
         if (entry.kind != .file) continue;
-        try file_paths.append(try arena.dupe(u8, entry.path));
+        try file_paths.append(arena, try arena.dupe(u8, entry.path));
     }
     // Sort files for reproducibility.
     std.mem.sort([]const u8, file_paths.items, {}, string_less_than);
 
     var offset: u32 = 0;
-    var entries = std.ArrayList(Entry).init(arena);
+    var entries: std.ArrayList(Entry) = .empty;
 
     for (file_paths.items) |relative_path| {
         const archive_name = try shell.fmt("tigerbeetle/{s}", .{relative_path});
-        const data = try package_dir.readFileAlloc(arena, relative_path, file_size_max);
+        const data = try package_dir.readFileAlloc(
+            shell.io,
+            relative_path,
+            arena,
+            .limited(file_size_max),
+        );
         try add_entry(arena, &entries, writer, &offset, archive_name, data, dos_timestamp);
     }
 
@@ -186,13 +192,13 @@ pub fn make(
 
     // Build RECORD: all prior entries with sha256 hashes, then RECORD itself with empty fields.
     const record_name = try shell.fmt("{s}/RECORD", .{dist_info});
-    var record_buffer = std.ArrayList(u8).init(arena);
+    var record_buffer: std.ArrayList(u8) = .empty;
     for (entries.items) |entry| {
-        try record_buffer.writer().print("{s},sha256={s},{d}\n", .{
+        try record_buffer.print(arena, "{s},sha256={s},{d}\n", .{
             entry.archive_name, entry.sha256_base64, entry.uncompressed_size,
         });
     }
-    try record_buffer.writer().print("{s},,\n", .{record_name});
+    try record_buffer.print(arena, "{s},,\n", .{record_name});
     try add_entry(
         arena,
         &entries,
@@ -225,7 +231,7 @@ pub fn make(
             .external_file_attributes = 0,
             .local_file_header_offset = entry.local_header_offset,
         };
-        try writer.writeStructEndian(central_directory_header, .little);
+        try writer.writeStruct(central_directory_header, .little);
         try writer.writeAll(entry.archive_name);
         offset += @intCast(@sizeOf(std.zip.CentralDirectoryFileHeader) + entry.archive_name.len);
     }
@@ -240,9 +246,9 @@ pub fn make(
         .central_directory_offset = central_directory_offset,
         .comment_len = 0,
     };
-    try writer.writeStructEndian(end_record, .little);
+    try writer.writeStruct(end_record, .little);
 
-    try buffered_writer.flush();
+    try output_file_writer.interface.flush();
 }
 
 fn add_entry(
@@ -256,11 +262,17 @@ fn add_entry(
 ) !void {
     const crc32 = std.hash.Crc32.hash(data);
 
-    var compressed_buffer = std.ArrayList(u8).init(arena);
-    var compressor = try std.compress.flate.compressor(compressed_buffer.writer(), .{});
-    try compressor.writer().writeAll(data);
+    var compressed_buffer: std.Io.Writer.Allocating = try .initCapacity(arena, 64);
+    var compress_buffer: [std.compress.flate.max_window_len]u8 = undefined;
+    var compressor = try std.compress.flate.Compress.init(
+        &compressed_buffer.writer,
+        &compress_buffer,
+        .raw,
+        .default,
+    );
+    try compressor.writer.writeAll(data);
     try compressor.finish();
-    const compressed = compressed_buffer.items;
+    const compressed = compressed_buffer.written();
 
     var sha256_digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(data, &sha256_digest, .{});
@@ -282,13 +294,13 @@ fn add_entry(
         .filename_len = @intCast(archive_name.len),
         .extra_len = 0,
     };
-    try writer.writeStructEndian(local_header, .little);
+    try writer.writeStruct(local_header, .little);
     try writer.writeAll(archive_name);
     try writer.writeAll(compressed);
 
     offset.* += @intCast(@sizeOf(std.zip.LocalFileHeader) + archive_name.len + compressed.len);
 
-    try entries.append(.{
+    try entries.append(arena, .{
         .archive_name = archive_name,
         .local_header_offset = local_header_offset,
         .crc32 = crc32,

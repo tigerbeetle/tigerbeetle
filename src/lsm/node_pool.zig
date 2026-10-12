@@ -35,7 +35,7 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
                 .free = undefined,
             };
             const size = node_size * node_count;
-            pool.buffer = try allocator.alignedAlloc(u8, node_alignment, size);
+            pool.buffer = try allocator.alignedAlloc(u8, .fromByteUnits(node_alignment), size);
             errdefer allocator.free(pool.buffer);
 
             pool.free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
@@ -96,7 +96,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         prng: *stdx.PRNG,
         sentinel: u64,
         node_pool: TestPool,
-        node_map: std.AutoArrayHashMap(TestPool.Node, u64),
+        node_map: std.AutoArrayHashMapUnmanaged(TestPool.Node, u64),
 
         acquires: u64 = 0,
         releases: u64 = 0,
@@ -115,13 +115,13 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
             errdefer context.node_pool.deinit(testing.allocator);
             @memset(mem.bytesAsSlice(u64, context.node_pool.buffer), context.sentinel);
 
-            context.node_map = std.AutoArrayHashMap(TestPool.Node, u64).init(testing.allocator);
-            errdefer context.node_map.deinit();
+            context.node_map = .empty;
+            errdefer context.node_map.deinit(testing.allocator);
         }
 
         fn deinit(context: *TestContext) void {
             context.node_pool.deinit(testing.allocator);
-            context.node_map.deinit();
+            context.node_map.deinit(testing.allocator);
         }
 
         fn run(context: *TestContext) !void {
@@ -165,7 +165,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
                 try testing.expectEqual(context.sentinel, word);
             }
 
-            const gop = try context.node_map.getOrPut(node);
+            const gop = try context.node_map.getOrPut(testing.allocator, node);
             try testing.expect(!gop.found_existing);
 
             // Write unique data into the node so we can test that it doesn't get overwritten.

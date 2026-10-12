@@ -8,6 +8,6 @@ class TigerBeetleIntegrationTest < Minitest::Test
   end
 
   def teardown
-    @client.close if @client && !@client.closed?
+    @client&.close
   end
 end

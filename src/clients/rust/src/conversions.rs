@@ -34,10 +34,10 @@ impl From<InitError> for i32 {
     }
 }
 
-impl From<u8> for PacketError {
-    fn from(other: u8) -> PacketError {
+impl From<u8> for Error {
+    fn from(other: u8) -> Error {
         use tbc::*;
-        use PacketError::*;
+        use Error::*;
 
         match other {
             TB_PACKET_STATUS_TB_PACKET_OK => panic!(),
@@ -48,15 +48,15 @@ impl From<u8> for PacketError {
             TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED => ClientClosed,
             TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION => InvalidOperation,
             TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE => InvalidDataSize,
-            v => panic!("Unknown PacketError: {v}"),
+            v => panic!("Unknown Error: {v}"),
         }
     }
 }
 
-impl From<PacketError> for u8 {
-    fn from(other: PacketError) -> u8 {
+impl From<Error> for u8 {
+    fn from(other: Error) -> u8 {
         use tbc::*;
-        use PacketError::*;
+        use Error::*;
 
         match other {
             TooMuchData => TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA,

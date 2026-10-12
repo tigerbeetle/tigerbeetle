@@ -720,15 +720,23 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
 
-            const a = try gpa.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
+            const a = try gpa.alignedAlloc(
+                SuperBlockHeader,
+                .fromByteUnits(constants.sector_size),
+                1,
+            );
             errdefer gpa.free(a);
 
-            const b = try gpa.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
+            const b = try gpa.alignedAlloc(
+                SuperBlockHeader,
+                .fromByteUnits(constants.sector_size),
+                1,
+            );
             errdefer gpa.free(b);
 
             const reading = try gpa.alignedAlloc(
                 [constants.superblock_copies]SuperBlockHeader,
-                constants.sector_size,
+                .fromByteUnits(constants.sector_size),
                 1,
             );
             errdefer gpa.free(reading);
@@ -1314,7 +1322,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     "{[replica]?}: " ++
                         "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
                         "sequence={[sequence]} " ++
-                        "release={[release]} " ++
+                        "release={[release]f} " ++
                         "cluster={[cluster]x:0>32} replica_id={[replica_id]} " ++
                         "size={[size]} " ++
                         "free_set_blocks_acquired_size={[free_set_blocks_acquired_size]} " ++

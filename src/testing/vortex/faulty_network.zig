@@ -167,8 +167,8 @@ const Pipe = struct {
             ) * std.time.ns_per_ms + 1;
             assert(timeout_duration_ns > 0);
 
-            log.debug("delaying {} ({d},{d})", .{
-                std.fmt.fmtDuration(timeout_duration_ns),
+            log.debug("delaying {f} ({d},{d})", .{
+                std.Io.Duration.fromNanoseconds(timeout_duration_ns),
                 pipe.connection.replica_index,
                 pipe.connection.connection_index,
             });
@@ -358,13 +358,13 @@ const Connection = struct {
                 connection.connection_index,
             });
             connection.state = .closing;
-            std.posix.shutdown(connection.origin_fd.?, .both) catch |err| switch (err) {
+            stdx.posix.shutdown(connection.origin_fd.?, .both) catch |err| switch (err) {
                 error.SocketNotConnected => {},
                 else => log.warn("shutdown origin_fd ({d},{d}) failed: {}", .{
                     connection.replica_index, connection.connection_index, err,
                 }),
             };
-            std.posix.shutdown(connection.remote_fd.?, .both) catch |err| switch (err) {
+            stdx.posix.shutdown(connection.remote_fd.?, .both) catch |err| switch (err) {
                 error.SocketNotConnected => {},
                 else => log.warn("shutdown remote_fd ({d},{d}) failed: {}", .{
                     connection.replica_index, connection.connection_index, err,

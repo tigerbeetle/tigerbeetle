@@ -86,15 +86,19 @@ pub const StorageChecker = struct {
         const free_set_size = free_set.encode_size_max();
 
         const free_set_blocks_acquired_encoded =
-            try allocator.alignedAlloc(u8, @alignOf(u64), free_set_size);
+            try allocator.alignedAlloc(u8, .fromByteUnits(@alignOf(u64)), free_set_size);
         errdefer allocator.free(free_set_blocks_acquired_encoded);
 
         const free_set_blocks_released_encoded =
-            try allocator.alignedAlloc(u8, @alignOf(u64), free_set_size);
+            try allocator.alignedAlloc(u8, .fromByteUnits(@alignOf(u64)), free_set_size);
         errdefer allocator.free(free_set_blocks_released_encoded);
 
         const client_sessions_buffer =
-            try allocator.alignedAlloc(u8, @sizeOf(u256), vsr.ClientSessions.encode_size);
+            try allocator.alignedAlloc(
+                u8,
+                .fromByteUnits(@sizeOf(u256)),
+                vsr.ClientSessions.encode_size,
+            );
         errdefer allocator.free(client_sessions_buffer);
 
         return StorageChecker{

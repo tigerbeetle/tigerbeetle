@@ -42,7 +42,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -76,7 +76,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             log.info("testing docker image: '{s}'", .{image});
 
             for (0..5) |attempt| {
-                if (attempt > 0) std.time.sleep(1 * std.time.ns_per_min);
+                if (attempt > 0) try std.Io.sleep(shell.io, .fromSeconds(60), .awake);
                 if (shell.exec("podman image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}
@@ -126,7 +126,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -135,11 +135,11 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     const base_dir = shell.cwd;
-    try shell.pushd_dir(tmp_dir.dir);
+    try shell.pushd(tmp_dir);
     defer shell.popd();
 
     try shell.exec("dotnet new console", .{});
@@ -150,7 +150,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         log.warn("waiting for 5 minutes for the {s} version to appear in nuget.org", .{
             options.release,
         });
-        std.time.sleep(5 * std.time.ns_per_min);
+        try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
     } else {
         switch (try nuget_install(shell, .{ .version = options.release })) {
             .ok => {},
@@ -161,7 +161,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         }
     }
 
-    try Shell.copy_path(
+    try shell.copy_path(
         base_dir,
         "src/clients/dotnet/samples/basic/Program.cs",
         shell.cwd,
@@ -179,7 +179,7 @@ fn nuget_install(shell: *Shell, options: struct {
     } else |err| {
         const exec_result = try shell.exec_raw(command, options);
         switch (exec_result.term) {
-            .Exited => |code| if (code == 0) return .ok,
+            .exited => |code| if (code == 0) return .ok,
             else => {},
         }
 

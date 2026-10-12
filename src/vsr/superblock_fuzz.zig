@@ -94,11 +94,12 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     });
     defer superblock_verify.deinit(gpa);
 
-    var sequence_states = Environment.SequenceStates.init(gpa);
-    defer sequence_states.deinit();
+    var sequence_states: Environment.SequenceStates = .empty;
+    defer sequence_states.deinit(gpa);
 
     const members = vsr.root_members(cluster);
     var env = Environment{
+        .gpa = gpa,
         .members = members,
         .sequence_states = sequence_states,
         .superblock = &superblock,
@@ -189,6 +190,7 @@ const Environment = struct {
 
     sequence_states: SequenceStates,
 
+    gpa: std.mem.Allocator,
     members: vsr.Members,
 
     superblock: *SuperBlock,
@@ -298,8 +300,8 @@ const Environment = struct {
         view_headers.push(vsr.Header.Prepare.root(cluster));
 
         assert(env.sequence_states.items.len == 0);
-        try env.sequence_states.append(undefined); // skip sequence=0
-        try env.sequence_states.append(.{
+        try env.sequence_states.append(env.gpa, undefined); // skip sequence=0
+        try env.sequence_states.append(env.gpa, .{
             .vsr_state = VSRState.root(.{
                 .cluster = cluster,
                 .release = vsr.Release.minimum,
@@ -358,7 +360,7 @@ const Environment = struct {
         view_headers.push(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
-        try env.sequence_states.append(.{
+        try env.sequence_states.append(env.gpa, .{
             .vsr_state = vsr_state,
             .view_headers = view_headers,
         });
@@ -430,7 +432,7 @@ const Environment = struct {
         };
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
-        try env.sequence_states.append(.{
+        try env.sequence_states.append(env.gpa, .{
             .vsr_state = vsr_state,
             .view_headers = vsr.Headers.Array.from_slice(
                 env.superblock.staging.view_headers().slice,

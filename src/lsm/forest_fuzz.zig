@@ -311,13 +311,16 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove;
-                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_begin(getter._snapshot);
                 groove.prefetch_enqueue(getter._key);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
             fn prefetch_callback(prefetch_context: *GrooveTransfers.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                const groove = context._groove;
+                groove.prefetch_finish();
+
                 assert(!context.finished);
                 context.finished = true;
             }
@@ -541,7 +544,7 @@ const Environment = struct {
 
         const Operation = union(enum) { put: tb.Transfer, remove };
         const LogEntry = struct { op: u64, id: u128, operation: Operation };
-        const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
+        const Log = std.ArrayList(LogEntry);
 
         transfers_mutable: Indexes,
         transfers_stashed: Indexes,
@@ -553,7 +556,7 @@ const Environment = struct {
             return .{
                 .transfers_mutable = Indexes.init(gpa),
                 .transfers_stashed = Indexes.init(gpa),
-                .log = Log.init(gpa),
+                .log = .empty,
                 .gpa = gpa,
             };
         }
@@ -561,7 +564,7 @@ const Environment = struct {
         pub fn deinit(model: *Model) void {
             model.transfers_mutable.deinit();
             model.transfers_stashed.deinit();
-            model.log.deinit();
+            model.log.deinit(model.gpa);
         }
 
         pub fn put(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
@@ -573,10 +576,10 @@ const Environment = struct {
         }
 
         fn mutate(model: *Model, entry: LogEntry) !void {
-            const log_count = model.log.readableLength();
-            if (log_count > 0) assert(model.log.peekItem(log_count - 1).op <= entry.op);
+            const log_count = model.log.items.len;
+            if (log_count > 0) assert(model.log.items[log_count - 1].op <= entry.op);
 
-            try model.log.writeItem(entry);
+            try model.log.append(model.gpa, entry);
             try apply_entry(&model.transfers_mutable, entry);
         }
 
@@ -598,31 +601,33 @@ const Environment = struct {
             const checkpointable = op - (op % constants.lsm_compaction_ops) -| 1;
 
             var log_index: usize = 0;
-            while (log_index < model.log.readableLength()) : (log_index += 1) {
-                const entry = model.log.peekItem(log_index);
+            while (log_index < model.log.items.len) : (log_index += 1) {
+                const entry = model.log.items[log_index];
                 if (entry.op > checkpointable) {
                     break;
                 }
                 try apply_entry(&model.transfers_stashed, entry);
             }
 
-            model.log.discard(log_index);
+            model.log.replaceRangeAssumeCapacity(0, log_index, &.{});
         }
 
         pub fn storage_reset(model: *Model) !void {
             model.transfers_mutable.deinit();
             model.transfers_mutable = try model.transfers_stashed.clone();
-            model.log.discard(model.log.readableLength());
+            model.log.clearRetainingCapacity();
         }
 
         pub fn scan(model: *const Model, params: ScanParams) ![]tb.Transfer {
-            var matches = std.ArrayList(tb.Transfer).init(model.gpa);
-            errdefer matches.deinit();
+            var matches: std.ArrayList(tb.Transfer) = .empty;
+            errdefer matches.deinit(model.gpa);
 
             var iterator = model.transfers_mutable.transfers_by_id.valueIterator();
             while (iterator.next()) |transfer| {
                 const key = scan_key(params.index, transfer) orelse continue;
-                if (key >= params.min and key <= params.max) try matches.append(transfer.*);
+                if (key >= params.min and key <= params.max) {
+                    try matches.append(model.gpa, transfer.*);
+                }
             }
             std.mem.sort(tb.Transfer, matches.items, params, struct {
                 fn less_than(context: ScanParams, a: tb.Transfer, b: tb.Transfer) bool {
@@ -638,7 +643,7 @@ const Environment = struct {
                     };
                 }
             }.less_than);
-            return matches.toOwnedSlice();
+            return matches.toOwnedSlice(model.gpa);
         }
 
         fn scan_key(index: @FieldType(ScanParams, "index"), object: *const tb.Transfer) ?u128 {
@@ -735,8 +740,8 @@ const Environment = struct {
                     .transfers.objects_cache.options.stash_value_count_max;
                 var index: u32 = 0;
 
-                while (index < model.log.readableLength()) : (index += 1) {
-                    const entry = model.log.peekItem(index);
+                while (index < model.log.items.len) : (index += 1) {
+                    const entry = model.log.items[index];
                     const id = entry.id;
                     _ = try env.check_lookup(
                         .{ .id = id },

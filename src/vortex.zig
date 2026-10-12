@@ -7,6 +7,7 @@ const stdx = @import("stdx");
 const builtin = @import("builtin");
 const ratio = stdx.PRNG.ratio;
 
+const Release = @import("multiversion.zig").Release;
 const Supervisor = @import("testing/vortex/supervisor.zig").Supervisor;
 const Command = @import("testing/vortex/workload.zig").Command;
 const dependencies_count: u32 = @import("vortex_options").dependencies_count;
@@ -26,6 +27,7 @@ const CLIArgs = struct {
     replica_count: u8 = 1,
     disable_faults: bool = false,
     log_debug: bool = false,
+    directory: ?[]const u8 = null,
     /// Log file path.
     log: ?[]const u8 = null,
 
@@ -40,7 +42,7 @@ const Scenario = enum {
     recover,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     comptime assert(builtin.target.cpu.arch.endian() == .little);
 
     if (builtin.os.tag == .windows) {
@@ -58,7 +60,7 @@ pub fn main() !void {
     }
     assert(builtin.os.tag == .linux);
 
-    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa_allocator = std.heap.DebugAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
         .ok => {},
         .leak => @panic("memory leak"),
@@ -69,19 +71,13 @@ pub fn main() !void {
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const args = flags.parse(CLIArgs);
+    const args = flags.parse(CLIArgs, init.minimal.args);
 
-    if (args.log) |log_path| {
-        const log_file = try std.fs.cwd().createFile(log_path, .{});
-        defer log_file.close();
-
-        // Redirect stderr to the file.
-        try std.posix.dup2(log_file.handle, std.posix.STDERR_FILENO);
-    }
+    if (args.log) |log_path| try setup_log(init.io, log_path);
 
     if (builtin.os.tag == .linux) {
         // Relaunch in fresh pid / network namespaces.
-        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{
+        try stdx.unshare.maybe_unshare_and_relaunch(gpa, init.io, init.minimal.args, .{
             .pid = true,
             .network = true,
         });
@@ -94,20 +90,54 @@ pub fn main() !void {
         log.warn("not testing upgrades", .{});
     }
 
-    const seed = args.seed orelse std.crypto.random.int(u64);
+    const seed = args.seed orelse stdx.crypto_random_int(init.io, u64);
     var prng = stdx.PRNG.from_seed(seed);
+
+    const shell = try stdx.Shell.create(gpa, init.io, init.environ_map);
+    defer shell.destroy();
+
+    const output_directory_relative = args.directory orelse (try shell.create_tmp_dir());
+    const output_directory = try std.Io.Dir.cwd().realPathFileAlloc(
+        shell.io,
+        output_directory_relative,
+        shell.arena.allocator(),
+    );
+    defer {
+        if (args.directory == null) {
+            shell.cwd.deleteTree(shell.io, output_directory) catch |err| {
+                log.err("error deleting tree: {}", .{err});
+            };
+        }
+    }
 
     log.info("seed={}", .{seed});
     switch (args.scenario) {
-        .default => try scenario_default(gpa, &prng, args),
-        .upgrade => try scenario_upgrade(gpa, &prng),
-        .recover => try scenario_recover(gpa, &prng),
+        .default => try scenario_default(gpa, init, &prng, args, output_directory),
+        .upgrade => try scenario_upgrade(gpa, init, &prng, output_directory),
+        .recover => try scenario_recover(gpa, init, &prng, output_directory),
     }
 
     log.info("done", .{});
 }
 
-fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) !void {
+fn setup_log(io: std.Io, log_path: []const u8) !void {
+    const log_file = try std.Io.Dir.cwd().createFile(io, log_path, .{});
+    defer log_file.close(io);
+
+    // Redirect stderr to the file.
+    switch (std.posix.errno(std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO))) {
+        .SUCCESS => {},
+        else => |err| return stdx.unexpected_errno("dup2", err),
+    }
+}
+
+fn scenario_default(
+    gpa: std.mem.Allocator,
+    init: std.process.Init,
+    prng: *stdx.PRNG,
+    args: CLIArgs,
+    output_directory: []const u8,
+) !void {
     assert(args.scenario == .default);
 
     // Even if we have past versions available, only use them sometimes.
@@ -117,17 +147,18 @@ fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) !vo
         dependencies_count - 1,
     );
 
-    const supervisor = try Supervisor.create(gpa, .{
+    const supervisor = try Supervisor.create(gpa, init.io, init.environ_map, .{
         .seed = prng.int(u64),
         .replica_count = args.replica_count,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 
     log.info("output_directory={s}", .{supervisor.output_directory});
-    log.info("duration={}", .{args.test_duration});
-    log.info("releases={any}", .{supervisor.releases});
+    log.info("duration={f}", .{args.test_duration});
+    log.info("releases={f}", .{Release.format_slice(&supervisor.releases)});
 
     for (0..args.replica_count) |replica_index| {
         try supervisor.replica_install(@intCast(replica_index), release_min);
@@ -142,8 +173,8 @@ fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) !vo
         .{ .transfer_count = std.math.maxInt(u32) },
     );
 
-    var timer = try std.time.Timer.start();
-    while (timer.read() < args.test_duration.ns) {
+    var timer = stdx.Timer.init(supervisor.time.interface());
+    while (timer.read().ns < args.test_duration.ns) {
         try supervisor.tick();
     }
 
@@ -159,17 +190,23 @@ fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) !vo
     supervisor.workload_terminate();
 }
 
-fn scenario_upgrade(gpa: std.mem.Allocator, prng: *stdx.PRNG) !void {
+fn scenario_upgrade(
+    gpa: std.mem.Allocator,
+    init: std.process.Init,
+    prng: *stdx.PRNG,
+    output_directory: []const u8,
+) !void {
     const replica_count = 3;
     const duration_max = stdx.Duration.seconds(200);
     const tick_ms = 10;
     const ticks_max = duration_max.to_ms() / tick_ms;
 
-    var supervisor = try Supervisor.create(gpa, .{
+    var supervisor = try Supervisor.create(gpa, init.io, init.environ_map, .{
         .seed = prng.int(u64),
         .replica_count = replica_count,
         .faulty = false,
         .log_debug = false,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 
@@ -219,14 +256,20 @@ fn scenario_upgrade(gpa: std.mem.Allocator, prng: *stdx.PRNG) !void {
     }
 }
 
-fn scenario_recover(gpa: std.mem.Allocator, prng: *stdx.PRNG) !void {
+fn scenario_recover(
+    gpa: std.mem.Allocator,
+    init: std.process.Init,
+    prng: *stdx.PRNG,
+    output_directory: []const u8,
+) !void {
     const replica_count = 3;
 
-    var supervisor = try Supervisor.create(gpa, .{
+    var supervisor = try Supervisor.create(gpa, init.io, init.environ_map, .{
         .seed = prng.int(u64),
         .replica_count = replica_count,
         .faulty = false,
         .log_debug = false,
+        .directory = output_directory,
     });
     defer supervisor.destroy();
 

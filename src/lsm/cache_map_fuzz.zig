@@ -40,7 +40,7 @@ const Environment = struct {
         errdefer cache_map.deinit(gpa);
 
         var model = Model.init(gpa);
-        errdefer model.deinit(gpa);
+        errdefer model.deinit();
 
         return Environment{
             .cache_map = cache_map,
@@ -216,6 +216,7 @@ const Model = struct {
         value: ?OpValue,
     });
 
+    gpa: std.mem.Allocator,
     map: Map,
     undo_log: UndoLog,
     scope_active: bool = false,
@@ -223,13 +224,14 @@ const Model = struct {
 
     fn init(gpa: std.mem.Allocator) Model {
         return .{
+            .gpa = gpa,
             .map = Map.init(gpa),
-            .undo_log = UndoLog.init(gpa),
+            .undo_log = .empty,
         };
     }
 
     fn deinit(model: *Model) void {
-        model.undo_log.deinit();
+        model.undo_log.deinit(model.gpa);
         model.map.deinit();
         model.* = undefined;
     }
@@ -249,7 +251,7 @@ const Model = struct {
             .{ .op = model.compacts, .value = value.* },
         );
         if (model.scope_active) {
-            try model.undo_log.append(.{
+            try model.undo_log.append(model.gpa, .{
                 .key = key,
                 .value = if (kv_old) |kv| kv.value else null,
             });
@@ -259,7 +261,7 @@ const Model = struct {
     fn remove(model: *Model, key: Key) !void {
         const kv_old = model.map.fetchRemove(key);
         if (model.scope_active) {
-            try model.undo_log.append(.{
+            try model.undo_log.append(model.gpa, .{
                 .key = key,
                 .value = if (kv_old) |kv| kv.value else null,
             });

@@ -138,7 +138,7 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
 test BoundedArrayType {
     const capacity = 8;
     const Array = BoundedArrayType(u8, capacity);
-    const Model = std.ArrayListUnmanaged(u8);
+    const Model = std.ArrayList(u8);
     const swarm_count = 10;
     const action_count = 1_000;
 

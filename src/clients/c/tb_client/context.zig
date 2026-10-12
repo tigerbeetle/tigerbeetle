@@ -224,7 +224,7 @@ pub fn ContextType(
         request_latency: ?stdx.Duration,
 
         const Context = @This();
-        const GPA = std.heap.GeneralPurposeAllocator(.{
+        const GPA = std.heap.DebugAllocator(.{
             .thread_safe = true,
         });
 
@@ -275,7 +275,7 @@ pub fn ContextType(
             context.* = .{
                 .gpa = context.gpa,
 
-                .client_id = stdx.crypto_u128(),
+                .client_id = stdx.crypto_u128(std.Io.Threaded.global_single_threaded.io()),
                 .cluster_id = cluster_id,
 
                 .completion_callback = completion_callback,
@@ -325,7 +325,7 @@ pub fn ContextType(
             context.addresses.resize(addresses_parsed.len) catch unreachable;
 
             log.debug("{}: init: initializing IO", .{context.client_id});
-            context.io = IO.init(32, 0) catch |err| {
+            context.io = IO.init(std.Io.Threaded.global_single_threaded.io(), 32, 0) catch |err| {
                 log.err("{}: failed to initialize IO: {s}", .{
                     context.client_id,
                     @errorName(err),
@@ -342,10 +342,10 @@ pub fn ContextType(
             context.message_pool = try MessagePool.init(allocator, .client);
             errdefer context.message_pool.deinit(allocator);
 
-            log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
+            log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={f})", .{
                 context.client_id,
                 cluster_id,
-                context.addresses.const_slice(),
+                vsr.format_addresses(context.addresses.const_slice()),
             });
             context.client = Client.init(
                 allocator,
@@ -567,12 +567,19 @@ pub fn ContextType(
 
         fn packet_enqueue(self: *Context, packet: *Packet) void {
             assert(thread_caller == .io);
-            assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
+            maybe(self.batch_size_limit == null);
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
                 assert(self.pending.empty());
+
+                if (self.batch_size_limit == null) {
+                    // Evicted during registration.
+                    assert(self.client.evicted);
+                    assert(self.eviction_reason != null);
+                    return self.packet_cancel(packet);
+                }
 
                 // The client might have been evicted, but we don't return early,
                 // so that batch validation errors are surfaced first.
@@ -593,10 +600,10 @@ pub fn ContextType(
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
                 packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
-                self.packet_send(packet);
-                return;
+                return self.packet_send(packet);
             }
             assert(self.client.request_inflight != null);
+            assert(self.batch_size_limit != null);
             // Upon eviction, `request_inflight` is cleaned up.
             assert(self.eviction_reason == null);
             maybe(self.pending.empty());
@@ -681,14 +688,25 @@ pub fn ContextType(
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
             switch (self.signal.status()) {
                 .running => if (self.batch_size_limit == null) {
-                    // Don't send any requests until registration completes.
-                    assert(self.client.request_inflight != null);
-                    assert(self.client.request_inflight.?.message.header.operation == .register);
-                    return;
+                    if (self.client.request_inflight) |request_inflight| {
+                        // Don't send any requests until registration completes.
+                        assert(request_inflight.message.header.operation == .register);
+                        assert(!self.client.evicted);
+                        assert(self.eviction_reason == null);
+                        return;
+                    }
+
+                    // Evicted during registration (e.g., `client_release_too_{low,high}`).
+                    // N.B. Don't assert the exact eviction reason here to avoid coupling
+                    // too tightly with the cluster logic.
+                    assert(self.client.request_inflight == null);
+                    assert(self.client.evicted);
+                    assert(self.eviction_reason != null);
                 },
                 // Shutdown flushes pending requests.
                 .shutdown_completed, .shutdown_requested => return,
             }
+            maybe(self.batch_size_limit == null);
 
             // Prevents IO thread starvation under heavy client load.
             // Process only the minimal number of packets for the next pending request.
@@ -734,7 +752,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.request_latency =
-                self.request_timer.elapsed(current_timestamp);
+                self.request_timer.until(current_timestamp);
 
             // The client might have a smaller message size limit.
             maybe(constants.message_body_size_max < result.batch_size_limit);
@@ -784,7 +802,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.request_latency =
-                self.request_timer.elapsed(current_timestamp);
+                self.request_timer.until(current_timestamp);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
@@ -939,10 +957,20 @@ pub fn ContextType(
     };
 }
 
-/// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
-/// Vendored from `std.Thread.Mutex.FutexImpl`.
+/// Implements the `Mutex` API as an `extern` struct, based on the futex operations of `std.Io`.
+/// Adapted from Zig 0.14's `std.Thread.Mutex.FutexImpl`.
 const Locker = extern struct {
-    const Futex = std.Thread.Futex;
+    const Futex = struct {
+        const io = std.Io.Threaded.global_single_threaded.io();
+
+        fn wait(ptr: *const std.atomic.Value(u32), expect: u32) void {
+            io.futexWaitUncancelable(u32, &ptr.raw, expect);
+        }
+
+        fn wake(ptr: *const std.atomic.Value(u32), max_waiters: u32) void {
+            io.futexWake(u32, &ptr.raw, max_waiters);
+        }
+    };
     const unlocked: u32 = 0b00;
     const locked: u32 = 0b01;
     const contended: u32 = 0b11; // Must contain the `locked` bit for x86 optimization below.

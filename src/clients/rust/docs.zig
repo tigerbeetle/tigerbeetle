@@ -30,7 +30,7 @@ pub const RustDocs = Docs{
     \\
     \\[dependencies]
     \\tigerbeetle.path = "../.."
-    \\futures = "0.3"
+    \\futures = "=0.3.31"
     ,
 
     .test_file_name = "main",

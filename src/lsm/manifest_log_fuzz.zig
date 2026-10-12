@@ -125,11 +125,11 @@ fn generate_events(
     prng: *stdx.PRNG,
     events_count: usize,
 ) ![]const ManifestEvent {
-    var events = std.ArrayList(ManifestEvent).init(gpa);
-    errdefer events.deinit();
+    var events: std.ArrayList(ManifestEvent) = .empty;
+    errdefer events.deinit(gpa);
 
-    var tables = std.ArrayList(TableInfo).init(gpa);
-    defer tables.deinit();
+    var tables: std.ArrayList(TableInfo) = .empty;
+    defer tables.deinit(gpa);
 
     // The maximum number of (live) tables that the manifest has at any point in time.
     var tables_max: usize = 0;
@@ -196,8 +196,8 @@ fn generate_events(
                 };
 
                 table_address += 1;
-                try tables.append(table);
-                try events.append(.{ .append = table });
+                try tables.append(gpa, table);
+                try events.append(gpa, .{ .append = table });
             }
             tables_max = @max(tables_max, tables.items.len);
 
@@ -208,7 +208,7 @@ fn generate_events(
                 if (table.label.level == constants.lsm_levels - 1) continue;
                 table.label.event = .update;
                 table.label.level += 1;
-                try events.append(.{ .append = table });
+                try events.append(gpa, .{ .append = table });
             }
 
             for (0..operations.update_snapshots) |_| {
@@ -219,7 +219,7 @@ fn generate_events(
                 if (table.snapshot_max == 2) continue;
                 table.label.event = .update;
                 table.snapshot_max = 2;
-                try events.append(.{ .append = table });
+                try events.append(gpa, .{ .append = table });
             }
         }
 
@@ -230,22 +230,22 @@ fn generate_events(
             if (tables.items[i].snapshot_max == 2) {
                 var table = tables.swapRemove(i);
                 table.label.event = .remove;
-                try events.append(.{ .append = table });
+                try events.append(gpa, .{ .append = table });
             } else {
                 i += 1;
             }
         }
 
         if (prng.int_inclusive(usize, compacts_per_checkpoint) == 0) {
-            try events.append(.checkpoint);
+            try events.append(gpa, .checkpoint);
         } else {
-            try events.append(.compact);
+            try events.append(gpa, .compact);
         }
     }
     log.info("event_count = {d}", .{events.items.len});
     log.info("tables_max = {d}/{d}", .{ tables_max, manifest_log_compaction_pace.tables_max });
 
-    return events.toOwnedSlice();
+    return events.toOwnedSlice(gpa);
 }
 
 const Environment = struct {
@@ -570,6 +570,7 @@ const ManifestLogModel = struct {
     /// Stores table updates that are not yet checkpointed.
     const AppendList = std.ArrayList(TableInfo);
 
+    gpa: std.mem.Allocator,
     tables: TableMap,
     appends: AppendList,
 
@@ -577,10 +578,11 @@ const ManifestLogModel = struct {
         const tables = TableMap.init(gpa);
         errdefer tables.deinit(gpa);
 
-        const appends = AppendList.init(gpa);
+        const appends: AppendList = .empty;
         errdefer appends.deinit(gpa);
 
         return ManifestLogModel{
+            .gpa = gpa,
             .tables = tables,
             .appends = appends,
         };
@@ -588,11 +590,11 @@ const ManifestLogModel = struct {
 
     fn deinit(model: *ManifestLogModel) void {
         model.tables.deinit();
-        model.appends.deinit();
+        model.appends.deinit(model.gpa);
     }
 
     fn append(model: *ManifestLogModel, table: *const TableInfo) !void {
-        try model.appends.append(table.*);
+        try model.appends.append(model.gpa, table.*);
     }
 
     fn checkpoint(model: *ManifestLogModel) !void {

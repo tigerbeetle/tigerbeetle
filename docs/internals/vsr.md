@@ -107,7 +107,7 @@ See also:
 
 Start-View-Change (ExitView, EV) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
 
-Unlike the Start-View-Change described in [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.2, this protocol runs in both `status=normal` and `status=view_change` (not just `status=view_change`).
+Unlike the Start-View-Change described in [VRR](https://hdl.handle.net/1721.1/71763) §4.2, this protocol runs in both `status=normal` and `status=view_change` (not just `status=view_change`).
 
 1. Depending on the replica's status:
    - `status=normal` & primary: When the replica has not recently received a `prepare_ok` (and it has a prepare in flight), pause broadcasting `command=commit`.
@@ -242,8 +242,8 @@ In response to a `get_reply`:
 
 See also:
 
-- [Integration: Client Session Lifecycle](../../reference/sessions.md#lifecycle)
-- [Integration: Client Session Eviction](../../reference/sessions.md#eviction)
+- [Integration: Client Session Lifecycle](../reference/sessions.md#lifecycle)
+- [Integration: Client Session Eviction](../reference/sessions.md#eviction)
 
 ### Protocol: Repair Grid
 

@@ -28,12 +28,7 @@ const Operation = operation_enum: {
         }
     }
 
-    break :operation_enum @Type(.{ .@"enum" = .{
-        .tag_type = u8,
-        .fields = operation_fields,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
+    break :operation_enum EnumFromFieldsType(u8, operation_fields);
 };
 
 const TreeEnum = tree_enum: {
@@ -50,12 +45,7 @@ const TreeEnum = tree_enum: {
         }
     }
 
-    break :tree_enum @Type(.{ .@"enum" = .{
-        .tag_type = u32,
-        .fields = tree_fields,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
+    break :tree_enum EnumFromFieldsType(u32, tree_fields);
 };
 
 const GrooveEnum = groove_enum: {
@@ -70,13 +60,21 @@ const GrooveEnum = groove_enum: {
         }};
     }
 
-    break :groove_enum @Type(.{ .@"enum" = .{
-        .tag_type = u32,
-        .fields = groove_fields,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
+    break :groove_enum EnumFromFieldsType(u32, groove_fields);
 };
+
+fn EnumFromFieldsType(
+    comptime Tag: type,
+    comptime fields: []const std.builtin.Type.EnumField,
+) type {
+    var names: [fields.len][]const u8 = undefined;
+    var values: [fields.len]Tag = undefined;
+    for (fields, &names, &values) |field, *name, *value| {
+        name.* = field.name;
+        value.* = field.value;
+    }
+    return @Enum(Tag, .exhaustive, &names, &values);
+}
 
 /// Returns the count of an exhaustive enum.
 fn enum_count(EnumOrUnion: type) u8 {
@@ -369,15 +367,7 @@ pub const EventTiming = union(Event.Tag) {
         }
     }
 
-    pub fn format(
-        event: *const EventTiming,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(event: *const EventTiming, writer: *std.Io.Writer) !void {
         switch (event.*) {
             inline else => |data| {
                 try format_data(data, writer);
@@ -516,15 +506,7 @@ pub const EventTracing = union(Event.Tag) {
         }
     }
 
-    pub fn format(
-        event: *const EventTracing,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(event: *const EventTracing, writer: *std.Io.Writer) !void {
         switch (event.*) {
             inline else => |data| {
                 try format_data(data, writer);
@@ -745,7 +727,7 @@ pub const EventMetricAggregate = struct {
 
 test "EventMetric slot doesn't have collisions" {
     const allocator = std.testing.allocator;
-    var stacks: std.ArrayListUnmanaged(u32) = .{};
+    var stacks: std.ArrayList(u32) = .empty;
     defer stacks.deinit(allocator);
 
     var g: @import("../testing/exhaustigen.zig") = .{};
@@ -794,7 +776,7 @@ test "EventMetric slot doesn't have collisions" {
 
 test "EventTiming slot doesn't have collisions" {
     const allocator = std.testing.allocator;
-    var stacks: std.ArrayListUnmanaged(u32) = .{};
+    var stacks: std.ArrayList(u32) = .empty;
     defer stacks.deinit(allocator);
 
     var g: @import("../testing/exhaustigen.zig") = .{};

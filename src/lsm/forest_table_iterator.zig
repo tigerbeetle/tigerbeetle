@@ -29,25 +29,14 @@ const TableInfo = @import("./schema.zig").ManifestNode.TableInfo;
 pub fn ForestTableIteratorType(comptime Forest: type) type {
     // struct { (Tree.name) → TreeTableIteratorType(Tree) }
     const TreeTableIterators = iterator: {
-        const StructField = std.builtin.Type.StructField;
-
-        var fields: [Forest.tree_infos.len]StructField = undefined;
+        var names: [Forest.tree_infos.len][]const u8 = undefined;
+        var types: [Forest.tree_infos.len]type = undefined;
         for (Forest.tree_infos, 0..) |tree_info, i| {
-            fields[i] = .{
-                .name = @ptrCast(tree_info.tree_name),
-                .type = TreeTableIteratorType(tree_info.Tree),
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(TreeTableIteratorType(tree_info.Tree)),
-            };
+            names[i] = tree_info.tree_name;
+            types[i] = TreeTableIteratorType(tree_info.Tree);
         }
 
-        break :iterator @Type(.{ .@"struct" = .{
-            .layout = .auto,
-            .fields = &fields,
-            .decls = &.{},
-            .is_tuple = false,
-        } });
+        break :iterator @Struct(.auto, null, &names, &types, &@splat(.{}));
     };
     assert(std.meta.fields(TreeTableIterators).len > 0);
 

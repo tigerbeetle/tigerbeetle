@@ -262,7 +262,10 @@ class ClientSync(Client, bindings.StateMachineMixin):
 
     def close(self) -> None:
         tb_assert(self._client is not None)
-        bindings.tb_client_deinit(ctypes.byref(self._client))
+        client_state = bindings.tb_client_deinit(ctypes.byref(self._client))
+        tb_assert(client_state != bindings.ClientStatus.NOT_INITIALIZED)
+        if client_state == bindings.ClientStatus.CLOSED:
+            return
 
         tb_assert(len(self._inflight_packets) == 0)
         del Client._clients[self._client_key]
@@ -323,7 +326,10 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
 
     async def close(self) -> None:
         tb_assert(self._client is not None)
-        bindings.tb_client_deinit(ctypes.byref(self._client))
+        client_state = bindings.tb_client_deinit(ctypes.byref(self._client))
+        tb_assert(client_state != bindings.ClientStatus.NOT_INITIALIZED)
+        if client_state == bindings.ClientStatus.CLOSED:
+            return
 
         # tb_client_deinit internally clears any inflight requests, and calls their callbacks, so
         # the client needs to stick around until that's done.

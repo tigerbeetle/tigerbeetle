@@ -13,15 +13,15 @@ const check_links_external: bool = false;
 
 var file_cache: std.StringHashMap([]const u8) = undefined;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     file_cache = std.StringHashMap([]const u8).init(allocator);
-    var args = std.process.args();
+    var args = init.minimal.args.iterate();
     _ = args.skip();
     const path = args.next().?;
     assert(args.next() == null);
-    try validate_dir(allocator, path);
+    try validate_dir(allocator, init.io, path);
 }
 
 fn classify_file(path: []const u8) enum { text, binary, exception, unexpected } {
@@ -48,19 +48,19 @@ fn classify_file(path: []const u8) enum { text, binary, exception, unexpected } 
     return .unexpected;
 }
 
-fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
-    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
-    defer dir.close();
+fn validate_dir(arena: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    var dir = try std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true });
+    defer dir.close(io);
 
     var walker = try dir.walk(arena);
     defer walker.deinit();
 
-    while (try walker.next()) |entry| switch (entry.kind) {
-        .file => try validate_file(.{ .arena = arena, .dir = dir, .path = entry.path }),
+    while (try walker.next(io)) |entry| switch (entry.kind) {
+        .file => try validate_file(.{ .arena = arena, .io = io, .dir = dir, .path = entry.path }),
         .directory => {},
         else => {
             log.err("unexpected file type: '{s}'", .{
-                try dir.realpathAlloc(arena, entry.path),
+                try dir.realPathFileAlloc(io, entry.path, arena),
             });
             return error.UnsupportedFileType;
         },
@@ -69,14 +69,15 @@ fn validate_dir(arena: std.mem.Allocator, path: []const u8) !void {
 
 const FileValidationContext = struct {
     arena: std.mem.Allocator,
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     path: []const u8,
 };
 
 fn validate_file(context: FileValidationContext) !void {
-    const stat = context.dir.statFile(context.path) catch |err| {
+    const stat = context.dir.statFile(context.io, context.path, .{}) catch |err| {
         log.err("unable to stat file '{s}': {s}", .{
-            try context.dir.realpathAlloc(context.arena, context.path),
+            try context.dir.realPathFileAlloc(context.io, context.path, context.arena),
             @errorName(err),
         });
         return err;
@@ -88,10 +89,10 @@ fn validate_file(context: FileValidationContext) !void {
     else
         file_size_max;
     if (stat.size > size_max) {
-        log.err("file '{s}' with size {:.2} exceeds max file size of {:.2}", .{
-            try context.dir.realpathAlloc(context.arena, context.path),
-            std.fmt.fmtIntSizeBin(stat.size),
-            std.fmt.fmtIntSizeBin(size_max),
+        log.err("file '{s}' with size {Bi:.2} exceeds max file size of {Bi:.2}", .{
+            try context.dir.realPathFileAlloc(context.io, context.path, context.arena),
+            stat.size,
+            size_max,
         });
         return error.FileSizeExceeded;
     }
@@ -102,7 +103,7 @@ fn validate_file(context: FileValidationContext) !void {
         .exception => {}, // Nothing to validate.
         .unexpected => {
             log.err("file '{s}' has unsupported type '{s}'", .{
-                try context.dir.realpathAlloc(context.arena, context.path),
+                try context.dir.realPathFileAlloc(context.io, context.path, context.arena),
                 std.fs.path.extension(context.path),
             });
             return error.UnsupportedFileType;
@@ -113,14 +114,15 @@ fn validate_file(context: FileValidationContext) !void {
 fn validate_text_file(context: FileValidationContext) !void {
     assert(classify_file(context.path) == .text);
 
-    const file = try context.dir.openFile(context.path, .{});
-    defer file.close();
+    const file = try context.dir.openFile(context.io, context.path, .{});
+    defer file.close(context.io);
 
-    try file.seekFromEnd(-1);
-    const last_byte = try file.reader().readByte();
-    if (last_byte != '\n') {
+    const stat = try file.stat(context.io);
+    var last_byte: [1]u8 = undefined;
+    _ = try file.readPositionalAll(context.io, &last_byte, stat.size - 1);
+    if (last_byte[0] != '\n') {
         log.err("file '{s}' doesn't end with a newline", .{
-            try context.dir.realpathAlloc(context.arena, context.path),
+            try context.dir.realPathFileAlloc(context.io, context.path, context.arena),
         });
         return error.MissingNewline;
     }
@@ -130,10 +132,15 @@ fn validate_text_file(context: FileValidationContext) !void {
     }
 }
 
-fn read_file_cached(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
+fn read_file_cached(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+) ![]const u8 {
     if (file_cache.get(path)) |content| return content;
 
-    const content = try dir.readFileAlloc(arena, path, 2 * 1024 * 1024);
+    const content = try dir.readFileAlloc(io, path, arena, .limited(2 * 1024 * 1024));
     try file_cache.put(try arena.dupe(u8, path), content);
 
     return content;
@@ -156,11 +163,11 @@ const https_exceptions = std.StaticStringMap(void).initComptime(.{
 });
 
 fn check_links(context: FileValidationContext) !void {
-    const html = try read_file_cached(context.arena, context.dir, context.path);
+    const html = try read_file_cached(context.arena, context.io, context.dir, context.path);
 
     var link_iterator = LinkIterator.init(html);
     errdefer log.err("[link checker] error in {s}:{}", .{
-        context.dir.realpathAlloc(context.arena, context.path) catch unreachable,
+        context.dir.realPathFileAlloc(context.io, context.path, context.arena) catch unreachable,
         link_iterator.line_number,
     });
 
@@ -177,12 +184,12 @@ fn check_link(context: FileValidationContext, link: Link) !void {
         }
 
         if (std.mem.startsWith(u8, link.base, "https://")) {
-            return check_link_external(context.arena, link);
+            return check_link_external(context.arena, context.io, link);
         }
 
         if (std.mem.startsWith(u8, link.base, "http://")) {
             if (http_exceptions.has(link.base)) {
-                return check_link_external(context.arena, link);
+                return check_link_external(context.arena, context.io, link);
             }
 
             log.err("found insecure link: '{s}'", .{link.base});
@@ -211,7 +218,7 @@ fn check_link(context: FileValidationContext, link: Link) !void {
         target = try std.fs.path.join(context.arena, &.{ target, "index.html" });
     }
 
-    if (!try path_exists(context.dir, target)) {
+    if (!try path_exists(context.io, context.dir, target)) {
         log.err("link target not found: '{s}'", .{target});
         return error.TargetNotFound;
     }
@@ -221,7 +228,7 @@ fn check_link(context: FileValidationContext, link: Link) !void {
     }
 }
 
-fn check_link_external(arena: std.mem.Allocator, link: Link) !void {
+fn check_link_external(arena: std.mem.Allocator, io: std.Io, link: Link) !void {
     if (!check_links_external) return;
     if (https_exceptions.has(link.base)) return;
 
@@ -229,19 +236,17 @@ fn check_link_external(arena: std.mem.Allocator, link: Link) !void {
 
     log.info("checking external link '{s}'", .{link.base});
 
-    var client = std.http.Client{ .allocator = arena };
+    var client = std.http.Client{ .allocator = arena, .io = io };
     defer client.deinit();
 
-    const uri = try std.Uri.parse(link.base);
-    var header_buffer: [512 * 1024]u8 = undefined;
-    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
-    defer request.deinit();
+    var discarding = std.Io.Writer.Discarding.init(&.{});
+    const result = try client.fetch(.{
+        .location = .{ .url = link.base },
+        .method = .GET,
+        .response_writer = &discarding.writer,
+    });
 
-    try request.send();
-    try request.finish();
-    try request.wait();
-
-    if (request.response.status != std.http.Status.ok) {
+    if (result.status != std.http.Status.ok) {
         return error.WrongStatusResponse;
     }
 }
@@ -253,7 +258,7 @@ fn check_link_fragment(
 ) !void {
     assert(std.mem.endsWith(u8, target_path, ".html"));
 
-    const html = try read_file_cached(context.arena, context.dir, target_path);
+    const html = try read_file_cached(context.arena, context.io, context.dir, target_path);
     const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", fragment, "\"" });
     if (std.mem.indexOf(u8, html, needle) == null) {
         log.err("link target '{s}' does not contain anchor: '{s}'", .{ target_path, fragment });
@@ -304,8 +309,8 @@ const LinkIterator = struct {
     }
 };
 
-fn path_exists(dir: std.fs.Dir, path: []const u8) !bool {
-    dir.access(path, .{}) catch |err| switch (err) {
+fn path_exists(io: std.Io, dir: std.Io.Dir, path: []const u8) !bool {
+    dir.access(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return false,
         else => return err,
     };

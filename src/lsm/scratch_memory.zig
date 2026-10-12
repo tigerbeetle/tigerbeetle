@@ -1,7 +1,7 @@
 //! ScratchMemory is a page-aligned scratch buffer meant for situations where a buffer is required
 //! (e.g., radix sort) and can be shared between components.
 //! The buffer is page-aligned so that smaller alignments are trivially satisfied. See:
-//! https://ziglang.org/documentation/0.14.1/#Alignment
+//! https://ziglang.org/documentation/0.16.0/#Alignment
 //!
 const std = @import("std");
 const stdx = @import("stdx");
@@ -20,7 +20,7 @@ pub fn init(gpa: std.mem.Allocator, size: usize) !ScratchMemory {
         .state = .free,
     };
 
-    scratch.buffer = try gpa.alignedAlloc(u8, std.heap.page_size_min, size);
+    scratch.buffer = try gpa.alignedAlloc(u8, .fromByteUnits(std.heap.page_size_min), size);
     errdefer gpa.free(scratch.buffer);
 
     return scratch;

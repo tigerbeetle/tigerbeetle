@@ -5,6 +5,7 @@ src/clients/c/lib
 *_*.tigerbeetle
 .zig-cache/
 zig-cache/
+zig-pkg/
 zig-out/
 
 tools/

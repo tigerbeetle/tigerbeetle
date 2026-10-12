@@ -296,8 +296,8 @@ fn TestContextType(comptime streams_max: u8) type {
             );
 
             for (std.enums.values(Direction)) |direction| {
-                var actual = std.ArrayList(Value).init(testing.allocator);
-                defer actual.deinit();
+                var actual: std.ArrayList(Value) = .empty;
+                defer actual.deinit(testing.allocator);
 
                 var context: TestContext = .{
                     .streams = undefined,
@@ -309,7 +309,7 @@ fn TestContextType(comptime streams_max: u8) type {
 
                 var it = ZigZagMerge.init(&context, @intCast(streams.len), direction);
                 while (try it.pop()) |value| {
-                    try actual.append(value);
+                    try actual.append(testing.allocator, value);
                 }
 
                 if (direction == .descending) std.mem.reverse(Value, actual.items);
@@ -540,7 +540,7 @@ test "zig_zag_merge: unit" {
 }
 
 test "zig_zag_merge: fuzz" {
-    const seed = std.crypto.random.int(u64);
+    const seed = std.testing.random_seed;
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
     var prng = stdx.PRNG.from_seed(seed);

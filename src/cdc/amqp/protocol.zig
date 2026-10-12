@@ -291,12 +291,7 @@ pub const Decoder = struct {
         comptime assert(@typeInfo(Enum) == .@"enum");
         const Int = std.meta.Tag(Enum);
         const value = try self.read_int(Int);
-        return std.meta.intToEnum(
-            Enum,
-            value,
-        ) catch |err| switch (err) {
-            error.InvalidEnumTag => return error.Unexpected,
-        };
+        return std.enums.fromInt(Enum, value) orelse return error.Unexpected;
     }
 
     pub fn read_bool(self: *Decoder) Error!bool {

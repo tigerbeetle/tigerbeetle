@@ -83,6 +83,7 @@ pub fn range_inclusive_ms(prng: *stdx.PRNG, min: anytype, max: anytype) Duration
 }
 
 pub const FuzzArgs = struct {
+    io: std.Io,
     seed: u64,
     events_max: ?usize,
 };
@@ -112,23 +113,20 @@ pub fn DeclEnumExcludingType(T: type, exclude: []const std.meta.DeclEnum(T)) typ
     const base = @typeInfo(std.meta.DeclEnum(T)).@"enum";
     assert(exclude.len > 0); // Use plain std.meta.DeclEnum.
     assert(exclude.len < base.fields.len);
-    var fields_filtered: [base.fields.len - exclude.len]std.builtin.Type.EnumField = undefined;
+    var names_filtered: [base.fields.len - exclude.len][]const u8 = undefined;
+    var values_filtered: [base.fields.len - exclude.len]base.tag_type = undefined;
     var i: usize = 0;
     next_field: for (base.fields) |field| {
         for (exclude) |excluded| {
             if (std.mem.eql(u8, field.name, @tagName(excluded))) continue :next_field;
         }
-        fields_filtered[i] = field;
+        names_filtered[i] = field.name;
+        values_filtered[i] = field.value;
         i += 1;
     }
-    assert(i == fields_filtered.len);
+    assert(i == names_filtered.len);
 
-    return @Type(.{ .@"enum" = .{
-        .tag_type = base.tag_type,
-        .fields = &fields_filtered,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
+    return @Enum(base.tag_type, .exhaustive, &names_filtered, &values_filtered);
 }
 
 pub fn limit_ram() void {

@@ -288,7 +288,7 @@ test "Queue: fuzz" {
             item.* = .{ .value = value, .link = .{} };
         }
 
-        var free: std.ArrayListUnmanaged(usize) = .{};
+        var free: std.ArrayList(usize) = .empty;
         defer free.deinit(gpa);
 
         try free.ensureTotalCapacity(gpa, N);

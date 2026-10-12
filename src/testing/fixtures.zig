@@ -51,7 +51,7 @@ pub fn init_time(options: struct {
 }
 
 pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {
-    writer: ?std.io.AnyWriter = null,
+    writer: ?*std.Io.Writer = null,
     process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = cluster, .replica = replica } },
 }) !Tracer {
     return Tracer.init(gpa, init, options.process_id, .{ .writer = options.writer });

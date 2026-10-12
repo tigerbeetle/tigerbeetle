@@ -1402,10 +1402,10 @@ test "batch_write: multibatch" {
     var buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8 =
         @ptrCast(try testing.allocator.alignedAlloc(
             u8,
-            constants.cache_line_size,
+            .fromByteUnits(constants.cache_line_size),
             constants.message_body_size_max,
         ));
-    defer testing.allocator.free(buffer);
+    defer testing.allocator.destroy(buffer);
 
     // Single batch.
     {
@@ -1573,10 +1573,10 @@ test "batch_write: no multibatch" {
     var buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8 =
         @ptrCast(try testing.allocator.alignedAlloc(
             u8,
-            constants.cache_line_size,
+            .fromByteUnits(constants.cache_line_size),
             constants.message_body_size_max,
         ));
-    defer testing.allocator.free(buffer);
+    defer testing.allocator.destroy(buffer);
 
     const result = packet.batch_write(TestOperation, operations_allowed, .{
         .output_buffer = buffer,

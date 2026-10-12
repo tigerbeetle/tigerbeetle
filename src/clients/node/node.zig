@@ -346,7 +346,7 @@ fn on_completion(
 
                     const packet = packet_extern.cast();
                     const request_buffer: []align(@alignOf(Event)) u8 =
-                        @constCast(@alignCast(packet.slice()));
+                        @alignCast(@constCast(packet.slice()));
                     // Trying to reallocate the request buffer instead of allocating a new one.
                     // This is optimal for create_* operations.
                     const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(

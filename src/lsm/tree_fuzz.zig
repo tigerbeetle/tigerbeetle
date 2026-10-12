@@ -281,7 +281,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn checkpoint_iop_release_callback(ctx: *anyopaque) void {
-            const env: *Environment = @alignCast(@ptrCast(ctx));
+            const env: *Environment = @ptrCast(@alignCast(ctx));
             if (env.state != .grid_checkpoint) return;
             if (!env.pool.idle()) return;
 

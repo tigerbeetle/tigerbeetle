@@ -18,8 +18,6 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
-const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
-
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -302,7 +300,8 @@ pub fn GrooveType(
         comptime maybe(optional);
     }
 
-    comptime var index_fields: []const std.builtin.Type.StructField = &.{};
+    comptime var index_names: []const []const u8 = &.{};
+    comptime var index_types: []const type = &.{};
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -327,15 +326,8 @@ pub fn GrooveType(
         else
             IndexTreeType(Storage, field.type, table_value_count_max);
 
-        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = IndexTree,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree),
-            },
-        };
+        index_names = index_names ++ .{field.name};
+        index_types = index_types ++ .{IndexTree};
     }
 
     // Generate IndexTrees for fields derived from the Value in groove_options.
@@ -379,27 +371,13 @@ pub fn GrooveType(
             UniqueKeyTreeType(Storage, DerivedType, table_value_count_max)
         else
             IndexTreeType(Storage, DerivedType, table_value_count_max);
-        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = IndexTree,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree),
-            },
-        };
+        index_names = index_names ++ .{field.name};
+        index_types = index_types ++ .{IndexTree};
     }
 
-    comptime var index_options_fields: [index_fields.len]std.builtin.Type.StructField = undefined;
-    for (index_fields, 0..) |index_field, i| {
-        const IndexTree = index_field.type;
-        index_options_fields[i] = .{
-            .name = index_field.name,
-            .type = IndexTree.Options,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(IndexTree.Options),
-        };
+    comptime var index_options_types: [index_names.len]type = undefined;
+    for (index_types, 0..) |IndexTree, i| {
+        index_options_types[i] = IndexTree.Options;
     }
 
     const ObjectTreeHelper = ObjectTreeHelperType(Object);
@@ -420,24 +398,10 @@ pub fn GrooveType(
         break :T TreeType(Table, Storage);
     };
 
-    const _IndexTrees = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = index_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
-    const _IndexTreeOptions = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &index_options_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
-
-    const has_scan = index_fields.len > 0;
+    const _IndexTrees =
+        @Struct(.auto, null, index_names, index_types[0..index_names.len], &@splat(.{}));
+    const _IndexTreeOptions =
+        @Struct(.auto, null, index_names, &index_options_types, &@splat(.{}));
 
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
@@ -695,8 +659,6 @@ pub fn GrooveType(
             not_found,
         };
 
-        pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
-
         grid: *Grid,
         objects: ObjectTree,
         indexes: IndexTrees,
@@ -726,8 +688,6 @@ pub fn GrooveType(
         /// table, it _must_ exist in our object cache.
         /// Otherwise, the ObjectsCache is of type void.
         objects_cache: ObjectsCache,
-
-        scan_builder: ScanBuilder,
 
         pub const IndexTreeOptions = _IndexTreeOptions;
 
@@ -762,7 +722,6 @@ pub fn GrooveType(
                 .indexes = undefined,
                 .prefetch_keys = undefined,
                 .objects_cache = if (ObjectsCache != void) undefined else {},
-                .scan_builder = undefined,
             };
 
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
@@ -841,9 +800,6 @@ pub fn GrooveType(
                 options.prefetch_entries_for_read_max + options.prefetch_entries_for_update_max,
             );
             errdefer groove.prefetch_keys.deinit(allocator);
-
-            if (has_scan) try groove.scan_builder.init(allocator);
-            errdefer if (has_scan) groove.scan_builder.deinit(allocator);
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
@@ -856,7 +812,6 @@ pub fn GrooveType(
             groove.prefetch_keys.deinit(allocator);
 
             if (ObjectsCache != void) groove.objects_cache.deinit(allocator);
-            if (has_scan) groove.scan_builder.deinit(allocator);
 
             groove.* = undefined;
         }
@@ -871,8 +826,6 @@ pub fn GrooveType(
 
             if (ObjectsCache != void) groove.objects_cache.reset();
 
-            if (has_scan) groove.scan_builder.reset();
-
             groove.* = .{
                 .grid = groove.grid,
                 .objects = groove.objects,
@@ -880,7 +833,6 @@ pub fn GrooveType(
                 .prefetch_keys = groove.prefetch_keys,
                 .prefetch_snapshot = null,
                 .objects_cache = groove.objects_cache,
-                .scan_builder = groove.scan_builder,
             };
         }
 
@@ -984,11 +936,21 @@ pub fn GrooveType(
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
-        pub fn prefetch_setup(groove: *Groove, snapshot_target: u64) void {
+        pub fn prefetch_begin(groove: *Groove, snapshot_target: u64) void {
             assert(snapshot_target < snapshot_latest);
+            assert(groove.prefetch_snapshot == null);
+            maybe(groove.prefetch_keys.count() == 0);
 
             groove.prefetch_snapshot = snapshot_target;
             groove.prefetch_keys.clearRetainingCapacity();
+        }
+
+        /// Must be called after the state machine finishes prefetching.
+        pub fn prefetch_finish(groove: *Groove) void {
+            assert(groove.prefetch_snapshot != null);
+            maybe(groove.prefetch_keys.count() == 0);
+
+            groove.prefetch_snapshot = null;
         }
 
         /// This must be called by the state machine for every lookup by unique keys.
@@ -1344,13 +1306,14 @@ pub fn GrooveType(
             callback: *const fn (*PrefetchContext) void,
             context: *PrefetchContext,
         ) void {
+            assert(groove.prefetch_snapshot != null);
+
             context.* = .{
                 .groove = groove,
                 .callback = callback,
                 .snapshot = groove.prefetch_snapshot.?,
                 .key_iterator = groove.prefetch_keys.iterator(),
             };
-            groove.prefetch_snapshot = null;
             context.start_workers();
         }
 
@@ -1525,7 +1488,7 @@ pub fn GrooveType(
             ) *PrefetchWorker {
                 const lookup: *LookupContext = @fieldParentPtr(@tagName(field), completion);
                 assert(lookup.* ==
-                    comptime std.enums.nameCast(std.meta.Tag(LookupContext), field));
+                    comptime @field(std.meta.Tag(LookupContext), @tagName(field)));
 
                 return @fieldParentPtr("lookup", lookup);
             }
@@ -1600,7 +1563,7 @@ pub fn GrooveType(
                         );
                         tree.lookup_from_levels_storage(.{
                             .callback = callback,
-                            .context = worker.lookup_context(comptime std.enums.nameCast(
+                            .context = worker.lookup_context(comptime @field(
                                 Field,
                                 @tagName(field),
                             )),
@@ -1622,12 +1585,12 @@ pub fn GrooveType(
                         result: ?*const Tree.Value,
                     ) void {
                         const worker: *PrefetchWorker = worker_from_completion(
-                            comptime std.enums.nameCast(Field, @tagName(field)),
+                            comptime @field(Field, @tagName(field)),
                             completion,
                         );
                         assert(worker.current != null);
                         assert(worker.lookup ==
-                            comptime std.enums.nameCast(std.meta.Tag(LookupContext), field));
+                            comptime @field(std.meta.Tag(LookupContext), @tagName(field)));
 
                         worker.lookup = .null;
 

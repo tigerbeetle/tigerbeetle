@@ -39,11 +39,11 @@ fn run_fuzz(
     var free_set_model = try FreeSetModel.init(gpa, blocks_count);
     defer free_set_model.deinit(gpa);
 
-    var active_reservations = std.ArrayList(Reservation).init(gpa);
-    defer active_reservations.deinit();
+    var active_reservations: std.ArrayList(Reservation) = .empty;
+    defer active_reservations.deinit(gpa);
 
-    var active_addresses = std.ArrayList(u64).init(gpa);
-    defer active_addresses.deinit();
+    var active_addresses: std.ArrayList(u64) = .empty;
+    defer active_addresses.deinit(gpa);
 
     for (events) |event| {
         log.debug("event={}", .{event});
@@ -54,7 +54,7 @@ fn run_fuzz(
                 assert(std.meta.eql(reservation_expect, reservation_actual));
 
                 if (reservation_expect) |reservation| {
-                    try active_reservations.append(reservation);
+                    try active_reservations.append(gpa, reservation);
                 }
             },
             .forfeit => {
@@ -74,7 +74,7 @@ fn run_fuzz(
                 const address_expect = free_set_model.acquire(reservation);
                 assert(std.meta.eql(address_expect, address_actual));
                 if (address_expect) |address| {
-                    try active_addresses.append(address);
+                    try active_addresses.append(gpa, address);
                 }
             },
             .release => |data| {

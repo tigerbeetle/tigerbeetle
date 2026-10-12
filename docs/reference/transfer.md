@@ -41,32 +41,89 @@ see the [Two-Phase Transfer guide](../coding/two-phase-transfers.md).
 
 Fields used by each mode of transfer:
 
-| Field                         | Single-Phase | Pending  | Post-Pending | Void-Pending |
-| ----------------------------- | ------------ | -------- | ------------ | ------------ |
-| `id`                          | required     | required | required     | required     |
-| `debit_account_id`            | required     | required | optional     | optional     |
-| `credit_account_id`           | required     | required | optional     | optional     |
-| `amount`                      | required     | required | required     | optional     |
-| `pending_id`                  | none         | none     | required     | required     |
-| `user_data_128`               | optional     | optional | optional     | optional     |
-| `user_data_64`                | optional     | optional | optional     | optional     |
-| `user_data_32`                | optional     | optional | optional     | optional     |
-| `timeout`                     | none         | optional¹| none         | none         |
-| `ledger`                      | required     | required | optional     | optional     |
-| `code`                        | required     | required | optional     | optional     |
-| `flags.linked`                | optional     | optional | optional     | optional     |
-| `flags.pending`               | false        | true     | false        | false        |
-| `flags.post_pending_transfer` | false        | false    | true         | false        |
-| `flags.void_pending_transfer` | false        | false    | false        | true         |
-| `flags.balancing_debit`       | optional     | optional | false        | false        |
-| `flags.balancing_credit`      | optional     | optional | false        | false        |
-| `flags.closing_debit`         | false        | true     | false        | false        |
-| `flags.closing_credit`        | false        | true     | false        | false        |
-| `flags.imported`              | optional     | optional | optional     | optional     |
-| `timestamp`                   | none²        | none²    | none²        | none²        |
+### Fields by Mode
 
-> _¹ None if `flags.imported` is set._<br/>
-  _² Required if `flags.imported` is set._
+- _Required_ means a valid nonzero value must be supplied.
+- _Optional_ means zero is allowed, with the behavior described below.
+- _Inherit or match_ means zero copies the pending transfer's
+  value, while a nonzero value must equal the pending transfer's value exactly.
+  For each `user_data_*` field, _inherit or new_ will either copy the old transfer's `user_data` field 
+  if set to zero, or set the provided user data field on the newly created transfer.
+  The original pending transfer is immutable.
+- All values remain subject to the individual [field constraints](#fields), 
+  account constraints, and balance limits.
+
+| Field               | Single-Phase | Pending   | Post-Pending     | Void-Pending     |
+|---------------------|--------------|-----------|------------------|------------------|
+| `id`                | required     | required  | required¹        | required¹        |
+| `debit_account_id`  | required     | required  | inherit or match | inherit or match |
+| `credit_account_id` | required     | required  | inherit or match | inherit or match |
+| `amount`            | required     | optional  | optional         | inherit or match |
+| `pending_id`²       | none         | none      | required         | required         |
+| `user_data_128`     | optional     | optional  | inherit or new   | inherit or new   |
+| `user_data_64`      | optional     | optional  | inherit or new   | inherit or new   |
+| `user_data_32`      | optional     | optional  | inherit or new   | inherit or new   |
+| `timeout`           | none         | optional³ | none             | none             |
+| `ledger`            | required     | required  | inherit or match | inherit or match |
+| `code`              | required     | required  | inherit or match | inherit or match |
+| `timestamp`         | none⁴        | none⁴     | none⁴            | none⁴            |
+
+> _¹ Posting and voiding require a new transfer `id`._<br/>
+> _² `pending_id` identifies an existing pending transfer that has not been posted, voided, or expired._<br/>
+> _³ None if `flags.imported` is set._<br/>
+> _⁴ Required if `flags.imported` is set._
+
+### Flags by Mode  
+
+_Required_ means the flag must be set, _forbidden_ means it must be unset, and _optional_
+means either is allowed subject to the rules below.
+
+| Flag                          | Single-Phase | Pending   | Post-Pending | Void-Pending |
+|-------------------------------|--------------|-----------|--------------|--------------|
+| `flags.pending`               | forbidden    | required  | forbidden    | forbidden    |
+| `flags.post_pending_transfer` | forbidden    | forbidden | required     | forbidden    |
+| `flags.void_pending_transfer` | forbidden    | forbidden | forbidden    | required     |
+| `flags.balancing_debit`       | optional     | optional  | forbidden    | forbidden    |
+| `flags.balancing_credit`      | optional     | optional  | forbidden    | forbidden    |
+| `flags.closing_debit`         | forbidden    | optional  | forbidden    | forbidden    |
+| `flags.closing_credit`        | forbidden    | optional  | forbidden    | forbidden    |
+| `flags.linked`                | optional     | optional  | optional     | optional     |
+| `flags.imported`              | optional     | optional  | optional     | optional     |
+
+- The three mode flags (`pending`, `post_pending_transfer`, and `void_pending_transfer`) are 
+  mutually exclusive.
+  - Single-phase transfers set none of them.
+- `flags.balancing_debit` and `flags.balancing_credit` may be set together.
+  - On a pending transfer, any combination of the two balancing and two closing flags is allowed, 
+    including all four or none.
+- Only a pending transfer can set `flags.closing_debit` or `flags.closing_credit`.
+  - Closed accounts can be reopened by voiding the closing transfer or once the closing 
+    transfer expires.
+  - Closing transfers cannot be posted.
+- Pending does not require closing.
+- The posting or voiding transfer must not repeat balancing or closing flags from the original 
+  pending transfer.
+
+### Linked and Imported Transfers
+
+These rules apply in every mode, including pending transfers with balancing or closing flags.
+
+| Condition                   | Requirement / Behavior                                             |
+|----------------------------|---------------------------------------------------------------------|
+| `flags.linked` set         | Link to the next event in the batch; the chain succeeds/fails as one|
+| Last event in linked chain | Unset `linked`; otherwise `linked_event_chain_open`                 |
+| `flags.imported` unset     | `timestamp = 0`; TigerBeetle assigns it                             |
+| `flags.imported` set       | Supply valid imported `timestamp`; `timeout = 0`                    |
+| Multiple transfers/request | All must use the same `flags.imported` value                        |
+| `linked` + `imported` set  | Both rules apply; last event unsets `linked`, keeps `imported`      |
+
+
+- A valid imported `timestamp` is `> 0` and `< 2^63`, and must satisfy the 
+  [import ordering and uniqueness constraints](#flagsimported).
+- The `imported` flag on a posting or voiding transfer does not have to match the original pending
+  transfer's flag.  
+- Imported and regular transfers can post or void pending transfers of either type, including those 
+  with a `timeout` that have not yet expired.
 
 ## Fields
 
@@ -487,7 +544,8 @@ necessary:
   The application must submit batches of imported events separately.
 
 - User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
-  No two objects can have the same timestamp, even different objects like an `Account` and a `Transfer` cannot share the same timestamp.
+  No two objects can have the same timestamp, even different objects like an `Account` and a
+  `Transfer` cannot share the same timestamp.
 
 - User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
   request arrives.
@@ -495,7 +553,8 @@ necessary:
 - Timestamps must be strictly increasing.
 
   Even user-defined timestamps that are required to be past dates need to be at least one
-  nanosecond ahead of the timestamp of the last transfer committed by the cluster.
+  nanosecond ahead of the timestamp of the last transfer committed or
+  [automatically expired](#timeout) by the cluster.
 
   Since the timestamp cannot regress, importing past events can be naturally restrictive without
   coordination, as the last timestamp can be updated using the cluster clock during regular
@@ -527,7 +586,7 @@ Constraints:
 
   It is set by TigerBeetle to the moment the transfer arrives at the cluster.
 
-- Must be greater than `0` and less than `2^63` when the `Transfer` is created with
+- Must be greater than `0` and not be larger than `2^63` when the `Transfer` is created with
   [`flags.imported`](#flagsimported) set
 
 ## Internals

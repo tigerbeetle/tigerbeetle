@@ -169,14 +169,14 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     const request_buffer = try allocator.alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(reply_buffer);
@@ -402,10 +402,7 @@ test "int_edge_biased" {
         }
 
         inline for (1..129) |bits| {
-            const IntType = @Type(.{ .int = .{
-                .signedness = .unsigned,
-                .bits = bits,
-            } });
+            const IntType = @Int(.unsigned, bits);
             const max = std.math.maxInt(IntType);
             if (int == max) {
                 found_max_int[bits] = true;

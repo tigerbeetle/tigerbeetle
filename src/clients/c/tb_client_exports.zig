@@ -200,14 +200,14 @@ pub const Logging = struct {
     var global: Logging = .{};
 
     callback: ?Callback = null,
-    mutex: std.Thread.Mutex = .{},
+    mutex: stdx.Mutex = .{},
     buffer: [log_line_max]u8 = undefined,
     debug: bool = false,
 
     /// A logger which defers to an application provided handler.
     pub fn application_logger(
         comptime message_level: std.log.Level,
-        comptime scope: @Type(.enum_literal),
+        comptime scope: @EnumLiteral(),
         comptime format: []const u8,
         args: anytype,
     ) void {

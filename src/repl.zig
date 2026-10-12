@@ -55,7 +55,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         const Repl = @This();
 
-        fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
+        fn fail(repl: *Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
                 try repl.terminal.print_error(format, arguments);
                 std.process.exit(1);
@@ -64,7 +64,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             try repl.terminal.print(format, arguments);
         }
 
-        fn debug(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
+        fn debug(repl: *Repl, comptime format: []const u8, arguments: anytype) !void {
             if (repl.debug_logs) {
                 try repl.terminal.print("[Debug] " ++ format, arguments);
             }
@@ -581,7 +581,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             const statement = Parser.parse_statement(
                 input,
-                repl.terminal.stderr.any(),
+                &repl.terminal.stderr.interface,
                 arguments,
             ) catch |err| {
                 switch (err) {
@@ -599,7 +599,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
+            try repl.terminal.print("TigerBeetle CLI Client {f}\n" ++
                 \\Press Ctrl+D to exit.
                 \\
                 \\Examples:
@@ -641,7 +641,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
 
-            const client_id = stdx.crypto_u128();
+            const client_id = stdx.crypto_u128(io.io_std);
             const client = try Client.init(
                 allocator,
                 time,
@@ -693,7 +693,8 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         pub fn run(repl: *Repl, statements: []const u8) !void {
             repl.interactive = statements.len == 0;
-            try Terminal.init(&repl.terminal, repl.interactive); // No corresponding deinit.
+            // No corresponding deinit.
+            try Terminal.init(&repl.terminal, repl.io.io_std, repl.interactive);
 
             try Completion.init(&repl.completion);
 
@@ -723,7 +724,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         const statement = Parser.parse_statement(
                             statement_string,
-                            repl.terminal.stderr.any(),
+                            &repl.terminal.stderr.interface,
                             &repl.arguments,
                         ) catch |err| {
                             switch (err) {
@@ -731,7 +732,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 // is not an interactive command, we should
                                 // exit immediately. Parsing error info
                                 // has already been emitted to stderr.
-                                error.ParseError => std.posix.exit(1),
+                                error.ParseError => std.process.exit(1),
 
                                 // An unexpected error for which we do
                                 // want the stacktrace.
@@ -849,6 +850,12 @@ pub fn ReplType(comptime MessageBus: type) type {
                     }
 
                     try repl.terminal.print("]", .{});
+                } else if (@typeInfo(object_field.type) == .@"enum") {
+                    try repl.terminal.print("  \"{s}\": \"{s}.{t}\"", .{
+                        object_field.name,
+                        @typeName(object_field.type),
+                        @field(object, object_field.name),
+                    });
                 } else {
                     try repl.terminal.print(
                         "  \"{s}\": \"{}\"",

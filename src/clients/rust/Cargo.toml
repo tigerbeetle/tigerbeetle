@@ -30,5 +30,5 @@ include = [
 overflow-checks = true
 
 [dev-dependencies]
-futures = { version = "0.3.31", default-features = false, features = ["executor"] }
+futures = { version = "=0.3.31", default-features = false, features = ["executor"] }
 

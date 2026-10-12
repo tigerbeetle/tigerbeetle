@@ -4,7 +4,7 @@ The purpose of a database is to store data: if the database accepts new data, it
 retrieve it later. Surprisingly, many databases don't provide guaranteed durability -- usually the
 data is there, but, under certain edge case conditions, it can get lost!
 
-As the purpose of TigerBeetle is to be the system of record for business transaction, associated
+As the purpose of TigerBeetle is to be the system of record for business transactions, associated
 with real-world value transfers, it is paramount that the data stored in TigerBeetle is safe.
 
 TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability --
@@ -186,7 +186,7 @@ doesn't provide any permission system. The application must implement its own ac
 Note on `io_uring`: it is a relatively recent
 ([Linux 5.1, 2019](https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.1))
 part of the Linux kernel. It had some kernel exploits, which made it problematic for sandboxed
-applications, and lead to `io_uring` being
+applications, and led to `io_uring` being
 [disabled](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html)
 for systems which deal with untrusted data. Because TigerBeetle, by design, only deals with trusted
 integer data, its usage of `io_uring` is secure, and is the safest and most performant way to handle

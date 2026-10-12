@@ -4,22 +4,22 @@
     .dependencies = .{
         .pandoc_macos_arm64 = .{
             .url = "https://github.com/jgm/pandoc/releases/download/3.4/pandoc-3.4-arm64-macOS.zip",
-            .hash = "1220c2506a07845d667e7c127fd0811e4f5f7591e38ccc7fb4376450f3435048d87a",
+            .hash = "N-V-__8AAM4HvwrCUGoHhF1mfnwSf9CBHk9fdZHjjMx_tDdk",
             .lazy = true,
         },
         .pandoc_linux_amd64 = .{
             .url = "https://github.com/jgm/pandoc/releases/download/3.4/pandoc-3.4-linux-amd64.tar.gz",
-            .hash = "1220139a44886509d8a61b44d8b8a79d03bad29ea95493dc97cd921d3f2eb208562c",
+            .hash = "N-V-__8AALLf8wgTmkSIZQnYphtE2LinnQO60p6pVJPcl82S",
             .lazy = true,
         },
         .vale_macos_arm64 = .{
             .url = "https://github.com/errata-ai/vale/releases/download/v3.9.5/vale_3.9.5_macOS_arm64.tar.gz",
-            .hash = "1220418afe2846224487326841b0228b1c44e77bb8440c96190fcc3189a2df1688eb",
+            .hash = "N-V-__8AAEY2RAJBiv4oRiJEhzJoQbAiixxE53u4RAyWGQ_M",
             .lazy = true,
         },
         .vale_linux_amd64 = .{
             .url = "https://github.com/errata-ai/vale/releases/download/v3.9.5/vale_3.9.5_Linux_64-bit.tar.gz",
-            .hash = "1220b6041f1354d29a1b8ad5be5f8a98300142ae992ac147ab70f98e4df94b470917",
+            .hash = "N-V-__8AAAxPRgK2BB8TVNKaG4rVvl-KmDABQq6ZKsFHq3D5",
             .lazy = true,
         },
     },

@@ -95,7 +95,7 @@ Many applications must comply with GDPR and other privacy-preserving requirement
 to be forgotten. User privacy can be preserved by being intentional about what data is stored in
 the `user_data_*` fields.
 
-For example, if `user_data_128` is used to map from your application's unique `user_id` and
+For example, if `user_data_128` is used to map between your application's unique `user_id` and
 TigerBeetle, a user can be 'forgotten' by deleting that mapping. Without it, the accounts and
 transfers in TigerBeetle cannot be linked back to a real user, rendering them meaningless and
 preserving the user's privacy.

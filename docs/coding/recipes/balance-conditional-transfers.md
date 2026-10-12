@@ -5,7 +5,7 @@ certain balance.
 
 It would be unsafe to check an account's balance using the
 [`lookup_accounts`](../../reference/requests/lookup_accounts.md) and then perform the transfer,
-because these requests are not be atomic and the account's balance may change between the lookup and
+because these requests are not atomic and the account's balance may change between the lookup and
 the transfer.
 
 You can atomically run a check against an account's balance before executing a transfer by using a

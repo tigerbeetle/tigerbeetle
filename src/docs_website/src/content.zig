@@ -25,11 +25,17 @@ const PageContent = struct {
     };
 };
 
-pub fn load(arena: Allocator, base: std.fs.Dir, page_buffer: []u8) !Page {
-    return load_page(arena, base, "./", page_buffer);
+pub fn load(arena: Allocator, io: std.Io, base: std.Io.Dir, page_buffer: []u8) !Page {
+    return load_page(arena, io, base, "./", page_buffer);
 }
 
-fn load_page(arena: Allocator, base: std.fs.Dir, path: []const u8, page_buffer: []u8) !Page {
+fn load_page(
+    arena: Allocator,
+    io: std.Io,
+    base: std.Io.Dir,
+    path: []const u8,
+    page_buffer: []u8,
+) !Page {
     errdefer log.err("error while loading '{s}'", .{path});
     const is_dir = std.mem.endsWith(u8, path, "/");
     const is_client = std.mem.indexOf(u8, path, "src/clients") != null;
@@ -39,12 +45,12 @@ fn load_page(arena: Allocator, base: std.fs.Dir, path: []const u8, page_buffer: 
         return error.InvalidPath;
     }
 
-    const text = try read_file(base, file_path, page_buffer);
+    const text = try read_file(io, base, file_path, page_buffer);
     const content = try parse_page_content(arena, text, .{
         .parse_children = is_dir and !is_client,
     });
 
-    var children: std.ArrayListUnmanaged(Page) = .{};
+    var children: std.ArrayList(Page) = .empty;
     for (content.children) |child| {
         assert(is_dir);
         const child_path = if (std.mem.startsWith(u8, child.path, "/src/clients"))
@@ -57,22 +63,22 @@ fn load_page(arena: Allocator, base: std.fs.Dir, path: []const u8, page_buffer: 
                 path,
                 cut_prefix(child.path, "./") orelse child.path,
             });
-        const child_page = try load_page(arena, base, child_path, page_buffer);
+        const child_page = try load_page(arena, io, base, child_path, page_buffer);
         try children.append(arena, child_page);
     }
 
     if (is_dir and !is_client) {
-        var dir = try base.openDir(path, .{ .iterate = true });
-        defer dir.close();
+        var dir = try base.openDir(io, path, .{ .iterate = true });
+        defer dir.close(io);
 
         var dir_iterator = dir.iterate();
-        while (try dir_iterator.next()) |entry| {
+        while (try dir_iterator.next(io)) |entry| {
             if (std.mem.eql(u8, entry.name, "README.md")) continue;
             if (std.mem.eql(u8, entry.name, "internals")) continue;
             if (std.mem.eql(u8, entry.name, "TIGER_STYLE.md")) continue;
             if (std.mem.eql(u8, entry.name, "ARCHITECTURE.md")) continue;
             for (content.children) |child| {
-                const name = std.mem.trimRight(
+                const name = std.mem.trimEnd(
                     u8,
                     cut_prefix(child.path, "./") orelse child.path,
                     "/",
@@ -106,7 +112,7 @@ fn parse_page_content(arena: Allocator, text: []const u8, options: struct {
     title = std.mem.trim(u8, title, "`");
     if (title.len < 3) return error.TitleInvalid;
 
-    var children: std.ArrayListUnmanaged(PageContent.Child) = .{};
+    var children: std.ArrayList(PageContent.Child) = .empty;
 
     if (options.parse_children) {
         while (line_iterator.next()) |line| {
@@ -149,8 +155,8 @@ fn parse_page_child(line: []const u8) !?PageContent.Child {
     };
 }
 
-fn read_file(dir: std.fs.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
-    const result = try dir.readFile(path, page_buffer);
+fn read_file(io: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
+    const result = try dir.readFile(io, path, page_buffer);
     if (result.len == page_buffer.len) return error.FileToLarge;
     return result;
 }

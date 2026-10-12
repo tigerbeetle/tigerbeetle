@@ -62,8 +62,7 @@ pub fn deinit(flags: *Flags, gpa: Allocator) void {
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
-    const stderr = std.io.getStdErr().writer();
-    stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
+    std.debug.print("error: " ++ fmt_string ++ "\n", args);
     // NB: this status must match vsr.FatalReason.cli, but it would be wrong for flags to depend on
     // vsr. The right way would be to parametrize flags by this behavior, and let the caller inject
     // the implementation of fatal function, but let's be pragmatic here and just match the behavior
@@ -99,12 +98,12 @@ fn oom(_: error{OutOfMemory}) noreturn {
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 ///
 /// Value parsing can be customized on per-type basis via `parse_flag_value` customization point.
-pub fn parse(flags: *Flags, comptime CLIArgs: type) CLIArgs {
+pub fn parse(flags: *Flags, comptime CLIArgs: type, process_args: std.process.Args) CLIArgs {
     comptime assert(CLIArgs != void);
 
     const arena = flags.arena.allocator();
 
-    var args = std.process.argsWithAllocator(arena) catch |err| oom(err);
+    var args = std.process.Args.Iterator.initAllocator(process_args, arena) catch |err| oom(err);
     if (!args.skip()) fatal("executable name missing", .{});
 
     return parse_flags(arena, &args, CLIArgs);
@@ -112,7 +111,7 @@ pub fn parse(flags: *Flags, comptime CLIArgs: type) CLIArgs {
 
 fn parse_commands(
     arena: Allocator,
-    args: *std.process.ArgIterator,
+    args: *std.process.Args.Iterator,
     comptime Commands: type,
 ) Commands {
     comptime assert(@typeInfo(Commands) == .@"union");
@@ -126,7 +125,8 @@ fn parse_commands(
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
         if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
-            std.io.getStdOut().writeAll(Commands.help) catch std.process.exit(1);
+            std.Io.File.stdout().writeStreamingAll(std.Options.debug_io, Commands.help) catch
+                std.process.exit(1);
             std.process.exit(0);
         }
     }
@@ -140,7 +140,7 @@ fn parse_commands(
     fatal("unknown subcommand: '{s}'", .{first_arg});
 }
 
-fn parse_flags(arena: Allocator, args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
+fn parse_flags(arena: Allocator, args: *std.process.Args.Iterator, comptime CLIArgs: type) CLIArgs {
     @setEvalBranchQuota(5_000);
 
     if (CLIArgs == void) {
@@ -181,7 +181,7 @@ fn parse_flags(arena: Allocator, args: *std.process.ArgIterator, comptime CLIArg
         assert(fields_positional.len == 0);
     }
 
-    var arg_extended: if (field_extended == null) void else std.ArrayListUnmanaged([]const u8) =
+    var arg_extended: if (field_extended == null) void else std.ArrayList([]const u8) =
         if (field_extended == null) {} else .empty;
 
     comptime {
@@ -567,7 +567,8 @@ pub fn parse_flag_value_fuzz(
 
         var diagnostic: ?[]const u8 = null;
         if (parse_flag_value(string, &diagnostic)) |value| {
-            std.debug.print("expected an error, got value: input='{s}', value={}", .{
+            const value_fmt = if (std.meta.hasMethod(T, "format")) "{f}" else "{}";
+            std.debug.print("expected an error, got value: input='{s}', value=" ++ value_fmt, .{
                 string,
                 value,
             });
@@ -586,7 +587,7 @@ pub fn parse_flag_value_fuzz(
         }
     }
 
-    var corpus: std.ArrayListUnmanaged(u8) = .empty;
+    var corpus: std.ArrayList(u8) = .empty;
     defer corpus.deinit(gpa);
 
     for (cases.ok) |case| try corpus.appendSlice(gpa, case[0]);
@@ -695,17 +696,16 @@ pub const main =
             ;
         };
 
-        fn main() !void {
-            var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-            const gpa = gpa_allocator.allocator();
+        fn main(process_init: std.process.Init) !void {
+            const gpa = process_init.gpa;
 
             var flags = Flags.init(gpa);
             defer flags.deinit(gpa);
 
-            const cli_args = flags.parse(CLIArgs);
+            const cli_args = flags.parse(CLIArgs, process_init.minimal.args);
 
-            const stdout = std.io.getStdOut();
-            const out_stream = stdout.writer();
+            var stdout = std.Io.File.stdout().writerStreaming(process_init.io, &.{});
+            const out_stream = &stdout.interface;
             switch (cli_args) {
                 .empty => try out_stream.print("empty\n", .{}),
                 .prefix => |values| {
@@ -735,7 +735,7 @@ pub const main =
                     try out_stream.print("boolean: {}\n", .{values.boolean});
                     try out_stream.print("path: {s}\n", .{values.path});
                     try out_stream.print("optional: {?s}\n", .{values.optional});
-                    try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
+                    try out_stream.print("choice: {s}\n", .{@tagName(values.choice)});
                 },
                 .subcommand => |values| {
                     switch (values) {
@@ -764,7 +764,7 @@ test "flags" {
         fn init(gpa: std.mem.Allocator) !T {
             // TODO: Avoid std.posix.getenv() as it currently causes a linker error on windows.
             // See: https://github.com/ziglang/zig/issues/8456
-            const zig_exe = try std.process.getEnvVarOwned(gpa, "ZIG_EXE"); // Set by build.zig
+            const zig_exe = try std.testing.environ.getAlloc(gpa, "ZIG_EXE"); // Set by build.zig
             defer gpa.free(zig_exe);
 
             var tmp_dir = std.testing.tmpDir(.{});
@@ -777,8 +777,8 @@ test "flags" {
             });
             defer gpa.free(tmp_dir_path);
 
-            const output_buf = std.ArrayList(u8).init(gpa);
-            errdefer output_buf.deinit();
+            var output_buf: std.ArrayList(u8) = .empty;
+            errdefer output_buf.deinit(gpa);
 
             const flags_exe_buf = try gpa.create([std.fs.max_path_bytes]u8);
             errdefer gpa.destroy(flags_exe_buf);
@@ -790,32 +790,33 @@ test "flags" {
                 });
                 defer gpa.free(path_relative);
 
-                const this_file = try std.fs.cwd().realpath(
+                const this_file = flags_exe_buf[0..try std.Io.Dir.cwd().realPathFile(
+                    std.testing.io,
                     path_relative,
                     flags_exe_buf,
-                );
+                )];
                 const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
-                const exec_result = try std.process.Child.run(.{
-                    .allocator = gpa,
+                const exec_result = try std.process.run(gpa, std.testing.io, .{
                     .argv = &argv,
-                    .cwd = tmp_dir_path,
+                    .cwd = .{ .path = tmp_dir_path },
                 });
                 defer gpa.free(exec_result.stdout);
                 defer gpa.free(exec_result.stderr);
 
-                if (exec_result.term.Exited != 0) {
+                if (exec_result.term.exited != 0) {
                     std.debug.print("{s}{s}", .{ exec_result.stdout, exec_result.stderr });
                     return error.FailedToCompile;
                 }
             }
 
-            const flags_exe = try tmp_dir.dir.realpath(
+            const flags_exe = flags_exe_buf[0..try tmp_dir.dir.realPathFile(
+                std.testing.io,
                 "flags" ++ comptime builtin.target.exeFileExt(),
                 flags_exe_buf,
-            );
+            )];
 
-            const sanity_check = try std.fs.openFileAbsolute(flags_exe, .{});
-            sanity_check.close();
+            const sanity_check = try std.Io.Dir.openFileAbsolute(std.testing.io, flags_exe, .{});
+            sanity_check.close(std.testing.io);
 
             return .{
                 .gpa = gpa,
@@ -828,7 +829,7 @@ test "flags" {
 
         fn deinit(t: *T) void {
             t.gpa.destroy(t.flags_exe_buf);
-            t.output_buf.deinit();
+            t.output_buf.deinit(t.gpa);
             t.tmp_dir.cleanup();
             t.* = undefined;
         }
@@ -845,8 +846,7 @@ test "flags" {
                 assert(argv[argv.len - 1].ptr == cli[cli.len - 1].ptr);
             }
 
-            const exec_result = try std.process.Child.run(.{
-                .allocator = t.gpa,
+            const exec_result = try std.process.run(t.gpa, std.testing.io, .{
                 .argv = argv,
             });
             defer t.gpa.free(exec_result.stdout);
@@ -854,14 +854,14 @@ test "flags" {
 
             t.output_buf.clearRetainingCapacity();
 
-            if (exec_result.term.Exited != 0) {
-                try t.output_buf.writer().print("status: {}\n", .{exec_result.term.Exited});
+            if (exec_result.term.exited != 0) {
+                try t.output_buf.print(t.gpa, "status: {}\n", .{exec_result.term.exited});
             }
             if (exec_result.stdout.len > 0) {
-                try t.output_buf.writer().print("stdout:\n{s}", .{exec_result.stdout});
+                try t.output_buf.print(t.gpa, "stdout:\n{s}", .{exec_result.stdout});
             }
             if (exec_result.stderr.len > 0) {
-                try t.output_buf.writer().print("stderr:\n{s}", .{exec_result.stderr});
+                try t.output_buf.print(t.gpa, "stderr:\n{s}", .{exec_result.stderr});
             }
 
             try want.diff(t.output_buf.items);

@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
@@ -30,45 +29,18 @@ pub const table_count_max = @import("tree.zig").table_count_max;
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     const groove_count = std.meta.fields(@TypeOf(groove_cfg)).len;
-    var groove_fields: [groove_count]std.builtin.Type.StructField = undefined;
-    var groove_options_fields: [groove_count]std.builtin.Type.StructField = undefined;
+    var groove_types: [groove_count]type = undefined;
+    var groove_options_types: [groove_count]type = undefined;
 
     for (std.meta.fields(@TypeOf(groove_cfg)), 0..) |field, i| {
         const Groove = @field(groove_cfg, field.name);
-        groove_fields[i] = .{
-            .name = field.name,
-            .type = Groove,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(Groove),
-        };
-
-        groove_options_fields[i] = .{
-            .name = field.name,
-            .type = Groove.Options,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(Groove),
-        };
+        groove_types[i] = Groove;
+        groove_options_types[i] = Groove.Options;
     }
 
-    const _Grooves = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &groove_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
-
-    const _GroovesOptions = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &groove_options_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
+    const groove_names = std.meta.fieldNames(@TypeOf(groove_cfg));
+    const _Grooves = @Struct(.auto, null, groove_names, &groove_types, &@splat(.{}));
+    const _GroovesOptions = @Struct(.auto, null, groove_names, &groove_options_types, &@splat(.{}));
 
     {
         // Verify that every tree id is unique.
@@ -144,19 +116,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     };
 
     const _TreeID = comptime tree_id: {
-        var fields: [_tree_infos.len]std.builtin.Type.EnumField = undefined;
+        var names: [_tree_infos.len][]const u8 = undefined;
+        var values: [_tree_infos.len]u16 = undefined;
         for (_tree_infos, 0..) |tree_info, i| {
-            fields[i] = .{
-                .name = @ptrCast(tree_info.tree_name),
-                .value = tree_info.tree_id,
-            };
+            names[i] = tree_info.tree_name;
+            values[i] = tree_info.tree_id;
         }
-        break :tree_id @Type(.{ .@"enum" = .{
-            .tag_type = u16,
-            .fields = &fields,
-            .decls = &.{},
-            .is_exhaustive = true,
-        } });
+        break :tree_id @Enum(u16, .exhaustive, &names, &values);
     };
 
     comptime {
@@ -807,7 +773,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn checkpoint_iop_release_callback(ctx: *anyopaque) void {
-            const forest: *Forest = @alignCast(@ptrCast(ctx));
+            const forest: *Forest = @ptrCast(@alignCast(ctx));
             assert(forest.progress.? == .checkpoint);
 
             if (!forest.resource_pool.idle()) return;

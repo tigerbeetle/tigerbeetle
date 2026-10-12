@@ -1,9 +1,9 @@
 const std = @import("std");
-const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
+const posix = stdx.posix;
 const constants = @import("../constants.zig");
 const common = @import("../io/common.zig");
 const QueueType = @import("../queue.zig").QueueType;
@@ -100,7 +100,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime operation_tag: std.meta.Tag(Operation),
-        operation_data: std.meta.TagPayload(Operation, operation_tag),
+        operation_data: @FieldType(Operation, @tagName(operation_tag)),
         comptime OperationImpl: type,
     ) void {
         const on_complete_fn = struct {
@@ -330,7 +330,7 @@ pub const IO = struct {
         file.offset += @as(u32, @intCast(source.len));
     }
 
-    pub const PReadError = posix.PReadError;
+    pub const PReadError = std.Io.File.ReadPositionalError;
 
     pub fn aof_blocking_close(self: *IO, fd: fd_t) void {
         assert(fd < self.files.len);
@@ -350,16 +350,20 @@ pub const IO = struct {
         return target.len;
     }
 
-    pub fn aof_blocking_stat(_: *IO, _: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
+    pub fn aof_blocking_stat(_: *IO, _: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
         return error.Unexpected;
     }
 
-    pub fn aof_blocking_fstat(_: *IO, _: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
+    pub fn aof_blocking_fstat(_: *IO, _: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
         return error.Unexpected;
     }
 
-    pub fn aof_blocking_open(_: *IO, _: []const u8) !fd_t {
-        return error.Unexpected;
+    pub fn aof_blocking_open(io: *IO, _: []const u8) !fd_t {
+        assert(io.files.len == 1);
+        // NB: We assume that each test AOF is supplied with its
+        // own testing IO instance with exactly one in-memory
+        // file. So, we can safely use fd as 0 here.
+        return 0;
     }
 
     pub fn reset(self: *IO) void {

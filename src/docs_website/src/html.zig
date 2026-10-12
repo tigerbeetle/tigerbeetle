@@ -4,17 +4,17 @@ const log = std.log.scoped(.template);
 pub const Html = @This();
 
 arena: std.mem.Allocator,
-buffer: std.ArrayList(u8),
-writer: std.ArrayList(u8).Writer,
+buffer: std.Io.Writer.Allocating,
+writer: *std.Io.Writer,
 
 pub fn create(arena: std.mem.Allocator) !*Html {
     var html = try arena.create(Html);
     html.* = .{
         .arena = arena,
-        .buffer = std.ArrayList(u8).init(arena),
+        .buffer = .init(arena),
         .writer = undefined,
     };
-    html.writer = html.buffer.writer();
+    html.writer = &html.buffer.writer;
     return html;
 }
 
@@ -76,7 +76,7 @@ pub fn child(self: Html) !*Html {
 }
 
 pub fn string(self: Html) []const u8 {
-    return self.buffer.items;
+    return self.writer.buffered();
 }
 
 pub fn redirect(arena: std.mem.Allocator, url: []const u8) ![]const u8 {

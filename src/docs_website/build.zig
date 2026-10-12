@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "git-commit",
         "The git commit revision of the source code.",
-    ) orelse std.mem.trimRight(u8, b.run(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n");
+    ) orelse std.mem.trimEnd(u8, b.run(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n");
 
     const pandoc_bin = get_pandoc_bin(b) orelse return;
     const vale_bin = get_vale_bin(b) orelse return;
@@ -34,13 +34,13 @@ pub fn build(b: *std.Build) !void {
 
     const content = b.addWriteFiles();
     { //TODO(zig): https://github.com/ziglang/zig/issues/20571
-        var dir = try b.build_root.handle.openDir("assets", .{ .iterate = true });
-        defer dir.close();
+        var dir = try b.build_root.handle.openDir(b.graph.io, "assets", .{ .iterate = true });
+        defer dir.close(b.graph.io);
 
         var walker = try dir.walk(b.allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(b.graph.io)) |entry| {
             if (entry.kind == .file) {
                 if (std.mem.eql(u8, entry.basename, ".DS_Store")) continue;
                 const source = b.path("assets").path(b, entry.path);
@@ -55,7 +55,18 @@ pub fn build(b: *std.Build) !void {
     try docs.build(b, content, website);
     try redirects.build(b, content, website);
 
-    const clean_zigout_step = b.addRemoveDirTree(b.path("zig-out"));
+    // Zig 0.16 removed `b.addRemoveDirTree`.
+    const clean_zigout_step = b.allocator.create(std.Build.Step) catch @panic("OOM");
+    clean_zigout_step.* = .init(.{
+        .id = .custom,
+        .name = "RemoveDir zig-out",
+        .owner = b,
+        .makeFn = struct {
+            fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
+                try step.owner.build_root.handle.deleteTree(step.owner.graph.io, "zig-out");
+            }
+        }.make,
+    });
 
     const install_content_step = b.addInstallDirectory(.{
         .source_dir = content.getDirectory(),
@@ -63,22 +74,26 @@ pub fn build(b: *std.Build) !void {
         .install_subdir = ".",
     });
 
-    install_content_step.step.dependOn(&clean_zigout_step.step);
+    install_content_step.step.dependOn(clean_zigout_step);
 
     const service_worker_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "service_worker_writer",
-        .root_source_file = b.path("src/service_worker_writer.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/service_worker_writer.zig"),
+            .target = b.graph.host,
+        }),
     }));
     service_worker_writer.addArgs(&.{ url_prefix, git_commit });
     service_worker_writer.addDirectoryArg(content.getDirectory());
 
-    const service_worker = service_worker_writer.captureStdOut();
+    const service_worker = service_worker_writer.captureStdOut(.{});
 
     const file_checker = b.addRunArtifact(b.addExecutable(.{
         .name = "file_checker",
-        .root_source_file = b.path("src/file_checker.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/file_checker.zig"),
+            .target = b.graph.host,
+        }),
     }));
     file_checker.addArg("zig-out");
 
@@ -130,7 +145,7 @@ fn get_vale_bin(b: *std.Build) ?std.Build.LazyPath {
 
 // Hide step's stdout unless it fails. Sadly, this requires overriding Build.Step.Run make function.
 fn hide_stdout(run: *std.Build.Step.Run) void {
-    _ = run.captureStdOut();
+    _ = run.captureStdOut(.{});
 
     const override = struct {
         var global_map: std.AutoHashMapUnmanaged(usize, std.Build.Step.MakeFn) = .{};
@@ -140,10 +155,12 @@ fn hide_stdout(run: *std.Build.Step.Run) void {
             original(step, options) catch |err| {
                 const run_step: *std.Build.Step.Run = @fieldParentPtr("step", step);
                 if (run_step.captured_stdout) |output| {
-                    const file = try std.fs.cwd().openFile(output.generated_file.getPath(), .{});
-                    defer file.close();
-
-                    const stdout = try file.readToEndAlloc(step.owner.allocator, 100 * 1024);
+                    const stdout = try std.Io.Dir.cwd().readFileAlloc(
+                        step.owner.graph.io,
+                        output.output.generated_file.getPath(),
+                        step.owner.allocator,
+                        .limited(100 * 1024),
+                    );
                     std.debug.print("{s}\n", .{stdout});
                 }
                 return err;

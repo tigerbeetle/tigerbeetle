@@ -2,14 +2,14 @@
 set -eu
 
 ZIG_MIRROR="https://ziglang.org/download"
-ZIG_RELEASE="0.14.1"
+ZIG_RELEASE="0.16.0"
 ZIG_CHECKSUMS=$(cat<<EOF
-${ZIG_MIRROR}/0.14.1/zig-aarch64-linux-0.14.1.tar.xz f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b
-${ZIG_MIRROR}/0.14.1/zig-aarch64-macos-0.14.1.tar.xz 39f3dc5e79c22088ce878edc821dedb4ca5a1cd9f5ef915e9b3cc3053e8faefa
-${ZIG_MIRROR}/0.14.1/zig-aarch64-windows-0.14.1.zip b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7
-${ZIG_MIRROR}/0.14.1/zig-x86_64-linux-0.14.1.tar.xz 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
-${ZIG_MIRROR}/0.14.1/zig-x86_64-macos-0.14.1.tar.xz b0f8bdfb9035783db58dd6c19d7dea89892acc3814421853e5752fe4573e5f43
-${ZIG_MIRROR}/0.14.1/zig-x86_64-windows-0.14.1.zip 554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c
+${ZIG_MIRROR}/0.16.0/zig-aarch64-linux-0.16.0.tar.xz ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
+${ZIG_MIRROR}/0.16.0/zig-aarch64-macos-0.16.0.tar.xz b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489
+${ZIG_MIRROR}/0.16.0/zig-aarch64-windows-0.16.0.zip aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef
+${ZIG_MIRROR}/0.16.0/zig-x86_64-linux-0.16.0.tar.xz 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+${ZIG_MIRROR}/0.16.0/zig-x86_64-macos-0.16.0.tar.xz 0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7
+${ZIG_MIRROR}/0.16.0/zig-x86_64-windows-0.16.0.zip 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
 EOF
 )
 

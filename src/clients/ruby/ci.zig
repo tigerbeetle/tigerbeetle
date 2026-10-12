@@ -19,7 +19,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
     {
         log.info("running tests", .{});
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -37,7 +37,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -62,7 +62,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     try shell.env.put("GEM_HOME", tmp_dir);
     try shell.env.put("GEM_PATH", tmp_dir);
@@ -76,7 +76,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             log.warn("waiting for 5 minutes for the {s} version to appear in RubyGems", .{
                 options.release,
             });
-            std.time.sleep(5 * std.time.ns_per_min);
+            try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
         }
     } else {
         shell.exec("gem install tigerbeetle -v {release}", .{
@@ -87,7 +87,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         };
     }
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -96,7 +96,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    try Shell.copy_path(
+    try shell.copy_path(
         shell.cwd,
         "src/clients/ruby/samples/basic/main.rb",
         shell.cwd,

@@ -16,6 +16,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
+const posix = @import("posix.zig");
 const log = std.log.scoped(.unshare);
 const assert = std.debug.assert;
 
@@ -28,17 +29,17 @@ var child_pid: ?std.process.Child.Id = null;
 // all of its descendants too.
 const trap_action = std.posix.Sigaction{
     .handler = .{ .handler = trap_handler },
-    .mask = std.posix.empty_sigset,
+    .mask = std.posix.sigemptyset(),
     .flags = 0,
 };
 
-fn trap_handler(signal: i32) callconv(.c) void {
+fn trap_handler(signal: std.posix.SIG) callconv(.c) void {
     if (child_pid) |child| {
         std.posix.kill(child, std.posix.SIG.KILL) catch |err| {
             log.err("error killing sandboxed process: {}", .{err});
         };
     }
-    std.posix.exit(@intCast(@as(i32, 128) + signal));
+    std.process.exit(@intCast(128 + @intFromEnum(signal)));
 }
 
 /// Relaunch this process with new namespaces.
@@ -59,6 +60,8 @@ fn trap_handler(signal: i32) callconv(.c) void {
 /// subprocesses will have loopback network access only.
 pub fn maybe_unshare_and_relaunch(
     gpa: std.mem.Allocator,
+    io: std.Io,
+    args: std.process.Args,
     options: struct {
         pid: bool,
         network: bool,
@@ -76,7 +79,7 @@ pub fn maybe_unshare_and_relaunch(
         }
         if (options.pid) {
             std.posix.sigaction(std.posix.SIG.TERM, &trap_action, null);
-            try fork_and_exit(gpa);
+            try fork_and_exit(gpa, io, args);
         }
     } else {
         // We are within the pid namespace.
@@ -114,7 +117,7 @@ pub fn linux_unshare(options: struct {
 
     // Create user namespace first.
     const unshare_user_result = std.os.linux.unshare(linux.CLONE.NEWUSER);
-    const unshare_user_errno = std.os.linux.E.init(unshare_user_result);
+    const unshare_user_errno = std.os.linux.errno(unshare_user_result);
     if (unshare_user_errno != .SUCCESS) {
         log.err("Failed to create user namespace: {}", .{unshare_user_errno});
         return error.UnshareFailure;
@@ -123,7 +126,7 @@ pub fn linux_unshare(options: struct {
     // Create PID namespace.
     if (options.pid) {
         const unshare_pid_result = std.os.linux.unshare(linux.CLONE.NEWPID);
-        const unshare_pid_errno = std.os.linux.E.init(unshare_pid_result);
+        const unshare_pid_errno = std.os.linux.errno(unshare_pid_result);
         if (unshare_pid_errno != .SUCCESS) {
             log.err("Failed to create pid namespace: {}", .{unshare_pid_errno});
             return error.UnshareFailure;
@@ -133,7 +136,7 @@ pub fn linux_unshare(options: struct {
     // Create network namespace.
     if (options.network) {
         const unshare_net_result = std.os.linux.unshare(linux.CLONE.NEWNET);
-        const unshare_net_errno = std.os.linux.E.init(unshare_net_result);
+        const unshare_net_errno = std.os.linux.errno(unshare_net_result);
         if (unshare_net_errno != .SUCCESS) {
             log.err("Failed to create net namespace: {}", .{unshare_net_errno});
             return error.UnshareFailure;
@@ -153,7 +156,7 @@ pub fn linux_ip_link_loopback() !void {
     comptime assert(builtin.os.tag == .linux);
 
     // Open a netlink socket with the NETLINK.ROUTE protocol.
-    const sock = std.posix.socket(
+    const sock = posix.socket(
         linux.AF.NETLINK,
         std.posix.SOCK.RAW,
         linux.NETLINK.ROUTE,
@@ -161,14 +164,14 @@ pub fn linux_ip_link_loopback() !void {
         log.err("failed to create netlink socket: {}", .{err});
         return error.IpLink;
     };
-    defer std.posix.close(sock);
+    defer posix.close(sock);
 
     const addr = linux.sockaddr.nl{
         .family = linux.AF.NETLINK,
         .pid = 0,
         .groups = 0,
     };
-    std.posix.bind(sock, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
+    posix.bind(sock, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
         log.err("failed to bind netlink socket: {}", .{err});
         return error.IpLink;
     };
@@ -226,7 +229,7 @@ pub fn linux_ip_link_loopback() !void {
     };
 
     const msg_buf = std.mem.asBytes(&msg);
-    const sent_len = std.posix.sendto(sock, msg_buf, 0, null, 0) catch |err| {
+    const sent_len = posix.sendto(sock, msg_buf, 0, null, 0) catch |err| {
         log.err("failed to send netlink message: {}", .{err});
         return error.IpLink;
     };
@@ -234,7 +237,7 @@ pub fn linux_ip_link_loopback() !void {
 
     var ack: Response = undefined;
     const ack_buf = std.mem.asBytes(&ack);
-    const ack_len = std.posix.recv(sock, ack_buf, 0) catch |err| {
+    const ack_len = posix.recv(sock, ack_buf, 0) catch |err| {
         log.err("failed to receive netlink ack: {}", .{err});
         return error.IpLink;
     };
@@ -249,14 +252,14 @@ pub fn linux_ip_link_loopback() !void {
     }
 }
 
-fn fork_and_exit(gpa: std.mem.Allocator) !void {
-    const args_ours = std.os.argv;
+fn fork_and_exit(gpa: std.mem.Allocator, io: std.Io, args: std.process.Args) !void {
+    const args_ours = args.vector;
 
     // We get a fresh path to the exe instead of using the original
     // first argument so that the exe path will be correct even if
     // this process's cwd has changed relative to the original exe.
     var exe_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExePath(&exe_path_buffer);
+    const exe_path = exe_path_buffer[0..try std.process.executablePath(io, &exe_path_buffer)];
 
     const args_new = try gpa.alloc([]const u8, args_ours.len);
     defer gpa.free(args_new);
@@ -267,24 +270,24 @@ fn fork_and_exit(gpa: std.mem.Allocator) !void {
         args_new[arg_index] = std.mem.span(args_ours[arg_index]);
     }
 
-    var child = std.process.Child.init(args_new, gpa);
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-
-    try child.spawn();
+    var child = try std.process.spawn(io, .{
+        .argv = args_new,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    });
 
     // Set the global pid so that we can kill it if we receive a SIGTERM.
     assert(child_pid == null);
-    child_pid = child.id;
+    child_pid = child.id.?;
 
-    const result = try child.wait();
+    const result = try child.wait(io);
     switch (result) {
-        .Exited => |code| {
+        .exited => |code| {
             std.process.exit(code);
         },
-        .Signal => |signal| {
-            log.info("sandboxed subprocesses exited with signal {}", .{signal});
+        .signal => |signal| {
+            log.info("sandboxed subprocesses exited with signal {}", .{@intFromEnum(signal)});
             std.process.exit(1);
         },
         else => {

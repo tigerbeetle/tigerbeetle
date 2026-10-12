@@ -48,9 +48,9 @@ fn run(
     prng: *stdx.PRNG,
 ) !u64 {
     const Value = ValueType(Key, value_bytes);
-    const values_original = try arena.alignedAlloc(Value, 64, values_count);
-    const values = try arena.alignedAlloc(Value, 64, values_count);
-    const values_scratch = try arena.alignedAlloc(Value, 64, values_count);
+    const values_original = try arena.alignedAlloc(Value, .fromByteUnits(64), values_count);
+    const values = try arena.alignedAlloc(Value, .fromByteUnits(64), values_count);
+    const values_scratch = try arena.alignedAlloc(Value, .fromByteUnits(64), values_count);
 
     for (values_original) |*value| value.key = prng.int(Key);
 

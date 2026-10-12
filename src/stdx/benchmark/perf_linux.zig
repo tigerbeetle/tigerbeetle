@@ -303,7 +303,7 @@ pub const PerfCounters = struct {
         for (&perf_counters.counters.values) |*counter| {
             _ = try counter.read();
         }
-        const elapsed = perf_counters.timer.?.elapsed(perf_counters.time.benchmark_monotonic());
+        const elapsed = perf_counters.timer.?.until(perf_counters.time.benchmark_monotonic());
         var measurement: PerfMeasurement = .{
             .elapsed = elapsed,
             .counters = undefined,

@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $ZIG_MIRROR="https://ziglang.org/download"
-$ZIG_RELEASE = "0.14.1"
+$ZIG_RELEASE = "0.16.0"
 $ZIG_CHECKSUMS = @"
-$ZIG_MIRROR/0.14.1/zig-aarch64-windows-0.14.1.zip b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7
-$ZIG_MIRROR/0.14.1/zig-x86_64-windows-0.14.1.zip 554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c
+$ZIG_MIRROR/0.16.0/zig-aarch64-windows-0.16.0.zip aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef
+$ZIG_MIRROR/0.16.0/zig-x86_64-windows-0.16.0.zip 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
 "@
 
 $ZIG_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {

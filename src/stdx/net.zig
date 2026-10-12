@@ -21,7 +21,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const Snap = stdx.Snap;
 const snap = Snap.snap_fn("src/stdx");
 
-/// An IPv6 or IPv6-mapped IPv4.
+/// An IPv6 or IPv6-mapped IPv4, a logical and physical representation.
 pub const IPAddress = extern struct {
     // - Array instead of u128 to avoid endian ambiguity.
     // - Natural alignment to allow re-interpreting as u128.
@@ -44,6 +44,7 @@ pub const IPAddress = extern struct {
         @as([16]u8, @bitCast(std.mem.nativeToBig(u128, IPv4_prefix)))[0..12].*;
 
     pub const @"127.0.0.1": IPAddress = .ip("127.0.0.1");
+    pub const @"::1": IPAddress = .ip("::1");
 
     comptime {
         // The code is endianness-clean, aspirationally. Audit before running on your PowerPC!
@@ -89,13 +90,16 @@ pub const IPAddress = extern struct {
         var rest = text;
         for (0..octets.len - 1) |index| {
             const octet_text, rest = stdx.cut(rest, ".") orelse return error.InvalidIPAddress;
-            octets[index] = stdx.parse_int(u8, octet_text, .{ .base = 10 }) catch
-                return error.InvalidIPAddress;
+            octets[index] = try parse_octet(octet_text);
         }
-        octets[octets.len - 1] = stdx.parse_int(u8, rest, .{ .base = 10 }) catch
-            return error.InvalidIPAddress;
+        octets[octets.len - 1] = try parse_octet(rest);
 
         return IPAddress.from_v4(octets);
+    }
+
+    fn parse_octet(text: []const u8) error{InvalidIPAddress}!u8 {
+        return stdx.parse_int(u8, text, .{ .base = 10 }) catch
+            return error.InvalidIPAddress;
     }
 
     fn parse_v6(text: []const u8) error{InvalidIPAddress}!IPAddress {
@@ -127,19 +131,11 @@ pub const IPAddress = extern struct {
             if (count > 0) {
                 for (0..count - 1) |_| {
                     const quibble_text, rest = stdx.cut(rest, ":").?;
-                    const quibble = stdx.parse_int(u16, quibble_text, .{
-                        .base = 16,
-                        .allow_leading_zero = true,
-                    }) catch
-                        return error.InvalidIPAddress;
+                    const quibble = try parse_quibble(quibble_text);
                     quibbles_big[index] = std.mem.nativeToBig(u16, quibble);
                     index += 1;
                 }
-                const quibble = stdx.parse_int(u16, rest, .{
-                    .base = 16,
-                    .allow_leading_zero = true,
-                }) catch
-                    return error.InvalidIPAddress;
+                const quibble = try parse_quibble(rest);
                 quibbles_big[index] = std.mem.nativeToBig(u16, quibble);
                 index += 1;
             }
@@ -148,19 +144,23 @@ pub const IPAddress = extern struct {
         return .{ .big = @bitCast(quibbles_big) };
     }
 
+    fn parse_quibble(text: []const u8) error{InvalidIPAddress}!u16 {
+        if (text.len > 4) {
+            // Leading zeros are allowed but not required, and a quibble is at most 4 digits.
+            return error.InvalidIPAddress;
+        }
+        return stdx.parse_int(u16, text, .{
+            .base = 16,
+            .allow_leading_zero = true,
+        }) catch return error.InvalidIPAddress;
+    }
+
     fn quibble_count(text: []const u8) usize {
         if (text.len == 0) return 0;
         return std.mem.count(u8, text, ":") + 1;
     }
 
-    pub fn format(
-        address: IPAddress,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        comptime assert(fmt.len == 0);
-        _ = options;
+    pub fn format(address: IPAddress, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (address.family()) {
             .IPv4 => try address.format_v4(writer),
             .IPv6 => try address.format_v6(writer),
@@ -278,7 +278,7 @@ test IPAddress {
         fn check_ok_canonical(text: []const u8) !void {
             const ip = try IPAddress.parse(text);
             var buffer: [64]u8 = undefined;
-            const text_canonical = try std.fmt.bufPrint(&buffer, "{}", .{ip});
+            const text_canonical = try std.fmt.bufPrint(&buffer, "{f}", .{ip});
             try expectEqualStrings(text, text_canonical);
 
             try check_ok(text);
@@ -287,7 +287,7 @@ test IPAddress {
         fn check_ok_non_canonical(text: []const u8) !void {
             const ip = try IPAddress.parse(text);
             var buffer: [64]u8 = undefined;
-            const text_canonical = try std.fmt.bufPrint(&buffer, "{}", .{ip});
+            const text_canonical = try std.fmt.bufPrint(&buffer, "{f}", .{ip});
             if (std.mem.eql(u8, text, text_canonical)) {
                 std.log.err("{s} is already canonical", .{text});
                 return error.TestUnexpectedResult;
@@ -302,21 +302,25 @@ test IPAddress {
 
             const ip = try IPAddress.parse(text);
             const address = SocketAddress.to_std(.{ .ip = ip, .port = 0 });
-            const address_std = try parse_std(text);
-            if (!address.eql(address_std)) {
-                if (address.any.family == std.posix.AF.INET and
-                    address_std.any.family == std.posix.AF.INET6 and
-                    std.mem.eql(u8, &IPAddress.IPv4_prefix_octets, address_std.in6.sa.addr[0..12]))
+            const address_std = parse_std(text) catch |err| blk: {
+                // Std doesn't parse IPv6-mapped IPv4 addresses in hexadecimal notation.
+                if (ip.as_v4() != null) break :blk address;
+                return err;
+            };
+            if (!address.eql(&address_std)) {
+                if (address == .ip4 and
+                    address_std == .ip6 and
+                    std.mem.eql(u8, &IPAddress.IPv4_prefix_octets, address_std.ip6.bytes[0..12]))
                 {
                     // Std doesn't canonicalize IPv6-mapped IPv4 addresses.
                 } else {
-                    std.log.err("{} != {}", .{ address, address_std });
+                    std.log.err("{f} != {f}", .{ address, address_std });
                     return error.TestUnexpectedResult;
                 }
             }
 
             var buffer: [64]u8 = undefined;
-            const text_roundtrip = try std.fmt.bufPrint(&buffer, "{}", .{ip});
+            const text_roundtrip = try std.fmt.bufPrint(&buffer, "{f}", .{ip});
             const ip_roundtrip = try IPAddress.parse(text_roundtrip);
             assert(std.meta.eql(ip, ip_roundtrip));
         }
@@ -348,7 +352,7 @@ test IPAddress {
                 return;
             }
 
-            std.log.err("incorrectly parsed as {}", .{address_std});
+            std.log.err("incorrectly parsed as {f}", .{address_std});
             return error.ExpectedError;
         }
 
@@ -359,7 +363,7 @@ test IPAddress {
             corpus: []const []const []const u8,
             test_count: u32,
         }) !struct { ok: u32, err: u32 } {
-            var corpus: std.ArrayListUnmanaged(u8) = .empty;
+            var corpus: std.ArrayList(u8) = .empty;
             defer corpus.deinit(gpa);
 
             for (options.corpus) |cases| for (cases) |case| try corpus.appendSlice(gpa, case);
@@ -392,8 +396,8 @@ test IPAddress {
             return .{ .ok = ok, .err = err };
         }
 
-        fn parse_std(text: []const u8) !std.net.Address {
-            return try std.net.Address.parseIp(text, 0);
+        fn parse_std(text: []const u8) !std.Io.net.IpAddress {
+            return try std.Io.net.IpAddress.parse(text, 0);
         }
     };
 
@@ -436,14 +440,15 @@ test IPAddress {
             "::::",
             "b::8%4",
             "::ffff:192.0.2.128",
+            "ff01::00101",
         },
     });
 }
 
 test "IPAddress: from_v4" {
     const v4 = IPAddress.from_v4(.{ 1, 2, 3, 4 });
-    const v4_std = std.net.Address.initIp4(.{ 1, 2, 3, 4 }, 0);
-    try expectEqual(v4, (try SocketAddress.from_std(v4_std)).ip);
+    const v4_std: std.Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 1, 2, 3, 4 }, .port = 0 } };
+    try expectEqual(v4, SocketAddress.from_std(v4_std).ip);
 
     try snap(@src(),
         \\00 00 00 00 00 00 00 00  00 00 ff ff 01 02 03 04
@@ -454,49 +459,22 @@ pub const SocketAddress = struct {
     ip: IPAddress,
     port: u16,
 
-    pub fn to_std(socket: SocketAddress) std.net.Address {
+    pub fn to_std(socket: SocketAddress) std.Io.net.IpAddress {
         switch (socket.ip.family()) {
             .IPv4 => {
                 const octets: [4]u8 = socket.ip.as_v4().?;
-                return .{ .in = std.net.Ip4Address.init(octets, socket.port) };
+                return .{ .ip4 = .{ .bytes = octets, .port = socket.port } };
             },
             .IPv6 => {
-                // The following two fields are machine-local and can be safely zeroed-out.
-                //
-                // Flowinfo corresponds to the matching field in the IPv6 header, and is a property
-                // of a connection, rather than a part of the address proper. std.net needs it
-                // because the kernel API works this way.
-                const flowinfo = 0;
-                // On a machine with several network interfaces, each network interface might have
-                // the _same_ link-local IPv6 address (in addition to a separate, globally routable
-                // IPv6 address). Scope-id is another machine-local kernel API, telling the kernel
-                // which interface to use.
-                const scopeid = 0;
-
-                return .{ .in6 = std.net.Ip6Address.init(
-                    socket.ip.big,
-                    socket.port,
-                    flowinfo,
-                    scopeid,
-                ) };
+                return .{ .ip6 = .{ .bytes = socket.ip.big, .port = socket.port } };
             },
         }
     }
 
-    pub fn from_std(address: std.net.Address) error{UnsupportedFamily}!SocketAddress {
-        switch (address.any.family) {
-            std.posix.AF.INET => {
-                const octets_big: [4]u8 = @bitCast(address.in.sa.addr);
-                const ip = IPAddress.from_v4(octets_big);
-                const port = std.mem.bigToNative(u16, address.in.sa.port);
-                return .{ .ip = ip, .port = port };
-            },
-            std.posix.AF.INET6 => {
-                const ip: IPAddress = .{ .big = address.in6.sa.addr };
-                const port = std.mem.bigToNative(u16, address.in6.sa.port);
-                return .{ .ip = ip, .port = port };
-            },
-            else => return error.UnsupportedFamily,
+    pub fn from_std(address: std.Io.net.IpAddress) SocketAddress {
+        switch (address) {
+            .ip4 => |ip4| return .{ .ip = .from_v4(ip4.bytes), .port = ip4.port },
+            .ip6 => |ip6| return .{ .ip = .{ .big = ip6.bytes }, .port = ip6.port },
         }
     }
 
@@ -504,24 +482,3 @@ pub const SocketAddress = struct {
         return .{ .ip = IPAddress.arbitrary(prng), .port = prng.int(u16) };
     }
 };
-
-test "SocketAddress: from_std bad family" {
-    if (builtin.os.tag == .windows) return;
-    const unix_domain = try std.net.Address.initUnix("/tmp/socket");
-    try expectError(error.UnsupportedFamily, SocketAddress.from_std(unix_domain));
-}
-
-test "SocketAddress: fuzz to_std/from_std" {
-    var prng = stdx.PRNG.from_seed_testing();
-    for (0..1000) |_| {
-        const socket = SocketAddress.arbitrary(&prng);
-        const address = socket.to_std();
-        const socket_roundtrip = try SocketAddress.from_std(address);
-        assert(std.meta.eql(socket, socket_roundtrip));
-
-        switch (socket.ip.family()) {
-            .IPv4 => assert(address.any.family == std.posix.AF.INET),
-            .IPv6 => assert(address.any.family == std.posix.AF.INET6),
-        }
-    }
-}

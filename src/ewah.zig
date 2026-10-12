@@ -390,25 +390,27 @@ fn test_decode_with_word(comptime Word: type) !void {
         codec.marker_word(.{ .uniform_bit = 0, .uniform_word_count = 2, .literal_word_count = 0 }),
     });
 
-    var encoding = std.ArrayList(Word).init(std.testing.allocator);
-    defer encoding.deinit();
+    var encoding: std.ArrayList(Word) = .empty;
+    defer encoding.deinit(std.testing.allocator);
 
     {
         // Consecutive literal marker overflow.
-        try encoding.append(codec.marker_word(.{
+        try encoding.append(std.testing.allocator, codec.marker_word(.{
             .uniform_bit = 0,
             .uniform_word_count = 0,
             .literal_word_count = math.maxInt(codec.MarkerLiteralCount),
         }));
         var i: Word = 0;
-        while (i < math.maxInt(codec.MarkerLiteralCount)) : (i += 1) try encoding.append(i + 1);
-        try encoding.append(codec.marker_word(.{
+        while (i < math.maxInt(codec.MarkerLiteralCount)) : (i += 1) {
+            try encoding.append(std.testing.allocator, i + 1);
+        }
+        try encoding.append(std.testing.allocator, codec.marker_word(.{
             .uniform_bit = 0,
             .uniform_word_count = 0,
             .literal_word_count = 2,
         }));
-        try encoding.append(i + 2);
-        try encoding.append(i + 3);
+        try encoding.append(std.testing.allocator, i + 2);
+        try encoding.append(std.testing.allocator, i + 3);
         try test_decode(Word, encoding.items);
         encoding.items.len = 0;
     }
@@ -424,7 +426,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []const Word) !void {
     const decoded_expect = decoded_expect_data[0..decoded_expect_length];
     const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
-        @alignOf(Word),
+        .fromByteUnits(@alignOf(Word)),
         codec.encode_size_max(decoded_expect.len),
     );
     defer std.testing.allocator.free(encoded_actual);

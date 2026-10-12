@@ -13,6 +13,7 @@
 ///!
 ///! Additionally, each function is unit tested against a real JVM to validate if they are
 ///! calling the correct vtable entry with the expected arguments.
+const std = @import("std");
 
 // https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getversion.
 pub const jni_version_1_1: JInt = 0x00010001;
@@ -3204,12 +3205,21 @@ pub const JavaVM = opaque {
 fn JNIInterfaceType(comptime T: type) type {
     return struct {
         fn JniFnType(comptime function: T.FunctionTable) type {
+            @setEvalBranchQuota(10_000);
             const Fn = @TypeOf(@field(T, @tagName(function)));
-            var fn_info = @typeInfo(Fn);
+            const fn_info = @typeInfo(Fn);
             switch (fn_info) {
-                .@"fn" => {
-                    fn_info.@"fn".calling_convention = .c;
-                    return @Type(fn_info);
+                .@"fn" => |f| {
+                    var param_types: [f.params.len]type = undefined;
+                    var param_attrs: [f.params.len]std.builtin.Type.Fn.Param.Attributes = undefined;
+                    for (f.params, 0..) |param, i| {
+                        param_types[i] = param.type.?;
+                        param_attrs[i] = .{ .@"noalias" = param.is_noalias };
+                    }
+                    return @Fn(&param_types, &param_attrs, f.return_type.?, .{
+                        .@"callconv" = .c,
+                        .varargs = f.is_var_args,
+                    });
                 },
                 else => @compileError("Expected " ++ @tagName(function) ++ " to be a function"),
             }

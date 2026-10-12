@@ -44,7 +44,11 @@ void Init_tigerbeetle(void) {
     rb_eInitError = rb_define_class_under(rb_mTigerBeetle, "InitError", rb_eStandardError);
     rb_eClientClosedError =
         rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
-    rb_define_class_under(rb_mTigerBeetle, "PacketError", rb_eStandardError);
+    VALUE ePacketError = rb_define_class_under(rb_mTigerBeetle, "PacketError", rb_eStandardError);
+    rb_define_class_under(rb_mTigerBeetle, "TooMuchDataError", ePacketError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientEvictedError", ePacketError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooLowError", ePacketError);
+    rb_define_class_under(rb_mTigerBeetle, "ClientReleaseTooHighError", ePacketError);
 
     rb_tb_init_native_client(rb_mTigerBeetle);
 }
@@ -200,9 +204,14 @@ static VALUE rb_tb_client_initialize(
     return self;
 }
 
+typedef struct rb_tb_deinit_context {
+    tb_client_t *client;
+    TB_CLIENT_STATUS status;
+} rb_tb_deinit_context_t;
+
 static void *rb_tb_deinit_without_gvl(void *arg) {
-    tb_client_deinit((tb_client_t *)arg);
-    return NULL;
+    rb_tb_deinit_context_t *context = (rb_tb_deinit_context_t *)arg;
+    context->status = tb_client_deinit(context->client);
 }
 
 static VALUE rb_tb_client_close(VALUE self) {
@@ -211,7 +220,10 @@ static VALUE rb_tb_client_close(VALUE self) {
 
     // deinit blocks until all in-flight callbacks complete. The GVL is released
     // while waiting so other Ruby threads can run.
-    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, client, NULL, NULL);
+    rb_tb_deinit_context_t context = { .client = client };
+    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, &context, NULL, NULL);
+    tb_assert(context.status != TB_CLIENT_NOT_INITIALIZED);
+
     return Qnil;
 }
 
@@ -304,6 +316,16 @@ static VALUE rb_tb_request_id(VALUE self) {
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
     rb_define_const(mTigerBeetle, "PACKET_OK", RB_INT2NUM(TB_PACKET_OK));
     rb_define_const(mTigerBeetle, "PACKET_CLIENT_CLOSED", RB_INT2NUM(TB_PACKET_CLIENT_CLOSED));
+    rb_define_const(mTigerBeetle, "PACKET_TOO_MUCH_DATA", RB_INT2NUM(TB_PACKET_TOO_MUCH_DATA));
+    rb_define_const(mTigerBeetle, "PACKET_CLIENT_EVICTED", RB_INT2NUM(TB_PACKET_CLIENT_EVICTED));
+    rb_define_const(
+        mTigerBeetle, "PACKET_CLIENT_RELEASE_TOO_LOW", RB_INT2NUM(TB_PACKET_CLIENT_RELEASE_TOO_LOW)
+    );
+    rb_define_const(
+        mTigerBeetle,
+        "PACKET_CLIENT_RELEASE_TOO_HIGH",
+        RB_INT2NUM(TB_PACKET_CLIENT_RELEASE_TOO_HIGH)
+    );
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);
     rb_define_alloc_func(cNativeClient, rb_tb_client_alloc);

@@ -12,7 +12,7 @@ OLTP workloads have increased by 3-4 orders of magnitude in the last 10 years al
 
 - The [UPI](https://en.wikipedia.org/wiki/Unified_Payments_Interface)
   real-time payments switch in India processed 10 billion payments in the year 2019.
-  In January 2025 alone, it processed [16.9 billion payments.](https://www.npci.org.in/what-we-do/upi/product-statistics)
+  In January 2025 alone, it processed [16.9 billion payments.](https://www.npci.org.in/product/upi/product-statistics)
 - Cleaner energy and smart metering means energy is being traded by the kilowatt-hour.
   Customer billing is every 15 or 30 minutes rather than at the end of the month.
 - Serverless APIs charge for usage by the second or per-request, rather than per month. (Today,

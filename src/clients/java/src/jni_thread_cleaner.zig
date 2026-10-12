@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const stdx = @import("stdx");
 const jni = @import("jni.zig");
 
 const log = std.log.scoped(.tb_client_jni);
@@ -10,7 +11,7 @@ const assert = std.debug.assert;
 /// https://developer.android.com/training/articles/perf-jni#threads
 pub const JNIThreadCleaner = struct {
     var tls_key: ?tls.Key = null;
-    var create_key_once = std.once(create_key);
+    var create_key_once = stdx.once(create_key);
 
     /// This function calls `AttachCurrentThreadAsDaemon` to attach the current native thread to
     /// the JVM as a daemon thread. It also registers a callback to call `DetachCurrentThread`
@@ -126,7 +127,7 @@ pub const JNIThreadCleaner = struct {
 
             fn set_key(key: Key, value: *anyopaque) void {
                 const ret = windows.FlsSetValue(key, value);
-                if (ret == std.os.windows.FALSE) {
+                if (ret == .FALSE) {
                     const message = "Unexpected result calling FlsSetValue";
                     log.err(message ++ "; Error = {}", .{ret});
                     @panic("JNI: " ++ message);
@@ -143,7 +144,7 @@ test "JNIThreadCleaner:tls" {
         const TestContext = @This();
 
         var tls_key: ?tls.Key = null;
-        var event: std.Thread.ResetEvent = .{};
+        var event: std.Io.Event = .unset;
 
         counter: std.atomic.Value(u32),
 
@@ -159,7 +160,7 @@ test "JNIThreadCleaner:tls" {
 
         fn thread_main(self: *TestContext) void {
             tls.set_key(tls_key.?, self);
-            event.wait();
+            event.waitUncancelable(std.testing.io);
         }
 
         fn destructor_callback(tls_value: *anyopaque) callconv(.c) void {
@@ -180,7 +181,7 @@ test "JNIThreadCleaner:tls" {
     try std.testing.expect(context.counter.load(.monotonic) == 0);
 
     // Signal all threads to complete and wait for them.
-    TestContext.event.set();
+    TestContext.event.set(std.testing.io);
     for (&threads) |*thread| {
         thread.join();
     }

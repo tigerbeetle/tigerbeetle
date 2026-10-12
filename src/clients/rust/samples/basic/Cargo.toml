@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-futures = { version = "0.3.31", default-features = false, features = ["executor"] }
+futures = { version = "=0.3.31", default-features = false, features = ["executor"] }
 tigerbeetle.path = "../.."
 
 [profile.release]

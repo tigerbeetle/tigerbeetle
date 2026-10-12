@@ -123,7 +123,7 @@ pub fn stop(bench: *Bench) Duration {
     defer assert(bench.timer == null);
 
     const instant_stop = bench.time.benchmark_monotonic();
-    const elapsed = bench.timer.?.elapsed(instant_stop);
+    const elapsed = bench.timer.?.until(instant_stop);
     bench.timer = null;
     return elapsed;
 }
