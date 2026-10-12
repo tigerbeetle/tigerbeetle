@@ -1,6 +1,6 @@
 module basic
 
-go 1.21
+go 1.26
 
 require github.com/tigerbeetle/tigerbeetle-go v0.0.0
 

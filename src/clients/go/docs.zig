@@ -20,7 +20,7 @@ pub const GoDocs = Docs{
     ,
 
     .prerequisites =
-    \\* Go >= 1.21
+    \\* Go >= 1.26
     \\
     \\**Additionally on Windows**: you must install [Zig
     \\0.16.0](https://ziglang.org/download/#release-0.16.0) and set the

@@ -12,7 +12,7 @@ this repo and subdirectory.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Go >= 1.21
+* Go >= 1.26
 
 **Additionally on Windows**: you must install [Zig
 0.16.0](https://ziglang.org/download/#release-0.16.0) and set the

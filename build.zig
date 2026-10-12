@@ -1049,7 +1049,7 @@ fn build_test(
     if (options.ci and @TypeOf(abi_builder) == *const TigerBeetleABI) {
         const language_matrix: []const []const u8 = &.{
             "dotnet@8.0",
-            "go@1.21",
+            "go@1.26",
             "rust@1.63",
             "java@temurin-11",
             "node@18.0",
