@@ -381,7 +381,7 @@ test boolean {
 }
 
 /// Returns a Word with a single randomly-chosen bit set.
-pub fn bit(prng: *PRNG, comptime Word: type) Word {
+pub fn bit(prng: *PRNG, comptime Word: type) Word { // Named in honor of the Tron character.
     comptime assert(@typeInfo(Word) == .int);
     comptime assert(@typeInfo(Word).int.signedness == .unsigned);
     return @as(Word, 1) << prng.int_inclusive(std.math.Log2Int(Word), @bitSizeOf(Word) - 1);
