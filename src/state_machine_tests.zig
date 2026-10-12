@@ -2494,6 +2494,17 @@ test "imported events: imported batch" {
     );
 }
 
+test "imported events: timestamp between event and batch timestamps" {
+    // The batch timestamp is 3, but the first event's timestamp is 1.
+    // Importing timestamp 2 must return an error instead of reaching create_account's assertion.
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _ 2 imported_event_timestamp_must_not_advance
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _ 1 created
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _ 2 created
+        \\ commit create_accounts
+    );
+}
+
 test "imported events: timestamp" {
     try check(
         \\ tick 10 nanoseconds

@@ -3042,7 +3042,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 timestamp_event,
                             };
                         }
-                        if (event.timestamp >= timestamp) {
+                        if (event.timestamp >= timestamp_event) {
                             break :result .{
                                 .imported_event_timestamp_must_not_advance,
                                 timestamp_event,
