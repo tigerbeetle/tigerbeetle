@@ -107,7 +107,7 @@ pub fn MessageBusType(comptime IO: type) type {
             switch (process_id) {
                 .replica => {
                     assert(options.clients_limit.? > 0);
-                    assert(IO != vsr.io.ClientIO);
+                    assert((@import("builtin").target.os.tag == .linux) == (IO != vsr.io.ClientIO));
                 },
                 .client => assert(options.clients_limit == null),
             }
