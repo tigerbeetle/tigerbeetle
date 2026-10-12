@@ -1635,6 +1635,19 @@ test "linked_event_chain_open for a batch of 1" {
 // 1. all CreateTransferStatus enums are covered, with
 // 2. enums tested in the order that they are defined, for easier auditing of coverage, and that
 // 3. state machine logic cannot be reordered in any way, breaking determinism.
+
+test "post or void an orphaned pending transfer ID" {
+    try check(
+        \\ transfer T1 A1 A2 1 _ _ _ _ _ L1 C1 _ PEN _ _ _ _ _ _ _ _ _ debit_account_not_found
+        \\ commit create_transfers
+        \\ lookup_transfer T1 exists false
+        \\ commit lookup_transfers
+        \\ transfer T2 A0 A0 0 T1 _ _ _ _ L0 C0 _ _ POS _ _ _ _ _ _ _ _ pending_transfer_not_found
+        \\ transfer T3 A0 A0 0 T1 _ _ _ _ L0 C0 _ _ _ VOI _ _ _ _ _ _ _ pending_transfer_not_found
+        \\ commit create_transfers
+    );
+}
+
 test "create_transfers/lookup_transfers" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
