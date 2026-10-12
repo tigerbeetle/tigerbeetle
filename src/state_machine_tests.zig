@@ -2660,14 +2660,14 @@ test "imported events: mixed multibatching" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
         \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
         \\ commit create_accounts
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _  3 created
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _  3 imported_event_timestamp_must_not_advance
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _  4 imported_event_timestamp_must_not_advance
         \\ commit create_accounts
         \\
         \\ transfer   T3 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _    _ _ _ _   0 created
         \\ transfer   T4 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _    _ _ _ _   0 created
         \\ commit create_transfers
-        \\ transfer   T1 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   7 created
+        \\ transfer   T1 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   7 imported_event_timestamp_must_not_advance
         \\ transfer   T2 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   8 imported_event_timestamp_must_not_advance
         \\ commit create_transfers
     );
