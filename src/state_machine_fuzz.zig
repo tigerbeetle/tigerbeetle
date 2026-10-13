@@ -49,8 +49,12 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     var prng = stdx.PRNG.from_seed(args.seed);
     const options = Options.swarm(&prng);
+    world.state_machine.prepare_timestamp = options.timestamp_start;
+    // Count final reply statuses, including successful creates and linked-event rollbacks.
+    var accounts_stats = std.EnumArray(tb.CreateAccountStatus, u64).initFill(0);
+    var transfers_stats = std.EnumArray(tb.CreateTransferStatus.Ordered, u64).initFill(0);
 
-    for (0..args.events_max orelse 100) |_| {
+    for (0..args.events_max orelse 1000) |_| {
         const operation = prng.enum_weighted(
             World.StateMachine.Operation,
             options.operation_weights,
@@ -127,6 +131,16 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 @ptrCast(reply_buffer),
             );
             stdx.maybe(reply_size == 0);
+            if (operation == .create_accounts) {
+                var decoder = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                    .element_size = @sizeOf(tb.CreateAccountResult),
+                }) catch unreachable;
+                while (decoder.pop()) |batch| {
+                    for (stdx.bytes_as_slice(.exact, tb.CreateAccountResult, batch)) |result| {
+                        accounts_stats.set(result.status, accounts_stats.get(result.status) + 1);
+                    }
+                }
+            }
             if (operation == .create_transfers) {
                 var decoder = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
                     .element_size = @sizeOf(tb.CreateTransferResult),
@@ -134,6 +148,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 var watermark = cdc_timestamp_before;
                 while (decoder.pop()) |batch| {
                     for (stdx.bytes_as_slice(.exact, tb.CreateTransferResult, batch)) |result| {
+                        const status = result.status.to_ordered();
+                        transfers_stats.set(status, transfers_stats.get(status) + 1);
                         // Failed/exists events do not insert CDC. Linked rollbacks are
                         // reflected in their final statuses, so only created events advance it.
                         if (result.status == .created) {
@@ -157,9 +173,19 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                     error.MultiBatchInvalid => unreachable,
                 };
             }
-            // TODO: add tracking how many return codes we got back.
         }
         world.tick();
+    }
+    // Include zero counts so each run reports the complete status denominator.
+    for (std.enums.values(tb.CreateAccountStatus)) |status| {
+        log.info("status_count: operation=create_accounts status={s} count={}", .{
+            @tagName(status), accounts_stats.get(status),
+        });
+    }
+    for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
+        log.info("status_count: operation=create_transfers status={s} count={}", .{
+            @tagName(status), transfers_stats.get(status),
+        });
     }
     log.info("expiration coverage: pulses={} transfers={}", .{
         world.expiration_pulses,
