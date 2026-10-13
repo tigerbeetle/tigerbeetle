@@ -936,11 +936,10 @@ test "create_transfers options swarm" {
 
     var covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
     var required = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(true);
-    // Deprecated results are unreachable; expiry and imported timeouts need dedicated swarms.
+    // Deprecated results are unreachable; expiry needs time advancement.
     for ([_]tb.CreateTransferStatus.Ordered{
         .deprecated_ok,
         .deprecated_18,
-        .imported_event_timeout_must_be_zero,
         .pending_transfer_expired,
     }) |status| required.set(status, false);
 
@@ -950,6 +949,10 @@ test "create_transfers options swarm" {
         50,  71,   80,   92,   95,   102,  112,  113,  115,  144,
         153, 212,  238,  303,  304,  307,  343,  346,  458,  591,
         703, 1412, 1669, 1842, 2746, 3597, 3603, 3895, 4263, 12374,
+        503, // exists_with_different_user_data_128.
+        859, // id_must_not_be_int_max.
+        9897, // imported_event_timestamp_must_postdate_credit_account.
+        382538, // imported_event_timeout_must_be_zero.
     };
 
     var prng_seed = stdx.PRNG.from_seed_testing();
