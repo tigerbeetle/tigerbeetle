@@ -126,10 +126,10 @@ pub const MultiBatchDecoder = struct {
 
     /// The message payload, excluding the trailer.
     payload: []align(constants.cache_line_size) const u8,
+    payload_offset: u32,
+
     /// The batching metadata, excluding the postamble.
     trailer_items: []const TrailerItem,
-
-    payload_index: u32,
     batch_index: u16,
 
     options: Options,
@@ -216,8 +216,8 @@ pub const MultiBatchDecoder = struct {
 
         return .{
             .payload = parser.buffer,
+            .payload_offset = 0,
             .trailer_items = trailer_items_used,
-            .payload_index = 0,
             .batch_index = 0,
             .options = options,
         };
@@ -228,9 +228,9 @@ pub const MultiBatchDecoder = struct {
     ) void {
         self.* = .{
             .payload = self.payload,
+            .payload_offset = 0,
             .trailer_items = self.trailer_items,
             .batch_index = 0,
-            .payload_index = 0,
             .options = self.options,
         };
     }
@@ -245,21 +245,21 @@ pub const MultiBatchDecoder = struct {
         maybe(self.payload.len == 0);
 
         if (self.batch_index == self.trailer_items.len) {
-            assert(self.payload_index == self.payload.len);
+            assert(self.payload_offset == self.payload.len);
             return null;
         }
         const batch_item: []const u8 = self.peek();
         self.batch_index += 1;
-        self.payload_index += @intCast(batch_item.len);
+        self.payload_offset += @intCast(batch_item.len);
         assert(self.batch_index <= self.trailer_items.len);
-        assert(self.payload_index <= self.payload.len);
+        assert(self.payload_offset <= self.payload.len);
         return batch_item;
     }
 
     pub fn peek(self: *const MultiBatchDecoder) []const u8 {
         assert(self.trailer_items.len > 0);
         assert(self.batch_index < self.trailer_items.len);
-        assert(self.payload_index <= self.payload.len);
+        assert(self.payload_offset <= self.payload.len);
         maybe(self.payload.len == 0);
 
         // Batch metadata is written from the end of the message, so the last
@@ -267,16 +267,16 @@ pub const MultiBatchDecoder = struct {
         const trailer_item: *const TrailerItem =
             &self.trailer_items[self.trailer_items.len - self.batch_index - 1];
         if (trailer_item.element_count == 0) {
-            assert(self.payload_index <= self.payload.len);
+            assert(self.payload_offset <= self.payload.len);
             return &.{};
         } else {
-            assert(self.payload_index < self.payload.len);
+            assert(self.payload_offset < self.payload.len);
         }
 
         const batch_size = trailer_item.element_count * self.options.element_size;
-        assert(self.payload_index + batch_size <= self.payload.len);
+        assert(self.payload_offset + batch_size <= self.payload.len);
 
-        const slice: []const u8 = self.payload[self.payload_index..][0..batch_size];
+        const slice: []const u8 = self.payload[self.payload_offset..][0..batch_size];
         assert(slice.len > 0);
         assert(slice.len % self.options.element_size == 0);
         return slice;
@@ -289,8 +289,8 @@ pub const MultiBatchEncoder = struct {
     };
 
     buffer: ?[]align(constants.cache_line_size) u8,
+    buffer_offset: u32,
     batch_count: u16,
-    buffer_index: u32,
     options: Options,
 
     pub fn init(
@@ -323,7 +323,7 @@ pub const MultiBatchEncoder = struct {
         return .{
             .buffer = buffer[0..aligned_len],
             .batch_count = 0,
-            .buffer_index = 0,
+            .buffer_offset = 0,
             .options = options,
         };
     }
@@ -333,7 +333,7 @@ pub const MultiBatchEncoder = struct {
         self.* = .{
             .buffer = self.buffer,
             .batch_count = 0,
-            .buffer_index = 0,
+            .buffer_offset = 0,
             .options = self.options,
         };
     }
@@ -348,9 +348,9 @@ pub const MultiBatchEncoder = struct {
         assert(self.batch_count < Postamble.batch_count_max);
         maybe(self.batch_count == 0);
 
-        assert(self.options.element_size > 0 or self.buffer_index == 0);
+        assert(self.options.element_size > 0 or self.buffer_offset == 0);
         assert(self.options.element_size == 0 or
-            self.buffer_index % self.options.element_size == 0);
+            self.buffer_offset % self.options.element_size == 0);
 
         // Takes into account extra trailer bytes that will need to be included.
         const trailer_size: usize = trailer_total_size(.{
@@ -359,7 +359,7 @@ pub const MultiBatchEncoder = struct {
         });
 
         const buffer: []u8 = self.buffer.?;
-        if (buffer.len < self.buffer_index + trailer_size) {
+        if (buffer.len < self.buffer_offset + trailer_size) {
             // Insufficient space for one more batch.
             return null;
         }
@@ -370,7 +370,7 @@ pub const MultiBatchEncoder = struct {
         }
 
         // Get an aligned slice.
-        const slice: []u8 = buffer[self.buffer_index .. buffer.len - trailer_size];
+        const slice: []u8 = buffer[self.buffer_offset .. buffer.len - trailer_size];
         const size: usize =
             @divFloor(slice.len, self.options.element_size) * self.options.element_size;
         return slice[0..size];
@@ -383,7 +383,7 @@ pub const MultiBatchEncoder = struct {
 
         const written_element_count: u16 = written_element_count: {
             if (self.options.element_size == 0) {
-                assert(self.buffer_index == 0);
+                assert(self.buffer_offset == 0);
                 assert(bytes_written == 0);
                 break :written_element_count 0;
             }
@@ -396,17 +396,18 @@ pub const MultiBatchEncoder = struct {
             break :written_element_count written_element_count;
         };
 
+        self.buffer_offset += bytes_written;
         self.batch_count += 1;
-        self.buffer_index += bytes_written;
+        assert(self.batch_count <= Postamble.batch_count_max);
 
         const buffer: []u8 = self.buffer.?;
-        assert(self.buffer_index < buffer.len);
+        assert(self.buffer_offset < buffer.len);
 
         const trailer_size = trailer_total_size(.{
             .batch_count = self.batch_count,
             .element_size = self.options.element_size,
         });
-        assert(self.buffer_index + trailer_size <= buffer.len);
+        assert(self.buffer_offset + trailer_size <= buffer.len);
 
         const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
             TrailerItem,
@@ -430,9 +431,9 @@ pub const MultiBatchEncoder = struct {
         assert(self.batch_count <= Postamble.batch_count_max);
 
         const buffer: []align(constants.cache_line_size) u8 = self.buffer.?;
-        assert(buffer.len > self.buffer_index);
-        assert(self.options.element_size > 0 or self.buffer_index == 0);
-        maybe(self.buffer_index == 0);
+        assert(buffer.len > self.buffer_offset);
+        assert(self.options.element_size > 0 or self.buffer_offset == 0);
+        maybe(self.buffer_offset == 0);
 
         const trailer_size = trailer_total_size(.{
             .batch_count = self.batch_count,
@@ -440,18 +441,18 @@ pub const MultiBatchEncoder = struct {
         });
 
         // For byte-aligned elements, padding may be required between the payload and the trailer.
-        const padding: u32 = self.buffer_index % @sizeOf(TrailerItem);
+        const padding: u32 = self.buffer_offset % @sizeOf(TrailerItem);
         assert(padding < @sizeOf(TrailerItem));
         assert(padding == 0 or self.options.element_size == 1);
-        assert(buffer.len >= self.buffer_index + padding + trailer_size);
+        assert(buffer.len >= self.buffer_offset + padding + trailer_size);
         // Filling the padding with sentinels.
-        @memset(buffer[self.buffer_index..][0..padding], std.math.maxInt(u8));
+        @memset(buffer[self.buffer_offset..][0..padding], std.math.maxInt(u8));
 
         // While batches are being encoded, the trailer is written at the end of the buffer.
         // Once all batches are encoded, the trailer needs to be moved closer to the last
         // element written.
         const source: []const u8 = buffer[buffer.len - trailer_size ..];
-        const target: []u8 = buffer[self.buffer_index + padding ..][0..trailer_size];
+        const target: []u8 = buffer[self.buffer_offset + padding ..][0..trailer_size];
         assert(source.len == target.len);
         assert(@intFromPtr(source.ptr) >= @intFromPtr(target.ptr));
         if (source.ptr != target.ptr) {
@@ -460,7 +461,7 @@ pub const MultiBatchEncoder = struct {
 
         const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
             TrailerItem,
-            buffer[self.buffer_index + padding ..][0 .. trailer_size - @sizeOf(Postamble)],
+            buffer[self.buffer_offset + padding ..][0 .. trailer_size - @sizeOf(Postamble)],
         ));
         // Filling in the extra alignment bytes with sentinels.
         @memset(
@@ -469,14 +470,14 @@ pub const MultiBatchEncoder = struct {
         );
 
         const postamble: *Postamble = @ptrCast(@alignCast(
-            buffer[self.buffer_index + padding + trailer_size - @sizeOf(Postamble) ..],
+            buffer[self.buffer_offset + padding + trailer_size - @sizeOf(Postamble) ..],
         ));
         postamble.* = .{
             .batch_count = self.batch_count,
         };
 
         self.buffer = null;
-        const bytes_written: u32 = self.buffer_index + padding + trailer_size;
+        const bytes_written: u32 = self.buffer_offset + padding + trailer_size;
         assert(self.options.element_size > 0 or bytes_written == trailer_size);
         assert(self.options.element_size == 0 or
             bytes_written % self.options.element_size == 0);
@@ -767,7 +768,7 @@ const TestRunner = struct {
             .element_size = options.element_size,
         });
         for (0..options.batch_count) |index| {
-            const bytes_available = options.buffer.len - encoder.buffer_index - trailer_size;
+            const bytes_available = options.buffer.len - encoder.buffer_offset - trailer_size;
 
             const elements_count: u16 = if (options.batch_elements) |batch_elements|
                 batch_elements

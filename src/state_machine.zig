@@ -241,7 +241,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         scan_lookup: ScanLookup = .null,
         scan_lookup_buffer: []align(constants.cache_line_size) u8,
-        scan_lookup_buffer_index: u32 = 0,
+        scan_lookup_buffer_offset: u32 = 0,
         scan_lookup_results: std.ArrayList(u32),
         scan_lookup_next_tick: Grid.NextTick = undefined,
 
@@ -1232,7 +1232,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_callback == null);
             assert(message_body_used.len <= self.batch_size_limit);
 
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const prefetch_input: []const u8 = input: {
@@ -1547,7 +1547,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .get_account_transfers or
                 self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
             assert(self.scan_lookup == .null);
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const filter: *const AccountFilter = self.get_prefetch_account_filter().?;
@@ -1561,7 +1561,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_transfers or
                 self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
             log.debug("{?}: get_account_transfers: {}", .{
@@ -1576,7 +1576,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
                     Transfer,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    self.scan_lookup_buffer[self.scan_lookup_buffer_offset..],
                 );
 
                 const scan_lookup = self.scan_lookup.get(.transfers);
@@ -1615,10 +1615,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_transfers or
                 self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
-            self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(Transfer));
+            self.scan_lookup_buffer_offset += @intCast(results.len * @sizeOf(Transfer));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
@@ -1633,7 +1633,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .get_account_balances or
                 self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup == .null);
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const filters = stdx.bytes_as_slice(
@@ -1662,7 +1662,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.scan_lookup == .null);
 
             // It runs before the scan; there must be no ongoing scan lookup.
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             self.prefetch_context = .null;
@@ -1677,7 +1677,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
                 self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
             log.debug("{?}: get_account_balances: {}", .{
@@ -1694,7 +1694,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         const scan_buffer = stdx.bytes_as_slice(
                             .inexact,
                             AccountEvent,
-                            self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                            self.scan_lookup_buffer[self.scan_lookup_buffer_offset..],
                         );
 
                         const scan_lookup = self.scan_lookup.get(.account_balances);
@@ -1747,10 +1747,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
                 self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
-            self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
+            self.scan_lookup_buffer_offset += @intCast(results.len * @sizeOf(AccountEvent));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
@@ -1765,7 +1765,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         /// or `null` if all filters have been executed.
         fn get_prefetch_account_filter(self: *StateMachine) ?*const AccountFilter {
             assert(self.prefetch_input != null);
-            assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
 
             switch (self.prefetch_operation.?) {
                 .get_account_transfers, .get_account_balances => {
@@ -1909,7 +1909,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .query_accounts or
                 self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
             assert(self.scan_lookup == .null);
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const filter: *const QueryFilter = self.get_prefetch_query_filter().?;
@@ -1920,7 +1920,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_accounts or
                 self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
             log.debug("{?}: prefetch_query_accounts_scan: {}", .{
@@ -1935,7 +1935,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
                     Account,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    self.scan_lookup_buffer[self.scan_lookup_buffer_offset..],
                 );
 
                 const scan_lookup = self.scan_lookup.get(.accounts);
@@ -1974,10 +1974,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_accounts or
                 self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
-            self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(Account));
+            self.scan_lookup_buffer_offset += @intCast(results.len * @sizeOf(Account));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
@@ -1992,7 +1992,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .query_transfers or
                 self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
             assert(self.scan_lookup == .null);
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const filter: *const QueryFilter = self.get_prefetch_query_filter().?;
@@ -2003,7 +2003,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_transfers or
                 self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
             log.debug("{?}: prefetch_query_transfers_scan: {}", .{
@@ -2018,7 +2018,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
                     Transfer,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    self.scan_lookup_buffer[self.scan_lookup_buffer_offset..],
                 );
 
                 const scan_lookup = self.scan_lookup.get(.transfers);
@@ -2057,10 +2057,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_transfers or
                 self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
-            self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(Transfer));
+            self.scan_lookup_buffer_offset += @intCast(results.len * @sizeOf(Transfer));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
@@ -2075,7 +2075,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         /// or `null` if all filters have been executed.
         fn get_prefetch_query_filter(self: *StateMachine) ?*const QueryFilter {
             assert(self.prefetch_input != null);
-            assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
 
             switch (self.prefetch_operation.?) {
                 .query_accounts, .query_transfers => {
@@ -2187,7 +2187,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation != null);
             assert(self.scan_lookup == .null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            maybe(self.scan_lookup_buffer_index > 0);
+            maybe(self.scan_lookup_buffer_offset > 0);
             maybe(self.scan_lookup_results.items.len > 0);
 
             self.forest.grid.on_next_tick(
@@ -2214,7 +2214,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation != null);
             assert(self.scan_lookup == .null);
-            maybe(self.scan_lookup_buffer_index > 0);
+            maybe(self.scan_lookup_buffer_offset > 0);
             maybe(self.scan_lookup_results.items.len > 0);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
@@ -2258,7 +2258,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup == .null);
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
             const filter: *const ChangeEventsFilter = self.get_prefetch_event_filter();
@@ -2271,7 +2271,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
             log.debug("{?}: prefetch_get_change_events_scan: {}", .{
@@ -2286,7 +2286,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
                     AccountEvent,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    self.scan_lookup_buffer[self.scan_lookup_buffer_offset..],
                 );
 
                 // TODO: For queries, the number of available prefetches may need to be considered:
@@ -2353,13 +2353,13 @@ pub fn StateMachineType(comptime Storage: type) type {
             const self: *StateMachine = ScanLookup.parent(.change_events, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
-            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset < self.scan_lookup_buffer.len);
 
             // Operations not encoded as multi-batch
             // must have only a single filter.
             assert(self.scan_lookup_results.items.len == 0);
 
-            self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
+            self.scan_lookup_buffer_offset += @intCast(results.len * @sizeOf(AccountEvent));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
@@ -2444,7 +2444,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         /// Returns the `EventFilter` from the prefetch input buffer.
         fn get_prefetch_event_filter(self: *StateMachine) *const ChangeEventsFilter {
             assert(self.prefetch_input != null);
-            assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
+            assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
 
             // Operations not encoded as multi-batch must have only a single filter.
             assert(self.scan_lookup_results.items.len == 0);
@@ -2501,7 +2501,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.pulse.action == .idle);
             defer assert(self.pulse.action != .idle);
 
-            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_buffer_offset == 0);
             assert(self.scan_lookup_results.items.len == 0);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(TimestampRange.valid(self.prefetch_timestamp));
@@ -2549,10 +2549,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(message_body_used.len <= self.batch_size_limit);
             if (client == 0) assert(operation == .pulse);
 
-            maybe(self.scan_lookup_buffer_index > 0);
+            maybe(self.scan_lookup_buffer_offset > 0);
             maybe(self.scan_lookup_results.items.len > 0);
             defer {
-                assert(self.scan_lookup_buffer_index == 0);
+                assert(self.scan_lookup_buffer_offset == 0);
                 assert(self.scan_lookup_results.items.len == 0);
             }
 
@@ -2742,15 +2742,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             comptime assert(!operation.is_multi_batch());
             comptime assert(!operation.is_batchable());
             assert(self.scan_lookup_results.items.len > 0);
-            maybe(self.scan_lookup_buffer_index == 0);
+            maybe(self.scan_lookup_buffer_offset == 0);
             defer {
-                self.scan_lookup_buffer_index = 0;
+                self.scan_lookup_buffer_offset = 0;
                 self.scan_lookup_results.clearRetainingCapacity();
             }
 
             assert(self.scan_lookup_results.items.len == 1);
             const result_count: u32 = self.scan_lookup_results.items[0];
-            const result_size: u32 = self.scan_lookup_buffer_index;
+            const result_size: u32 = self.scan_lookup_buffer_offset;
             // Invalid filter or no results found.
             if (result_size == 0) {
                 assert(result_count == 0);
@@ -2801,9 +2801,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             comptime assert(operation.is_multi_batch());
             comptime assert(!operation.is_batchable());
             assert(self.scan_lookup_results.items.len > 0);
-            maybe(self.scan_lookup_buffer_index == 0);
+            maybe(self.scan_lookup_buffer_offset == 0);
             defer {
-                self.scan_lookup_buffer_index = 0;
+                self.scan_lookup_buffer_offset = 0;
                 self.scan_lookup_results.clearRetainingCapacity();
             }
 
@@ -2821,8 +2821,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const bytes_written: usize = switch (operation) {
                     .get_account_transfers => size: {
                         const scan_size: u32 = result_count * @sizeOf(Transfer);
-                        assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
-                        assert(self.scan_lookup_buffer_index >= scan_size + offset);
+                        assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
+                        assert(self.scan_lookup_buffer_offset >= scan_size + offset);
                         defer offset += scan_size;
 
                         break :size self.execute_get_account_transfers(
@@ -2833,8 +2833,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                     },
                     .get_account_balances => size: {
                         const scan_size: u32 = result_count * @sizeOf(AccountEvent);
-                        assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
-                        assert(self.scan_lookup_buffer_index >= scan_size + offset);
+                        assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
+                        assert(self.scan_lookup_buffer_offset >= scan_size + offset);
                         defer offset += scan_size;
 
                         break :size self.execute_get_account_balances(
@@ -2845,8 +2845,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                     },
                     .query_transfers => size: {
                         const scan_size: u32 = result_count * @sizeOf(Transfer);
-                        assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
-                        assert(self.scan_lookup_buffer_index >= scan_size + offset);
+                        assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
+                        assert(self.scan_lookup_buffer_offset >= scan_size + offset);
                         defer offset += scan_size;
 
                         break :size self.execute_query_transfers(
@@ -2857,8 +2857,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                     },
                     .query_accounts => size: {
                         const scan_size: u32 = result_count * @sizeOf(Account);
-                        assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
-                        assert(self.scan_lookup_buffer_index >= scan_size + offset);
+                        assert(self.scan_lookup_buffer_offset <= self.scan_lookup_buffer.len);
+                        assert(self.scan_lookup_buffer_offset >= scan_size + offset);
                         defer offset += scan_size;
 
                         break :size self.execute_query_accounts(
@@ -2874,7 +2874,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
             assert(body_decoder.pop() == null);
             assert(reply_encoder.batch_count == self.scan_lookup_results.items.len);
-            assert(offset == self.scan_lookup_buffer_index);
+            assert(offset == self.scan_lookup_buffer_offset);
 
             const encoded_bytes_written: usize = reply_encoder.finish();
             assert(encoded_bytes_written > 0);
@@ -5049,7 +5049,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             const state_machine: *StateMachine = worker.parent();
             assert(state_machine.prefetch_input != null);
             assert(state_machine.prefetch_operation.? == .pulse);
-            assert(state_machine.scan_lookup_buffer_index == 0);
+            assert(state_machine.scan_lookup_buffer_offset == 0);
             assert(state_machine.scan_lookup_results.items.len == 0);
             assert(state_machine.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(TimestampRange.valid(state_machine.prefetch_timestamp));
@@ -5103,7 +5103,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             );
             assert(state_machine.prefetch_input != null);
             assert(state_machine.prefetch_operation.? == .pulse);
-            assert(state_machine.scan_lookup_buffer_index < state_machine.scan_lookup_buffer.len);
+            assert(state_machine.scan_lookup_buffer_offset < state_machine.scan_lookup_buffer.len);
             assert(state_machine.scan_lookup_results.items.len == 0);
 
             assert(state_machine.pulse.action == .expire_pending_transfers);
@@ -5112,7 +5112,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             assert(worker.timestamp_next <= state_machine.prefetch_timestamp);
             maybe(worker.timestamp_next == TimestampRange.timestamp_min);
 
-            state_machine.scan_lookup_buffer_index = @intCast(results.len * @sizeOf(Transfer));
+            state_machine.scan_lookup_buffer_offset = @intCast(results.len * @sizeOf(Transfer));
             state_machine.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             // The custom `ScanBuilder` returns the timestamp of the next pending
@@ -5167,18 +5167,18 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             assert(state_machine.prefetch_input != null);
             assert(state_machine.prefetch_operation.? == .pulse);
             assert(state_machine.scan_lookup_results.items.len == 1);
-            maybe(state_machine.scan_lookup_buffer_index == 0);
+            maybe(state_machine.scan_lookup_buffer_offset == 0);
 
             const result_count: u32 = state_machine.scan_lookup_results.items[0];
             assert(result_count > 0);
 
             const result_max: u32 = create_transfers_result_max(state_machine.batch_size_limit);
             assert(result_count <= result_max);
-            assert(state_machine.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
+            assert(state_machine.scan_lookup_buffer_offset == result_count * @sizeOf(Transfer));
             const transfers: []const Transfer = stdx.bytes_as_slice(
                 .exact,
                 Transfer,
-                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_index],
+                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_offset],
             );
 
             const grooves = &state_machine.forest.grooves;
@@ -5236,7 +5236,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             assert(timestamp > state_machine.commit_timestamp or state_machine.aof_recovery);
 
             defer {
-                state_machine.scan_lookup_buffer_index = 0;
+                state_machine.scan_lookup_buffer_offset = 0;
                 state_machine.scan_lookup_results.clearRetainingCapacity();
             }
 
@@ -5247,13 +5247,13 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             const result_max: u32 = create_transfers_result_max(state_machine.batch_size_limit);
             assert(result_count <= result_max);
 
-            assert(state_machine.scan_lookup_buffer_index > 0);
-            assert(state_machine.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
+            assert(state_machine.scan_lookup_buffer_offset > 0);
+            assert(state_machine.scan_lookup_buffer_offset == result_count * @sizeOf(Transfer));
 
             const transfers_pending: []const Transfer = stdx.bytes_as_slice(
                 .exact,
                 Transfer,
-                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_index],
+                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_offset],
             );
             log.debug("expire_pending_transfers: len={}", .{transfers_pending.len});
 
