@@ -472,6 +472,7 @@ const Options = struct {
     reads: ReadOptions,
     time_weights: stdx.PRNG.EnumWeightsType(TimeStep),
     small_timeout_probability: Ratio,
+    timestamp_start: u64,
 
     fn swarm(prng: *stdx.PRNG) Options {
         // Keep the existing create sequence stable while adding read-operation swarms.
@@ -481,6 +482,7 @@ const Options = struct {
         operation_weights.create_accounts = prng.range_inclusive(u64, 100, 1000);
         operation_weights.create_transfers = prng.range_inclusive(u64, 100, 1000);
         operation_weights.pulse = prng_reads.range_inclusive(u64, 100, 1000);
+        const timeout_max_ns: u64 = std.math.maxInt(u32) * std.time.ns_per_s;
         return .{
             .operation_weights = operation_weights,
             .transfers_weights = prng.enum_weights(TransferKind),
@@ -496,6 +498,11 @@ const Options = struct {
             .reads = ReadOptions.swarm(&prng_reads),
             .time_weights = prng_reads.enum_weights(TimeStep),
             .small_timeout_probability = ratio(prng_reads.int_inclusive(u8, 100), 100),
+            // Large timeouts can overflow u63, with decades of headroom for the run itself.
+            .timestamp_start = if (prng_reads.boolean())
+                std.math.maxInt(u63) - timeout_max_ns / 2
+            else
+                0,
         };
     }
 };
@@ -608,8 +615,16 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
                     );
                     build_transfer(&prng_low_cardinality, options, transfer);
                     if (prng.chance(ratio(2, 10))) {
-                        const transfer_bytes = std.mem.asBytes(transfer);
-                        transfer_bytes[prng.index(transfer_bytes)] ^= prng.bit(u8);
+                        // Give small fields such as code and ledger the same chance as IDs.
+                        switch (prng.enum_uniform(std.meta.FieldEnum(tb.Transfer))) {
+                            .flags => transfer.flags = @bitCast(
+                                @as(u16, @bitCast(transfer.flags)) ^ prng.bit(u16),
+                            ),
+                            inline else => |field| {
+                                const value = &@field(transfer, @tagName(field));
+                                value.* ^= prng.bit(@TypeOf(value.*));
+                            },
+                        }
                     }
                 } else {
                     build_transfer(prng, options, transfer);
@@ -895,12 +910,11 @@ test "create_transfers options swarm" {
 
     var covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
     var required = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(true);
-    // Deprecated results are unreachable; time and imported timeouts need dedicated swarms.
+    // Deprecated results are unreachable; expiry and imported timeouts need dedicated swarms.
     for ([_]tb.CreateTransferStatus.Ordered{
         .deprecated_ok,
         .deprecated_18,
         .imported_event_timeout_must_be_zero,
-        .overflows_timeout,
         .pending_transfer_expired,
     }) |status| required.set(status, false);
 
@@ -926,6 +940,7 @@ test "create_transfers options swarm" {
         var world: World = undefined;
         try world.init(arena.allocator());
         defer world.deinit(arena.allocator());
+        world.state_machine.prepare_timestamp = options.timestamp_start;
 
         var output: [constants.message_body_size_max]u8 align(constants.cache_line_size) =
             undefined;
