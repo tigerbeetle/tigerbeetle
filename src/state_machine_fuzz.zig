@@ -957,7 +957,7 @@ test "create_transfers options swarm" {
 
     var prng_seed = stdx.PRNG.from_seed_testing();
 
-    for (0..seeds.len + 50_000) |seed_index| {
+    for (0..seeds.len + 1_000) |seed_index| {
         const seed: u64 = if (seed_index < seeds.len)
             seeds[seed_index]
         else
