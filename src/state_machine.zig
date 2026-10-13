@@ -780,6 +780,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             query_transfers: TimingSummary = .{},
             get_change_events: TimingSummary = .{},
 
+            expire_pending_transfers: TimingSummary = .{},
+
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
 
@@ -4508,9 +4510,18 @@ pub fn StateMachineType(comptime Storage: type) type {
             switch (self.pulse.action) {
                 .idle => unreachable,
                 .no_op => {},
-                .expire_pending_transfers => self.pulse.expire_pending_transfers.execute(
-                    timestamp,
-                ),
+                .expire_pending_transfers => {
+                    const count = self.pulse.expire_pending_transfers.execute(
+                        timestamp,
+                    );
+
+                    const duration = self.metrics.timer.read();
+                    self.metrics.record(
+                        .expire_pending_transfers,
+                        duration.to_us(),
+                        count,
+                    );
+                },
             }
 
             // This operation has no output.
@@ -5229,7 +5240,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             state_machine.prefetch_finish();
         }
 
-        pub fn execute(worker: *ExpirePendingTransfersWorker, timestamp: u64) void {
+        pub fn execute(worker: *ExpirePendingTransfersWorker, timestamp: u64) u32 {
             const state_machine: *StateMachine = worker.parent();
             assert(state_machine.pulse.action == .expire_pending_transfers);
             assert(state_machine.scan_lookup_results.items.len == 1); // No multi-batch.
@@ -5241,7 +5252,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             }
 
             const result_count: u32 = state_machine.scan_lookup_results.items[0];
-            if (result_count == 0) return;
+            if (result_count == 0) return 0;
             assert(result_count > 0);
 
             const result_max: u32 = create_transfers_result_max(state_machine.batch_size_limit);
@@ -5339,6 +5350,8 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
                     .amount = p.amount,
                 });
             }
+
+            return result_count;
         }
 
         /// Gets the maximum number of results for `create_transfer` and its deprecated versions.
