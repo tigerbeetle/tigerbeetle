@@ -1,5 +1,6 @@
 pub const Arena = @import("conformance_test_arena.zig").Arena;
 pub const Printer = @import("conformance_test_printer.zig").Printer;
+pub const Words = @import("conformance_test_printer.zig").Words;
 pub const ast = @import("conformance_test_ast.zig");
 const parser = @import("conformance_test_parser.zig");
 

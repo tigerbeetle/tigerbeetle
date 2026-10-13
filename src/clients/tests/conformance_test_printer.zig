@@ -139,30 +139,32 @@ pub const Printer = struct {
     }
 };
 
-// Any run of characters that isn't alphanumeric is a word break for conversion purposes.
-const Words = struct {
+// Any run of characters that isn't alphanumeric is a word break for conversion purposes. With
+// `include_underscore`, `_` is part of a word.
+pub const Words = struct {
     input: []const u8,
     index: usize = 0,
+    include_underscore: bool = false,
 
     fn init(input: []const u8) Words {
         return .{ .input = input };
     }
 
-    fn next(words: *Words) ?[]const u8 {
-        _ = words.take(.separators);
-        return words.take(.word);
+    pub fn next(words: *Words) ?[]const u8 {
+        var start: ?usize = null;
+        while (words.index < words.input.len) : (words.index += 1) {
+            if (words.is_word_char(words.input[words.index])) {
+                if (start == null) start = words.index;
+            } else if (start != null) {
+                break;
+            }
+        }
+        const word_start = start orelse return null;
+        return words.input[word_start..words.index];
     }
 
-    // Consumes the run of `chars` under the cursor and returns it, or null if there are none.
-    fn take(words: *Words, chars: enum { word, separators }) ?[]const u8 {
-        const alphanumeric = chars == .word;
-        const start = words.index;
-        while (words.index < words.input.len and
-            std.ascii.isAlphanumeric(words.input[words.index]) == alphanumeric)
-        {
-            words.index += 1;
-        }
-        return if (words.index > start) words.input[start..words.index] else null;
+    fn is_word_char(words: *const Words, char: u8) bool {
+        return std.ascii.isAlphanumeric(char) or (char == '_' and words.include_underscore);
     }
 };
 

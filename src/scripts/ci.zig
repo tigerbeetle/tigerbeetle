@@ -48,6 +48,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             comptime unreachable;
         };
         try generate_readmes(shell, gpa, cli_args.language);
+        try shell.exec_zig("build conformance:generate", .{});
         try run_tests(shell, gpa, .{
             .language_requested = cli_args.language,
             .tigerbeetle = tigerbeetle,
