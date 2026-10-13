@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
@@ -13,7 +14,7 @@ const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
-const QueueType = @import("./queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const Tracer = vsr.trace.Tracer;
 const Time = stdx.Time;
 
@@ -57,6 +58,7 @@ pub fn MessageBusType(comptime IO: type) type {
         connections_used: u32 = 0,
         connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
             .name = null,
+            .verify_push = constants.verify,
         }),
         resume_receive_next_tick: IO.Completion = undefined,
         resume_receive_submitted: bool = false,
@@ -107,7 +109,10 @@ pub fn MessageBusType(comptime IO: type) type {
             switch (process_id) {
                 .replica => {
                     assert(options.clients_limit.? > 0);
-                    assert((@import("builtin").target.os.tag == .linux) == (IO != vsr.io.ClientIO));
+                    switch (builtin.target.os.tag) {
+                        .linux => assert(IO != stdx.ClientIO),
+                        else => {},
+                    }
                 },
                 .client => assert(options.clients_limit == null),
             }

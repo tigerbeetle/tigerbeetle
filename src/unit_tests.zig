@@ -10,7 +10,6 @@ comptime {
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
     _ = @import("ewah_benchmark.zig");
-    _ = @import("io/test.zig");
     _ = @import("lsm/binary_search.zig");
     _ = @import("lsm/binary_search_benchmark.zig");
     _ = @import("lsm/cache_map.zig");
@@ -32,12 +31,10 @@ comptime {
     _ = @import("lsm/zig_zag_merge.zig");
     _ = @import("message_buffer.zig");
     _ = @import("multiversion.zig");
-    _ = @import("queue.zig");
     _ = @import("repl/completion.zig");
     _ = @import("repl/parser.zig");
     _ = @import("repl/terminal.zig");
     _ = @import("scripts/changelog.zig");
-    _ = @import("stack.zig");
     _ = @import("state_machine.zig");
     _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine_tests.zig");

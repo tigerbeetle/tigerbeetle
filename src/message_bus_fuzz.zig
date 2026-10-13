@@ -21,7 +21,7 @@ const MessageBus = vsr.message_bus.MessageBusType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
-const fuzz = @import("testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
 const TimeOS = stdx.TimeOS;
@@ -416,7 +416,7 @@ const IO = struct {
     // We can't specify io/linux.zig since it won't compile on windows, which means that we are
     // potentially using different error sets for different OS's, which means that fuzzer seeds are
     // only reproducible on the same OS.
-    const RealIO = @import("io.zig").IO;
+    const RealIO = stdx.IO;
     pub const AcceptError = RealIO.AcceptError;
     pub const CloseError = RealIO.CloseError;
     pub const ConnectError = RealIO.ConnectError;

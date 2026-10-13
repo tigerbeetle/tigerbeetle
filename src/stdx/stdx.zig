@@ -27,6 +27,7 @@ pub const OnceType = @import("once.zig").OnceType;
 pub const once = @import("once.zig").once;
 
 pub const aegis = @import("vendored/aegis.zig");
+pub const fuzz = @import("testing/fuzz.zig");
 pub const Flags = @import("flags.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const posix = @import("posix.zig");
@@ -34,6 +35,14 @@ pub const Shell = @import("shell.zig");
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
 pub const radix_sort = @import("radix.zig").sort;
+const io = @import("io.zig");
+pub const IO = io.IO;
+pub const ClientIO = io.ClientIO;
+pub const IOTest = io.IOTest;
+pub const DirectIO = io.DirectIO;
+pub const buffer_limit = io.buffer_limit;
+pub const QueueType = @import("queue.zig").QueueType;
+pub const StackType = @import("stack.zig").StackType;
 
 pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
@@ -1026,37 +1035,6 @@ pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.Un
     return error.Unexpected;
 }
 
-/// Fills `buffer` with cryptographically secure random bytes from the OS.
-///
-/// Panics if the OS fails to provide entropy, like Zig 0.14's `std.crypto.random`. Unlike this,
-/// `io.random` silently falls back to a predictable seed (pid, time, and an ASLR address).
-pub fn crypto_random_bytes(io: std.Io, buffer: []u8) void {
-    const cancel_protection = io.swapCancelProtection(.blocked);
-    defer _ = io.swapCancelProtection(cancel_protection);
-
-    io.randomSecure(buffer) catch |err| switch (err) {
-        error.Canceled => unreachable,
-        error.EntropyUnavailable => @panic("crypto_random_bytes: entropy unavailable"),
-    };
-}
-
-/// Returns a cryptographically random integer, see `crypto_random_bytes`.
-pub fn crypto_random_int(io: std.Io, comptime T: type) T {
-    var buffer: [@sizeOf(T)]u8 = undefined;
-    crypto_random_bytes(io, &buffer);
-    return std.mem.readInt(T, &buffer, .little);
-}
-
-pub fn crypto_u128(io: std.Io) u128 {
-    const value = crypto_random_int(io, u128);
-
-    // Broken CSPRNG is the likeliest explanation for zero or all ones.
-    assert(value != 0);
-    assert(value != std.math.maxInt(u128));
-
-    return value;
-}
-
 /// NB: intended for parsing CLI arguments where we care to preserve the user-specified unit.
 /// Use `size: u64` for all other use-cases.
 pub const ByteSize = struct {
@@ -1293,17 +1271,21 @@ comptime {
     _ = @import("bounded_array.zig");
     _ = @import("flags.zig");
     _ = @import("huge_page_allocator.zig");
+    _ = @import("io/test.zig");
     _ = @import("iops.zig");
     _ = @import("mutex.zig");
     _ = @import("net.zig");
     _ = @import("once.zig");
     _ = @import("prng.zig");
+    _ = @import("queue.zig");
     _ = @import("radix.zig");
     _ = @import("radix_benchmark.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
     _ = @import("sort_test.zig");
+    _ = @import("stack.zig");
     _ = @import("stdx.zig");
+    _ = @import("testing/fuzz.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("time.zig");
     _ = @import("time_units.zig");

@@ -1,46 +1,57 @@
 const std = @import("std");
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const os = struct {
     const windows = stdx.windows;
 };
 const posix = stdx.posix;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
-const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const TimeOS = stdx.TimeOS;
-const buffer_limit = @import("../io.zig").buffer_limit;
-const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
     pub const NextTickSource = common.NextTickSource;
+    pub const DirectIO = common.DirectIO;
+    pub const OpenDataFilePurpose = common.OpenDataFilePurpose;
+
+    pub const sector_size = common.sector_size;
 
     pub const dsync_all = true;
 
     iocp: os.windows.HANDLE,
 
     /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
-    io_std: std.Io,
+    io_std: ?std.Io,
 
     time: TimeOS = .{},
     io_pending: usize = 0,
-    timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
-    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
+    timeouts: QueueType(Completion) = QueueType(Completion).init(.{
+        .name = "io_timeouts",
+        .verify_push = true,
+    }),
+    completed: QueueType(Completion) = QueueType(Completion).init(.{
+        .name = "io_completed",
+        .verify_push = true,
+    }),
     run_for_ns_active: bool = false,
 
     stats: common.Stats = .{},
+    cng_device: fd_t,
 
-    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
+    pub fn init(entries: u12, flags: u32, io_std: ?std.Io) !IO {
         _ = entries;
         _ = flags;
 
         _ = try os.windows.WSAStartup(2, 2);
         errdefer os.windows.WSACleanup() catch unreachable;
+
+        const cng_device = get_cng_device();
+        errdefer os.windows.CloseHandle(cng_device);
 
         const iocp = try os.windows.CreateIoCompletionPort(
             os.windows.INVALID_HANDLE_VALUE,
@@ -48,13 +59,19 @@ pub const IO = struct {
             0,
             0,
         );
-        return IO{ .iocp = iocp, .io_std = io_std };
+        errdefer os.windows.CloseHandle(iocp);
+
+        return IO{ .iocp = iocp, .io_std = io_std, .cng_device = cng_device };
     }
 
     pub fn deinit(self: *IO) void {
         assert(self.iocp != os.windows.INVALID_HANDLE_VALUE);
         os.windows.CloseHandle(self.iocp);
         self.iocp = os.windows.INVALID_HANDLE_VALUE;
+
+        assert(self.cng_device != os.windows.INVALID_HANDLE_VALUE);
+        os.windows.CloseHandle(self.cng_device);
+        self.cng_device = os.windows.INVALID_HANDLE_VALUE;
 
         os.windows.WSACleanup() catch unreachable;
     }
@@ -72,8 +89,6 @@ pub const IO = struct {
             assert(self.run_for_ns_active);
             self.run_for_ns_active = false;
         }
-
-        defer self.stats.trace();
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
@@ -664,7 +679,7 @@ pub const IO = struct {
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
-                .len = @intCast(buffer_limit(buffer.len)),
+                .len = @intCast(common.buffer_limit(buffer.len)),
                 .buf = @constCast(buffer.ptr),
             },
             .overlapped = undefined,
@@ -771,7 +786,7 @@ pub const IO = struct {
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
-                .len = @intCast(buffer_limit(buffer.len)),
+                .len = @intCast(common.buffer_limit(buffer.len)),
                 .buf = buffer.ptr,
             },
             .overlapped = undefined,
@@ -940,7 +955,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
                 .offset = offset,
                 .overlapped = undefined,
                 .pending = false,
@@ -982,7 +997,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
                 .offset = offset,
                 .overlapped = undefined,
                 .pending = false,
@@ -1245,7 +1260,8 @@ pub const IO = struct {
 
     /// Opens a directory with read only access.
     pub fn open_dir(io: *IO, dir_path: []const u8) !fd_t {
-        const dir = try std.Io.Dir.cwd().openDir(io.io_std, dir_path, .{});
+        assert(io.io_std != null);
+        const dir = try std.Io.Dir.cwd().openDir(io.io_std.?, dir_path, .{});
         return dir.handle;
     }
 
@@ -1329,7 +1345,6 @@ pub const IO = struct {
         return handle;
     }
 
-    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on windows).
@@ -1347,7 +1362,7 @@ pub const IO = struct {
         direct_io: DirectIO,
     ) !fd_t {
         assert(relative_path.len > 0);
-        assert(size % constants.sector_size == 0);
+        assert(size % sector_size == 0);
         // On windows, assume that Direct IO is always available.
         _ = direct_io;
 
@@ -1385,7 +1400,6 @@ pub const IO = struct {
                 log.warn("file system failed to preallocate the file memory", .{});
                 log.info("allocating by writing to the last sector of the file instead...", .{});
 
-                const sector_size = constants.sector_size;
                 const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                 // Handle partial writes where the physical sector is less than a logical sector:
@@ -1485,26 +1499,32 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
     ) std.Io.File.Writer.Error!void {
-        return common.aof_blocking_write_all(io.io_std, fd, buffer);
+        assert(io.io_std != null);
+        return common.aof_blocking_write_all(io.io_std.?, fd, buffer);
     }
 
     pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
+        assert(io.io_std != null);
+        return common.aof_blocking_pread_all(io.io_std.?, fd, buffer, offset);
     }
 
     pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_close(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
-        return common.aof_blocking_stat(io.io_std, path);
+        assert(io.io_std != null);
+        return common.aof_blocking_stat(io.io_std.?, path);
     }
 
     pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
-        return common.aof_blocking_fstat(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_fstat(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
+        assert(io.io_std != null);
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
@@ -1513,9 +1533,104 @@ pub const IO = struct {
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std.?, dir_fd, file_path);
+    }
+
+    pub fn crypto_random_bytes(io: *IO, buffer: []u8) void {
+        assert(buffer.len > 0);
+        assert(buffer.len <= std.math.maxInt(u32));
+        assert(io.cng_device != os.windows.INVALID_HANDLE_VALUE);
+
+        const cng_device = io.cng_device;
+        var io_status_block: os.windows.IO_STATUS_BLOCK = undefined;
+        for (0..1_000) |_| {
+            const status = os.windows.ntdll.NtDeviceIoControlFile(
+                cng_device,
+                null,
+                null,
+                null,
+                &io_status_block,
+                os.windows.IOCTL.KSEC.GEN_RANDOM,
+                null,
+                0,
+                buffer.ptr,
+                @intCast(buffer.len),
+            );
+            switch (status) {
+                .SUCCESS => break,
+                .CANCELLED => continue,
+                else => @panic("crypto_random_bytes: entropy unavailable"),
+            }
+        }
+    }
+
+    pub fn crypto_random_int(io: *IO, comptime T: type) T {
+        return common.crypto_random_int(IO, T, io);
+    }
+
+    pub fn futex_wait(value: *const std.atomic.Value(u32), expect: u32) void {
+        const return_code = os.windows.ntdll.RtlWaitOnAddress(
+            value,
+            &expect,
+            @sizeOf(@TypeOf(expect)),
+            null,
+        );
+
+        switch (return_code) {
+            .SUCCESS => {},
+            .TIMEOUT => unreachable,
+            else => unreachable,
+        }
+    }
+
+    pub fn futex_wake(value: *const std.atomic.Value(u32), waiters_max: u16) void {
+        assert(waiters_max != 0);
+
+        switch (waiters_max) {
+            1 => os.windows.ntdll.RtlWakeAddressSingle(@ptrCast(value)),
+            else => os.windows.ntdll.RtlWakeAddressAll(@ptrCast(value)),
+        }
+    }
+
+    pub fn sleep(duration: stdx.Duration) void {
+        const milliseconds = @divFloor(duration.ns, std.time.ns_per_ms);
+        assert(milliseconds <= std.math.maxInt(os.windows.DWORD));
+        os.windows.kernel32.Sleep(@intCast(milliseconds));
     }
 };
+
+fn get_cng_device() IO.fd_t {
+    var fd: IO.fd_t = undefined;
+
+    var io_status_block: os.windows.IO_STATUS_BLOCK = undefined;
+    const object_name = os.windows.UNICODE_STRING.init(
+        &.{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'C', 'N', 'G' },
+    );
+    for (0..1_000) |_| {
+        const status = os.windows.ntdll.NtOpenFile(
+            &fd,
+            .{
+                .STANDARD = .{ .SYNCHRONIZE = true },
+                .SPECIFIC = .{ .FILE = .{ .READ_DATA = true } },
+            },
+            &.{ .ObjectName = @constCast(&object_name) },
+            &io_status_block,
+            .VALID_FLAGS,
+            .{ .IO = .SYNCHRONOUS_NONALERT },
+        );
+
+        switch (status) {
+            .SUCCESS => {
+                return fd;
+            },
+            .CANCELLED => {
+                continue;
+            },
+            else => break,
+        }
+    }
+    @panic("get_cng_device: cng device unavailable");
+}
 
 // TODO: use posix.getsockoptError when fixed for windows in stdlib.
 fn getsockoptError(socket: posix.socket_t) IO.ConnectError!void {
@@ -1650,7 +1765,7 @@ pub fn windows_open_file(
                 // call has failed. There is not really a sane way to handle
                 // this other than retrying the creation after the OS finishes
                 // the deletion.
-                os.windows.kernel32.Sleep(1);
+                IO.sleep(.ms(1));
                 continue;
             },
             else => return os.windows.unexpectedStatus(rc),

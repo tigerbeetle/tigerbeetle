@@ -45,7 +45,7 @@ pub fn test_freshness(
         .{ docs.test_source_path, docs.test_file_name, docs.extension },
     );
     const walkthrough = try shell.cwd.readFileAlloc(
-        shell.io,
+        shell.io_std,
         walkthrough_path,
         arena.allocator(),
         .limited(1 * MiB),

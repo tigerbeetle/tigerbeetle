@@ -125,12 +125,12 @@ pub fn make(
     const arena = shell.arena.allocator();
     const dos_timestamp = stdx.Shell.unix_to_dos_timestamp(commit_timestamp);
 
-    if (std.fs.path.dirname(output_path)) |path| try shell.cwd.createDirPath(shell.io, path);
-    const output_file = try shell.cwd.createFile(shell.io, output_path, .{});
-    defer output_file.close(shell.io);
+    if (std.fs.path.dirname(output_path)) |path| try shell.cwd.createDirPath(shell.io_std, path);
+    const output_file = try shell.cwd.createFile(shell.io_std, output_path, .{});
+    defer output_file.close(shell.io_std);
 
     var output_file_write_buffer: [4096]u8 = undefined;
-    var output_file_writer = output_file.writer(shell.io, &output_file_write_buffer);
+    var output_file_writer = output_file.writer(shell.io_std, &output_file_write_buffer);
     const writer = &output_file_writer.interface;
 
     var metadata_buffer: std.ArrayList(u8) = .empty;
@@ -146,14 +146,14 @@ pub fn make(
     try metadata_buffer.print(arena, "\n", .{});
     try metadata_buffer.appendSlice(arena, readme);
 
-    var package_dir = try shell.cwd.openDir(shell.io, "src/tigerbeetle", .{ .iterate = true });
-    defer package_dir.close(shell.io);
+    var package_dir = try shell.cwd.openDir(shell.io_std, "src/tigerbeetle", .{ .iterate = true });
+    defer package_dir.close(shell.io_std);
 
     var walker = try package_dir.walk(arena);
     defer walker.deinit();
 
     var file_paths: std.ArrayList([]const u8) = .empty;
-    while (try walker.next(shell.io)) |entry| {
+    while (try walker.next(shell.io_std)) |entry| {
         if (entry.kind != .file) continue;
         try file_paths.append(arena, try arena.dupe(u8, entry.path));
     }
@@ -166,7 +166,7 @@ pub fn make(
     for (file_paths.items) |relative_path| {
         const archive_name = try shell.fmt("tigerbeetle/{s}", .{relative_path});
         const data = try package_dir.readFileAlloc(
-            shell.io,
+            shell.io_std,
             relative_path,
             arena,
             .limited(file_size_max),

@@ -15,7 +15,8 @@ const posix = stdx.posix;
 const linux = std.os.linux;
 const log = std.log.scoped(.io);
 
-const stdx = @import("stdx");
+const IOLinuxUring = @import("./linux.zig").IO;
+const stdx = @import("../stdx.zig");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
 
@@ -24,10 +25,10 @@ pub const IO = struct {
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
     /// Ordered by expiry, from soonest-to-expire (out) to latest-to-expire (in).
-    timeouts: QueueType(Completion) = .init(.{ .name = "timeouts" }),
+    timeouts: QueueType(Completion) = .init(.{ .name = "timeouts", .verify_push = true }),
 
     /// Completions that are ready to have their callbacks run.
-    completed: QueueType(Completion) = .init(.{ .name = "io_completed" }),
+    completed: QueueType(Completion) = .init(.{ .name = "io_completed", .verify_push = true }),
 
     stats: common.Stats = .{},
     time: stdx.TimeOS = .{},
@@ -42,7 +43,7 @@ pub const IO = struct {
         assert(@alignOf(Completion) > timerfd_epoll_tag);
     }
 
-    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
+    pub fn init(entries: u12, flags: u32, io_std: ?std.Io) !IO {
         _ = io_std;
         _ = entries;
         _ = flags;
@@ -107,8 +108,6 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        defer self.stats.trace();
-
         const timer_run_for_ns = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
             timer_run_for_ns.until(self.time.monotonic()).ns;
@@ -1154,6 +1153,39 @@ pub const IO = struct {
                 callback(ctx, completion, result.*);
             }
         }.erased;
+    }
+
+    pub fn crypto_random_bytes(_: *IO, buffer: []u8) void {
+        assert(buffer.len > 0);
+        assert(buffer.len <= std.math.maxInt(u32));
+        var position: u32 = 0;
+        for (0..buffer.len) |_| {
+            const remaining = buffer[position..];
+            const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
+            switch (stdx.posix.errno(return_code)) {
+                .SUCCESS => {
+                    assert(return_code <= std.math.maxInt(u32));
+                    const bytes: u32 = @intCast(return_code);
+                    position += bytes;
+                    assert(bytes > 0);
+                    if (position < buffer.len) continue;
+                    assert(position == buffer.len);
+                    break;
+                },
+                .INTR => {
+                    continue;
+                },
+                else => @panic("crypto_random_bytes: entropy unavailable"),
+            }
+        } else @panic("crypto_random_bytes: entropy unavailable");
+    }
+
+    pub fn crypto_random_int(io: *IO, comptime T: type) T {
+        return common.crypto_random_int(IO, T, io);
+    }
+
+    pub fn sleep(duration: stdx.Duration) void {
+        IOLinuxUring.sleep(duration);
     }
 
     pub const Completion = struct {

@@ -2,18 +2,18 @@ const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
-const constants = @import("../constants.zig");
-const common = @import("../io/common.zig");
-const QueueType = @import("../queue.zig").QueueType;
-const buffer_limit = @import("../io.zig").buffer_limit;
+const common = @import("./common.zig");
+const QueueType = stdx.QueueType;
+const buffer_limit = common.buffer_limit;
 const Ratio = stdx.PRNG.Ratio;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {
     pub const fd_t = u32;
     pub const NextTickSource = common.NextTickSource;
+    pub const OpenDataFilePurpose = common.OpenDataFilePurpose;
 
     pub const File = struct {
         buffer: []u8,
@@ -44,7 +44,7 @@ pub const IO = struct {
     options: Options,
     prng: stdx.PRNG,
 
-    completed: Queue = Queue.init(.{ .name = "io_completed" }),
+    completed: Queue = Queue.init(.{ .name = "io_completed", .verify_push = true }),
 
     pub fn init(files: []File, options: Options) !IO {
         return .{
@@ -128,8 +128,6 @@ pub const IO = struct {
         self.completed.push(completion);
     }
 
-    pub const OpenDataFilePurpose = enum { format, open, inspect };
-
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
@@ -175,13 +173,13 @@ pub const IO = struct {
                         std.mem.readPackedIntNative(
                             u1,
                             fault_map,
-                            @divExact(op.offset, constants.sector_size),
+                            @divExact(op.offset, common.sector_size),
                         ) != 0
                     else
                         false;
 
                     const sector_has_larger_than_logical_sector_read_fault =
-                        (op.len > constants.sector_size and io.prng.chance(
+                        (op.len > common.sector_size and io.prng.chance(
                             io.options.larger_than_logical_sector_read_fault_probability,
                         ));
 

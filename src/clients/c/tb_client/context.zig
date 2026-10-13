@@ -13,7 +13,7 @@ const Header = vsr.Header;
 
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 
-const IO = vsr.io.ClientIO;
+const IO = stdx.ClientIO;
 const TimeOS = stdx.TimeOS;
 const message_pool = vsr.message_pool;
 
@@ -275,7 +275,7 @@ pub fn ContextType(
             context.* = .{
                 .gpa = context.gpa,
 
-                .client_id = stdx.crypto_u128(std.Io.Threaded.global_single_threaded.io()),
+                .client_id = undefined,
                 .cluster_id = cluster_id,
 
                 .completion_callback = completion_callback,
@@ -302,6 +302,22 @@ pub fn ContextType(
                 .request_timer = undefined,
                 .request_latency = null,
             };
+
+            log.debug("init: initializing IO", .{});
+            context.io = IO.init(32, 0, null) catch |err| {
+                log.err("init: failed to initialize IO: {s}", .{
+                    @errorName(err),
+                });
+                return switch (err) {
+                    error.ProcessFdQuotaExceeded => error.SystemResources,
+                    error.Unexpected => error.Unexpected,
+                    else => unreachable,
+                };
+            };
+            errdefer context.io.deinit();
+
+            context.client_id = context.io.crypto_random_int(u128);
+
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
 
@@ -323,20 +339,6 @@ pub fn ContextType(
             assert(addresses_parsed.len > 0);
             assert(addresses_parsed.len <= constants.replicas_max);
             context.addresses.resize(addresses_parsed.len) catch unreachable;
-
-            log.debug("{}: init: initializing IO", .{context.client_id});
-            context.io = IO.init(std.Io.Threaded.global_single_threaded.io(), 32, 0) catch |err| {
-                log.err("{}: failed to initialize IO: {s}", .{
-                    context.client_id,
-                    @errorName(err),
-                });
-                return switch (err) {
-                    error.ProcessFdQuotaExceeded => error.SystemResources,
-                    error.Unexpected => error.Unexpected,
-                    else => unreachable,
-                };
-            };
-            errdefer context.io.deinit();
 
             log.debug("{}: init: initializing MessagePool", .{context.client_id});
             context.message_pool = try MessagePool.init(allocator, .client);
@@ -986,14 +988,6 @@ const Locker = extern struct {
     }
 
     fn try_lock(self: *Locker) bool {
-        // On x86, use `lock bts` instead of `lock cmpxchg` as:
-        // - they both seem to mark the cache-line as modified regardless: https://stackoverflow.com/a/63350048.
-        // - `lock bts` is smaller instruction-wise which makes it better for inlining.
-        if (comptime builtin.target.cpu.arch.isX86()) {
-            const locked_bit = @ctz(locked);
-            return self.state.bitSet(locked_bit, .acquire) == 0;
-        }
-
         // Acquire barrier ensures grabbing the lock happens before the critical section
         // and that the previous lock holder's critical section happens before we grab the lock.
         return self.state.cmpxchgWeak(unlocked, locked, .acquire, .monotonic) == null;

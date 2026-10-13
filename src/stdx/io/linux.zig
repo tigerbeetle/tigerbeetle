@@ -7,31 +7,36 @@ const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
 
-const constants = @import("../constants.zig");
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
 const TimeOS = stdx.TimeOS;
 const common = @import("./common.zig");
-const QueueType = @import("../queue.zig").QueueType;
-const buffer_limit = @import("../io.zig").buffer_limit;
-const DirectIO = @import("../io.zig").DirectIO;
+const QueueType = stdx.QueueType;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
     pub const NextTickSource = common.NextTickSource;
+    pub const DirectIO = common.DirectIO;
+    pub const OpenDataFilePurpose = common.OpenDataFilePurpose;
+
+    pub const sector_size = common.sector_size;
 
     pub const dsync_all = true;
 
     ring: IO_Uring,
 
     /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
-    io_std: std.Io,
+    io_std: ?std.Io,
 
     /// Completions and deferred callbacks that are ready to have their callbacks run.
-    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
+    completed: QueueType(Completion) = QueueType(Completion).init(.{
+        .name = "io_completed",
+        .verify_push = true,
+    }),
 
     // TODO Track these as metrics:
     ios_queued: u32 = 0,
@@ -43,7 +48,7 @@ pub const IO = struct {
 
     run_for_ns_active: bool = false,
 
-    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
+    pub fn init(entries: u12, flags: u32, io_std: ?std.Io) !IO {
         errdefer |err| switch (err) {
             error.SystemOutdated => {
                 log.err("io_uring is not available", .{});
@@ -99,8 +104,6 @@ pub const IO = struct {
             assert(self.run_for_ns_active);
             self.run_for_ns_active = false;
         }
-
-        defer self.stats.trace();
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
@@ -417,21 +420,21 @@ pub const IO = struct {
                 .read => |op| {
                     sqe.prep_read(
                         op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.buffer[0..common.buffer_limit(op.buffer.len)],
                         op.offset,
                     );
                 },
                 .recv => |op| {
                     sqe.prep_recv(
                         op.socket,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.buffer[0..common.buffer_limit(op.buffer.len)],
                         0,
                     );
                 },
                 .send => |op| {
                     sqe.prep_send(
                         op.socket,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.buffer[0..common.buffer_limit(op.buffer.len)],
                         posix.MSG.NOSIGNAL,
                     );
                 },
@@ -450,7 +453,7 @@ pub const IO = struct {
                 .write => |op| {
                     sqe.prep_write(
                         op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.buffer[0..common.buffer_limit(op.buffer.len)],
                         op.offset,
                     );
                 },
@@ -1426,7 +1429,6 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
-    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (if possible in development mode, but required in production mode).
@@ -1444,7 +1446,7 @@ pub const IO = struct {
         direct_io: DirectIO,
     ) !fd_t {
         assert(relative_path.len > 0);
-        assert(size % constants.sector_size == 0);
+        assert(size % sector_size == 0);
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
 
@@ -1525,7 +1527,7 @@ pub const IO = struct {
                 // here (see below) but being able to benchmark production workloads
                 // on tmpfs is very useful for removing disk speed from the equation.
                 if (direct_io != .direct_io_disabled and !dir_on_tmpfs) {
-                    direct_io_supported = try fs_supports_direct_io(self.io_std, dir_fd);
+                    direct_io_supported = try self.fs_supports_direct_io(dir_fd);
                     if (direct_io_supported) {
                         flags.DIRECT = true;
                     } else if (direct_io == .direct_io_optional) {
@@ -1589,7 +1591,7 @@ pub const IO = struct {
             for (0..40) |_| {
                 posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
                     error.WouldBlock => {
-                        std.Io.sleep(self.io_std, .fromMilliseconds(50), .awake) catch {};
+                        sleep(.ms(50));
                         continue;
                     },
                     else => return err,
@@ -1631,7 +1633,6 @@ pub const IO = struct {
                     log.info("allocating by writing to the last sector " ++
                         "of the file instead...", .{});
 
-                    const sector_size = constants.sector_size;
                     const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                     // Handle partial writes where the physical sector is
@@ -1700,15 +1701,18 @@ pub const IO = struct {
                     //   one starting at 0MiB, one at 1024MiB) and the operator tries to format
                     //   the raw disk (/dev/sda) while a partition later is
                     //   TigerBeetle (/dev/sda2) it'll be blocked by the MBR/GPT existing.
-                    const superblock_zone_size =
-                        @import("../vsr/superblock.zig").superblock_zone_size;
-                    var read_buf: [superblock_zone_size]u8 align(constants.sector_size) = undefined;
+                    const superblock_zone_size = purpose.format.superblock_zone_size;
+                    var superblock_buffer: [128 * KiB]u8 align(sector_size) = undefined;
+                    assert(superblock_buffer.len >= superblock_zone_size);
+                    const superblock = superblock_buffer[0..superblock_zone_size];
 
                     // We can do this without worrying about retrying partial reads because on
                     // linux, read(2) on block devices can not be interrupted by signals.
                     // See signal(7).
-                    assert(superblock_zone_size == try posix.read(fd, &read_buf));
-                    if (!std.mem.allEqual(u8, &read_buf, 0)) {
+                    const result = try posix.read(fd, superblock);
+                    assert(superblock_zone_size == result);
+
+                    if (!std.mem.allEqual(u8, superblock, 0)) {
                         std.debug.panic(
                             "Superblock on block device not empty. " ++
                                 "If this is the correct block device to use, " ++
@@ -1718,12 +1722,12 @@ pub const IO = struct {
                     }
 
                     // Reset position in the block device to compensate for read(2).
-                    try posix.lseek_CUR(fd, -superblock_zone_size);
+                    try posix.lseek_CUR(fd, -@as(i64, superblock_zone_size));
                     assert(try posix.lseek_CUR_get(fd) == 0);
 
                     // In a similar vein to the fs_allocate for the .file case above, BLKDISCARD
                     // the entire block device.
-                    assert(std.mem.allEqual(u8, &read_buf, 0));
+                    assert(std.mem.allEqual(u8, superblock, 0));
 
                     const BLKDISCARD = os.linux.IOCTL.IO(0x12, 119);
                     const range: extern struct { start: u64, len: u64 } = .{
@@ -1777,18 +1781,19 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
-    fn fs_supports_direct_io(io_std: std.Io, dir_fd: fd_t) !bool {
+    fn fs_supports_direct_io(self: *IO, dir_fd: fd_t) !bool {
+        assert(self.io_std != null);
         if (!@hasField(posix.O, "DIRECT")) return false;
 
         var cookie: [16]u8 = @splat('0');
-        _ = stdx.array_print(16, &cookie, "{0x}", .{stdx.crypto_random_int(io_std, u64)});
+        _ = stdx.array_print(16, &cookie, "{0x}", .{self.crypto_random_int(u64)});
 
         const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
         const dir = std.Io.Dir{ .handle = dir_fd };
         const flags: posix.O = .{ .CLOEXEC = true, .CREAT = true, .TRUNC = true };
         const fd = try posix.openatZ(dir_fd, path, flags, 0o600);
         defer posix.close(fd);
-        defer dir.deleteFile(io_std, path) catch {};
+        defer dir.deleteFile(self.io_std.?, path) catch {};
 
         while (true) {
             const dir_flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDONLY, .DIRECT = true };
@@ -1840,26 +1845,32 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
     ) std.Io.File.Writer.Error!void {
-        return common.aof_blocking_write_all(io.io_std, fd, buffer);
+        assert(io.io_std != null);
+        return common.aof_blocking_write_all(io.io_std.?, fd, buffer);
     }
 
     pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
+        assert(io.io_std != null);
+        return common.aof_blocking_pread_all(io.io_std.?, fd, buffer, offset);
     }
 
     pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_close(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
-        return common.aof_blocking_stat(io.io_std, path);
+        assert(io.io_std != null);
+        return common.aof_blocking_stat(io.io_std.?, path);
     }
 
     pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
-        return common.aof_blocking_fstat(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_fstat(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
+        assert(io.io_std != null);
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
@@ -1868,7 +1879,104 @@ pub const IO = struct {
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std.?, dir_fd, file_path);
+    }
+
+    pub fn crypto_random_bytes(_: *IO, buffer: []u8) void {
+        assert(buffer.len > 0);
+        assert(buffer.len <= std.math.maxInt(u32));
+        var position: u32 = 0;
+        for (0..buffer.len) |_| {
+            const remaining = buffer[position..];
+            const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
+            switch (stdx.posix.errno(return_code)) {
+                .SUCCESS => {
+                    assert(return_code <= std.math.maxInt(u32));
+                    const bytes: u32 = @intCast(return_code);
+                    position += bytes;
+                    assert(bytes > 0);
+                    if (position < buffer.len) continue;
+                    assert(position == buffer.len);
+                    break;
+                },
+                .INTR => {
+                    continue;
+                },
+                else => @panic("crypto_random_bytes: entropy unavailable"),
+            }
+        } else @panic("crypto_random_bytes: entropy unavailable");
+    }
+
+    pub fn crypto_random_int(io: *IO, comptime T: type) T {
+        return common.crypto_random_int(IO, T, io);
+    }
+
+    pub fn futex_wait(
+        value: *const std.atomic.Value(u32),
+        expect: u32,
+    ) void {
+        const return_code = linux.futex_3arg(
+            &value.raw,
+            .{ .cmd = .WAIT, .private = true },
+            expect,
+        );
+
+        switch (linux.E.init(return_code)) {
+            .SUCCESS => {}, // notified by `wake()`
+            .INTR => {}, // spurious wakeup
+            .AGAIN => {}, // ptr.* != expect
+            .INVAL => {},
+            .TIMEDOUT => unreachable, // we don't provide a timeout value.
+            .FAULT => unreachable, // ptr was invalid
+            else => unreachable,
+        }
+    }
+
+    pub fn futex_wake(value: *const std.atomic.Value(u32), waiters_max: u16) void {
+        const return_code = linux.futex_3arg(
+            &value.raw,
+            .{ .cmd = .WAKE, .private = true },
+            waiters_max,
+        );
+
+        switch (stdx.posix.errno(return_code)) {
+            .SUCCESS => {}, // successful wake up
+            .INVAL => {}, // invalid futex_wait() on ptr done elsewhere
+            .FAULT => {}, // pointer became invalid while doing the wake
+            else => unreachable,
+        }
+    }
+
+    pub fn sleep(duration: stdx.Duration) void {
+        const seconds = @divFloor(duration.ns, std.time.ns_per_s);
+        const nanoseconds = duration.ns % std.time.ns_per_s;
+
+        var requested: linux.timespec = .{
+            .sec = @intCast(seconds),
+            .nsec = @intCast(nanoseconds),
+        };
+        var remaining: linux.timespec = undefined;
+
+        while (true) {
+            const return_code = linux.clock_nanosleep(
+                .MONOTONIC,
+                .{ .ABSTIME = false },
+                &requested,
+                &remaining,
+            );
+
+            switch (stdx.posix.errno(return_code)) {
+                .SUCCESS => return,
+                .INTR => {
+                    requested = remaining;
+                    continue;
+                },
+                .FAULT => unreachable,
+                .INVAL => unreachable,
+                .OPNOTSUPP => unreachable,
+                else => return,
+            }
+        }
     }
 
     fn erase_types(

@@ -90,21 +90,21 @@ pub fn main(init: std.process.Init) !void {
         log.warn("not testing upgrades", .{});
     }
 
-    const seed = args.seed orelse stdx.crypto_random_int(init.io, u64);
-    var prng = stdx.PRNG.from_seed(seed);
-
     const shell = try stdx.Shell.create(gpa, init.io, init.environ_map);
     defer shell.destroy();
 
+    const seed = args.seed orelse shell.io.crypto_random_int(u64);
+    var prng = stdx.PRNG.from_seed(seed);
+
     const output_directory_relative = args.directory orelse (try shell.create_tmp_dir());
     const output_directory = try std.Io.Dir.cwd().realPathFileAlloc(
-        shell.io,
+        shell.io_std,
         output_directory_relative,
         shell.arena.allocator(),
     );
     defer {
         if (args.directory == null) {
-            shell.cwd.deleteTree(shell.io, output_directory) catch |err| {
+            shell.cwd.deleteTree(shell.io_std, output_directory) catch |err| {
                 log.err("error deleting tree: {}", .{err});
             };
         }

@@ -2,7 +2,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const PRNG = stdx.PRNG;
 const Duration = stdx.Duration;
@@ -83,7 +83,6 @@ pub fn range_inclusive_ms(prng: *stdx.PRNG, min: anytype, max: anytype) Duration
 }
 
 pub const FuzzArgs = struct {
-    io: std.Io,
     seed: u64,
     events_max: ?usize,
 };

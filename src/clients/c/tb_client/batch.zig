@@ -11,7 +11,7 @@ const MultiBatchDecoder = multi_batch.MultiBatchDecoder;
 const stdx = vsr.stdx;
 const maybe = stdx.maybe;
 
-const QueueType = vsr.queue.QueueType;
+const QueueType = stdx.QueueType;
 
 pub const Batch = extern struct {
     user_data: ?*anyopaque,

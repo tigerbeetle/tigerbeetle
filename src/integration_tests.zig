@@ -37,10 +37,12 @@ test "repl integration" {
             const shell = try Shell.create_testing(std.testing.allocator);
             errdefer shell.destroy();
 
-            var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, shell.io, &shell.env, .{
-                .development = true,
-                .prebuilt = tigerbeetle,
-            });
+            var tmp_beetle = try TmpTigerBeetle.init(
+                std.testing.allocator,
+                shell.io_std,
+                &shell.env,
+                .{ .development = true, .prebuilt = tigerbeetle },
+            );
             errdefer tmp_beetle.deinit(std.testing.allocator);
 
             return Context{

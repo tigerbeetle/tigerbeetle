@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 
 const ProcessID = @import("../trace.zig").ProcessID;
-const IO = @import("../io.zig").IO;
+const IO = stdx.IO;
 
 const EventMetric = @import("event.zig").EventMetric;
 const EventMetricAggregate = @import("event.zig").EventMetricAggregate;

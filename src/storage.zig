@@ -106,7 +106,7 @@ pub fn StorageType(comptime IO: type) type {
             path: []const u8,
             size_min: u64,
             purpose: IO.OpenDataFilePurpose,
-            direct_io: vsr.io.DirectIO,
+            direct_io: IO.DirectIO,
         }) !Storage {
             // TODO Resolve the parent directory properly in the presence of .. and symlinks.
             // TODO Handle physical volumes where there is no directory to fsync.

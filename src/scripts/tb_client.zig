@@ -66,15 +66,15 @@ const TestingContext = struct {
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     _ = cli_args;
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = false,
         .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
     try test_init(gpa, tmp_beetle.port_str);
-    try test_client_status(gpa, shell.io, tmp_beetle.port_str);
-    try test_batch_status(gpa, shell.io, tmp_beetle.port_str);
+    try test_client_status(gpa, shell.io_std, tmp_beetle.port_str);
+    try test_batch_status(gpa, shell.io_std, tmp_beetle.port_str);
 }
 
 // Asserts the validation rules associated with the `init` function.

@@ -533,7 +533,7 @@ pub const Command = union(enum) {
     const Path = stdx.BoundedArrayType(u8, std.fs.max_path_bytes);
 
     pub const Format = struct {
-        cluster: u128,
+        cluster: ?u128,
         replica: u8,
         replica_count: u8,
         development: bool,
@@ -726,11 +726,11 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(flags: *stdx.Flags, io: std.Io, args: std.process.Args) Command {
+pub fn parse_args(flags: *stdx.Flags, args: std.process.Args) Command {
     const cli_args = flags.parse(CLIArgs, args);
 
     return switch (cli_args) {
-        .format => |format| .{ .format = parse_args_format(io, format) },
+        .format => |format| .{ .format = parse_args_format(format) },
         .recover => |recover| .{ .recover = parse_args_recover(recover) },
         .start => |start| .{ .start = parse_args_start(start) },
         .version => |version| .{ .version = parse_args_version(version) },
@@ -742,7 +742,7 @@ pub fn parse_args(flags: *stdx.Flags, io: std.Io, args: std.process.Args) Comman
     };
 }
 
-fn parse_args_format(io: std.Io, format: CLIArgs.Format) Command.Format {
+fn parse_args_format(format: CLIArgs.Format) Command.Format {
     if (format.replica_count == 0) {
         vsr.fatal(.cli, "--replica-count: value needs to be greater than zero", .{});
     }
@@ -789,19 +789,16 @@ fn parse_args_format(io: std.Io, format: CLIArgs.Format) Command.Format {
     assert(replica < constants.members_max);
     assert(replica < format.replica_count + constants.standbys_max);
 
-    const cluster_random = stdx.crypto_random_int(io, u128);
-    assert(cluster_random != 0);
-    const cluster = format.cluster orelse cluster_random;
-    if (format.cluster == null) {
-        std.log.info("generated random cluster id: {}\n", .{cluster});
-    } else if (format.cluster.? == 0) {
-        std.log.warn("a cluster id of 0 is reserved for testing and benchmarking, " ++
-            "do not use in production", .{});
-        std.log.warn("omit --cluster=0 to randomly generate a suitable id\n", .{});
+    if (format.cluster) |cluster| {
+        if (cluster == 0) {
+            std.log.warn("a cluster id of 0 is reserved for testing and benchmarking, " ++
+                "do not use in production", .{});
+            std.log.warn("omit --cluster=0 to randomly generate a suitable id\n", .{});
+        }
     }
 
     return .{
-        .cluster = cluster, // just an ID, any value is allowed
+        .cluster = format.cluster,
         .replica = replica,
         .replica_count = format.replica_count,
         .development = format.development,

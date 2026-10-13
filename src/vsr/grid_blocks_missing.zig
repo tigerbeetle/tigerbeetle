@@ -18,7 +18,7 @@ const stdx = @import("stdx");
 const schema = @import("../lsm/schema.zig");
 const vsr = @import("../vsr.zig");
 
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
 pub const GridBlocksMissing = struct {
@@ -118,9 +118,11 @@ pub const GridBlocksMissing = struct {
     ///   (address/checksum).
     faulty_tables: QueueType(RepairTable) = QueueType(RepairTable).init(.{
         .name = "grid_missing_blocks_tables",
+        .verify_push = constants.verify,
     }),
     faulty_tables_free: QueueType(RepairTable) = QueueType(RepairTable).init(.{
         .name = "grid_missing_blocks_tables_free",
+        .verify_push = constants.verify,
     }),
 
     state: union(enum) {
@@ -720,6 +722,7 @@ pub const GridBlocksMissing = struct {
 
         var tables: QueueType(RepairTable) = QueueType(RepairTable).init(.{
             .name = queue.faulty_tables.any.name,
+            .verify_push = constants.verify,
         });
         while (queue.faulty_tables.pop()) |table| {
             assert(!free_set.is_free(table.table_info.address));

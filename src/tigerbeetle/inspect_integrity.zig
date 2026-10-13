@@ -6,7 +6,7 @@ const log = std.log.scoped(.integrity);
 const cli = @import("cli.zig");
 const vsr = @import("vsr");
 const constants = vsr.constants;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const StateMachine = @import("main.zig").StateMachine;
 const Replica = @import("main.zig").Replica;
 const Storage = @import("main.zig").Storage;
@@ -70,7 +70,7 @@ pub fn command_inspect_integrity(
         // If no seed was given, use a random seed for better coverage.
         const seed: u64 = seed_from_arg: {
             const seed_argument = args.seed orelse
-                break :seed_from_arg @truncate(stdx.crypto_u128(io.io_std));
+                break :seed_from_arg io.crypto_random_int(u64);
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 
@@ -135,6 +135,7 @@ fn init(
     path: []const u8,
     lsm_forest_node_count: u32,
 ) !void {
+    assert(io.io_std != null);
     integrity.io = io;
 
     integrity.storage = try Storage.init(io, tracer, .{
@@ -149,7 +150,7 @@ fn init(
         .handle = integrity.storage.fd,
         .flags = .{ .nonblocking = false },
     };
-    const data_file_stat = try data_file.stat(io.io_std);
+    const data_file_stat = try data_file.stat(io.io_std.?);
 
     integrity.superblock = try SuperBlock.init(
         gpa,
@@ -408,7 +409,7 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
     var prng = stdx.PRNG.from_seed(seed);
     integrity.grid_scrubber.open(&prng);
 
-    const parent_progress_node = std.Progress.start(integrity.io.io_std, .{
+    const parent_progress_node = std.Progress.start(integrity.io.io_std.?, .{
         .root_name = "checking grid blocks",
         .estimated_total_items = blocks_expected_count,
     });

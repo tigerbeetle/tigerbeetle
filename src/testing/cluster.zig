@@ -13,7 +13,7 @@ const message_pool = @import("../message_pool.zig");
 const ratio = stdx.PRNG.ratio;
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
-const IO = @import("io.zig").IO;
+const IO = stdx.IOTest;
 
 const AOF = @import("../aof.zig").AOFType(IO);
 const TimeSim = stdx.TimeSim;

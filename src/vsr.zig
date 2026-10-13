@@ -13,9 +13,6 @@ test {
 // Note that we don't promise any stability of these interfaces yet.
 pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
-pub const io = @import("io.zig");
-pub const queue = @import("queue.zig");
-pub const stack = @import("stack.zig");
 pub const message_buffer = @import("message_buffer.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
@@ -40,9 +37,9 @@ pub const lsm = .{
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
-    .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
+    .random_int_exponential = stdx.fuzz.random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
-    .parse_seed = @import("testing/fuzz.zig").parse_seed,
+    .parse_seed = stdx.fuzz.parse_seed,
     .fixtures = @import("testing/fixtures.zig"),
 };
 pub const ewah = @import("ewah.zig").ewah;

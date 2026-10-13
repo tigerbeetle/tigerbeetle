@@ -9,7 +9,7 @@ const vsr = @import("../vsr.zig");
 const schema = @import("../lsm/schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const IOPSType = stdx.IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("stdx");
@@ -95,7 +95,10 @@ pub fn GridType(comptime Storage: type) type {
             cache_read: bool,
             cache_write: bool,
             pending: ReadPending = .{},
-            resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{ .name = null }),
+            resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{
+                .name = null,
+                .verify_push = constants.verify,
+            }),
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -197,23 +200,33 @@ pub fn GridType(comptime Storage: type) type {
         stash_available: u32,
 
         write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
-        write_queue: QueueType(Write) = QueueType(Write).init(.{ .name = "grid_write" }),
+        write_queue: QueueType(Write) = QueueType(Write).init(.{
+            .name = "grid_write",
+            .verify_push = constants.verify,
+        }),
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPSType(ReadIOP, read_iops_max) = .{},
-        read_queue: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_read" }),
+        read_queue: QueueType(Read) = QueueType(Read).init(.{
+            .name = "grid_read",
+            .verify_push = constants.verify,
+        }),
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
         read_pending_queue: QueueType(ReadPending) = QueueType(ReadPending).init(.{
             .name = "grid_read_pending",
+            .verify_push = constants.verify,
         }),
         /// List of `Read`s which are waiting for a block repair from another replica.
         /// (Reads in this queue have already failed locally).
         ///
         /// Invariants:
         /// - For each read, read.callback=from_local_or_global_storage.
-        read_global_queue: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_read_global" }),
+        read_global_queue: QueueType(Read) = QueueType(Read).init(.{
+            .name = "grid_read_global",
+            .verify_push = constants.verify,
+        }),
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
@@ -1447,6 +1460,7 @@ pub fn GridType(comptime Storage: type) type {
 
             var read_remote_resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{
                 .name = read.resolves.any.name,
+                .verify_push = constants.verify,
             });
 
             // Resolve all reads queued to the address with the block.

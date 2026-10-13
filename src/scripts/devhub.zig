@@ -69,8 +69,8 @@ fn devhub_coverage(shell: *Shell) !void {
     try shell.exec_zig("build fuzz:build", .{});
 
     // Put results into src/devhub, as that folder is deployed as GitHub pages.
-    try shell.project_root.deleteTree(shell.io, "./src/devhub/coverage");
-    try shell.project_root.createDirPath(shell.io, "./src/devhub/coverage");
+    try shell.project_root.deleteTree(shell.io_std, "./src/devhub/coverage");
+    try shell.project_root.createDirPath(shell.io_std, "./src/devhub/coverage");
 
     const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
     inline for (.{
@@ -83,17 +83,17 @@ fn devhub_coverage(shell: *Shell) !void {
     }
 
     var coverage_dir = try shell.cwd.openDir(
-        shell.io,
+        shell.io_std,
         "./src/devhub/coverage",
         .{ .iterate = true },
     );
-    defer coverage_dir.close(shell.io);
+    defer coverage_dir.close(shell.io_std);
 
     // kcov adds some symlinks to the output, which prevents upload to GitHub actions from working.
     var it = coverage_dir.iterate();
-    while (try it.next(shell.io)) |entry| {
+    while (try it.next(shell.io_std)) |entry| {
         if (entry.kind == .sym_link) {
-            try coverage_dir.deleteFile(shell.io, entry.name);
+            try coverage_dir.deleteFile(shell.io_std, entry.name);
         }
     }
 }
@@ -114,20 +114,20 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     const build_time_debug_ms = blk: {
         timer.reset();
         try shell.exec_zig("build install", .{});
-        defer shell.project_root.deleteFile(shell.io, "tigerbeetle") catch unreachable;
+        defer shell.project_root.deleteFile(shell.io_std, "tigerbeetle") catch unreachable;
 
         break :blk timer.read().ns / std.time.ns_per_ms;
     };
 
     const build_time_ms, const executable_size_bytes = blk: {
         timer.reset();
-        try shell.project_root.deleteTree(shell.io, ".zig-cache/tmp/devhub_cache");
+        try shell.project_root.deleteTree(shell.io_std, ".zig-cache/tmp/devhub_cache");
         try shell.exec_zig("build -Drelease install", .{});
-        defer shell.project_root.deleteFile(shell.io, "tigerbeetle") catch unreachable;
+        defer shell.project_root.deleteFile(shell.io_std, "tigerbeetle") catch unreachable;
 
         break :blk .{
             timer.read().ns / std.time.ns_per_ms,
-            (try shell.cwd.statFile(shell.io, "tigerbeetle", .{})).size,
+            (try shell.cwd.statFile(shell.io_std, "tigerbeetle", .{})).size,
         };
     };
 
@@ -136,7 +136,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // the release code to try and look for a version which doesn't yet exist!
     const no_changelog_flag = blk: {
         const changelog_text = try shell.project_root.readFileAlloc(
-            shell.io,
+            shell.io_std,
             "CHANGELOG.md",
             shell.arena.allocator(),
             .limited(1 * MiB),
@@ -168,7 +168,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             \\    --language=zig --devhub
         , .{ .sha = cli_args.sha });
     }
-    try shell.project_root.deleteFile(shell.io, "tigerbeetle");
+    try shell.project_root.deleteFile(shell.io_std, "tigerbeetle");
 
     try shell.unzip_executable(
         "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
@@ -197,7 +197,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         break :blk timer.read().ns / std.time.ns_per_ms;
     };
 
-    shell.cwd.deleteFile(shell.io, "datafile-devhub") catch unreachable;
+    shell.cwd.deleteFile(shell.io_std, "datafile-devhub") catch unreachable;
 
     const replica_log_lines = std.mem.count(u8, benchmark_stderr, "\n");
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
@@ -221,7 +221,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
 
         break :blk timer.read().ns / std.time.ns_per_ms;
     };
-    defer shell.cwd.deleteFile(shell.io, "datafile-devhub") catch unreachable;
+    defer shell.cwd.deleteFile(shell.io_std, "datafile-devhub") catch unreachable;
 
     const stats_count = blk: {
         const stats_inspect_result = try shell.exec_stdout("./tigerbeetle inspect metrics", .{});
@@ -256,13 +256,13 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         );
 
         defer {
-            process.stdin.?.close(shell.io);
+            process.stdin.?.close(shell.io_std);
             process.stdin = null;
-            _ = process.wait(shell.io) catch {};
+            _ = process.wait(shell.io_std) catch {};
         }
 
         const port: u16 = b: {
-            var stdout_reader = process.stdout.?.readerStreaming(shell.io, &.{});
+            var stdout_reader = process.stdout.?.readerStreaming(shell.io_std, &.{});
             var buffer: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
             const size = try stdout_reader.interface.readSliceShort(&buffer);
             break :b try stdx.parse_int(u16, buffer[0 .. size - 1], .{});
@@ -292,13 +292,13 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         var eviction: Header.Eviction = undefined;
 
         const peer = try std.Io.net.IpAddress.parseIp4("127.0.0.1", port);
-        const stream = try peer.connect(shell.io, .{ .mode = .stream });
-        defer stream.close(shell.io);
+        const stream = try peer.connect(shell.io_std, .{ .mode = .stream });
+        defer stream.close(shell.io_std);
 
-        var writer = stream.writer(shell.io, &.{});
+        var writer = stream.writer(shell.io_std, &.{});
         try writer.interface.writeAll(std.mem.asBytes(&ping)[0..@sizeOf(Header)]);
 
-        var reader = stream.reader(shell.io, &.{});
+        var reader = stream.reader(shell.io_std, &.{});
         _ = try reader.interface.readSliceShort(std.mem.asBytes(&eviction)[0..@sizeOf(Header)]);
 
         assert(eviction.command == .eviction);
@@ -426,13 +426,13 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
         try shell.exec("git reset --hard origin/main", .{});
 
         {
-            const file = try shell.cwd.openFile(shell.io, "./devhub/data.json", .{
+            const file = try shell.cwd.openFile(shell.io_std, "./devhub/data.json", .{
                 .mode = .write_only,
             });
-            defer file.close(shell.io);
+            defer file.close(shell.io_std);
 
-            var file_writer = file.writer(shell.io, &.{});
-            try file_writer.seekTo(try file.length(shell.io));
+            var file_writer = file.writer(shell.io_std, &.{});
+            try file_writer.seekTo(try file.length(shell.io_std));
             try std.json.Stringify.value(batch, .{}, &file_writer.interface);
             try file_writer.interface.writeAll("\n");
         }

@@ -15,7 +15,7 @@ const tb = vsr.tigerbeetle;
 
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
-const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
+const MessageBus = vsr.message_bus.MessageBusType(stdx.IO);
 const Header = vsr.Header;
 
 const MiB = stdx.MiB;
@@ -500,14 +500,15 @@ pub fn AOFType(comptime IO: type) type {
             last_checksum: ?u128 = null,
 
             pub fn init(io: *IO, path: []const u8) !Iterator {
+                assert(io.io_std != null);
                 const file = try std.Io.Dir.cwd().openFile(
-                    io.io_std,
+                    io.io_std.?,
                     path,
                     .{ .mode = .read_only },
                 );
-                errdefer file.close(io.io_std);
+                errdefer file.close(io.io_std.?);
 
-                const size = (try file.stat(io.io_std)).size;
+                const size = (try file.stat(io.io_std.?)).size;
 
                 return Iterator{ .io = io, .file_descriptor = file.handle, .size = size };
             }
@@ -601,7 +602,8 @@ pub fn AOFType(comptime IO: type) type {
             input_paths: []const []const u8,
             output_path: []const u8,
         ) !void {
-            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+            assert(io.io_std != null);
+            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std.?, &.{});
             const stdout = &stdout_writer.interface;
 
             var aofs: [constants.members_max]Iterator = undefined;
@@ -795,7 +797,7 @@ const testing = std.testing;
 
 test "aof write / read" {
     const io_testing = std.testing.io;
-    const IO = @import("io.zig").IO;
+    const IO = stdx.IO;
     const AOF = AOFType(IO);
     const AOFIterator = AOF.Iterator;
 
@@ -810,7 +812,7 @@ test "aof write / read" {
     const aof_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_realpath, "test.aof" });
     defer allocator.free(aof_file_path);
 
-    var io = try IO.init(io_testing, 32, 0);
+    var io = try IO.init(32, 0, io_testing);
     defer io.deinit();
 
     const dir_fd = try io.open_dir(".");
@@ -954,8 +956,8 @@ pub fn main(init: std.process.Init) !void {
     const target = try gpa.create(AOFEntry);
     defer gpa.destroy(target);
 
-    const IO = @import("io.zig").IO;
-    var io = try IO.init(init.io, 32, 0);
+    const IO = stdx.IO;
+    var io = try IO.init(32, 0, init.io);
     defer io.deinit();
 
     const AOF = AOFType(IO);
@@ -982,7 +984,7 @@ pub fn main(init: std.process.Init) !void {
             var data_checksum: [32]u8 = undefined;
             var blake3 = std.crypto.hash.Blake3.init(.{});
 
-            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std.?, &.{});
             const stdout = &stdout_writer.interface;
             while (try it.next(target)) |entry| {
                 const header = entry.header();

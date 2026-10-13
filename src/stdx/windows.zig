@@ -59,6 +59,7 @@ pub const DWORD = windows.DWORD;
 pub const GUID = windows.GUID;
 pub const HANDLE = windows.HANDLE;
 pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
+pub const IOCTL = windows.IOCTL;
 pub const INVALID_HANDLE_VALUE = windows.INVALID_HANDLE_VALUE;
 pub const OBJECT = windows.OBJECT;
 pub const ULONG = windows.ULONG;

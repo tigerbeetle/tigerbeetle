@@ -38,7 +38,7 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
-const IO = @import("../../io.zig").IO;
+const IO = stdx.IO;
 const Time = stdx.Time;
 const TimeOS = stdx.TimeOS;
 const RingBufferType = stdx.RingBufferType;
@@ -72,18 +72,18 @@ fn configuration(
     assert(std.fs.path.isAbsolute(source_directory));
     assert(std.fs.path.isAbsolute(target_directory));
 
-    const source_dir = try std.Io.Dir.openDirAbsolute(shell.io, source_directory, .{});
-    defer source_dir.close(shell.io);
+    const source_dir = try std.Io.Dir.openDirAbsolute(shell.io_std, source_directory, .{});
+    defer source_dir.close(shell.io_std);
 
-    const target_dir = try std.Io.Dir.openDirAbsolute(shell.io, target_directory, .{});
-    defer target_dir.close(shell.io);
+    const target_dir = try std.Io.Dir.openDirAbsolute(shell.io_std, target_directory, .{});
+    defer target_dir.close(shell.io_std);
 
     comptime assert(dependencies_count > 0);
     const server_executables: [dependencies_count][]const u8 = executables: {
         var executables: [dependencies_count][]const u8 = undefined;
         for (&executables, 0..) |*executable, i| {
             const file = try shell.fmt("tigerbeetle-{d}", .{dependencies_count - i - 1});
-            try source_dir.hardLink(file, target_dir, file, shell.io, .{});
+            try source_dir.hardLink(file, target_dir, file, shell.io_std, .{});
 
             executable.* =
                 try std.fs.path.join(shell.arena.allocator(), &.{ target_directory, file });
@@ -95,7 +95,7 @@ fn configuration(
         var executables: [dependencies_count][]const u8 = undefined;
         for (&executables, 0..) |*executable, i| {
             const file = try shell.fmt("vortex-driver-zig-{d}", .{dependencies_count - i - 1});
-            try source_dir.hardLink(file, target_dir, file, shell.io, .{});
+            try source_dir.hardLink(file, target_dir, file, shell.io_std, .{});
 
             executable.* =
                 try std.fs.path.join(shell.arena.allocator(), &.{ target_directory, file });
@@ -186,7 +186,7 @@ pub const Supervisor = struct {
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
 
-        io.* = try IO.init(io_std, 128, 0);
+        io.* = try IO.init(128, 0, null);
         errdefer io.deinit();
 
         const replica_ports_actual =
@@ -515,7 +515,7 @@ pub const Supervisor = struct {
         log.info("{}: reformatting replica", .{replica_index});
 
         supervisor.shell.cwd.deleteFile(
-            supervisor.shell.io,
+            supervisor.shell.io_std,
             supervisor.replica_datafiles[replica_index],
         ) catch |err| {
             log.err("{}: failed deleting datafile: {}", .{ replica_index, err });
@@ -590,7 +590,7 @@ pub const Supervisor = struct {
 
         assert(replica.process == null);
         replica.state = .running;
-        replica.process = try std.process.spawn(supervisor.shell.io, .{
+        replica.process = try std.process.spawn(supervisor.shell.io_std, .{
             .argv = argv.const_slice(),
             .stdin = .ignore,
             .stdout = .ignore,
@@ -606,7 +606,7 @@ pub const Supervisor = struct {
 
         try std.posix.kill(replica.process.?.id.?, std.posix.SIG.KILL);
 
-        const term = try replica.process.?.wait(supervisor.shell.io);
+        const term = try replica.process.?.wait(supervisor.shell.io_std);
         assert(std.meta.eql(term, .{ .signal = std.posix.SIG.KILL }));
 
         replica.process = null;
@@ -657,7 +657,7 @@ pub const Supervisor = struct {
         try std.Io.Dir.copyFileAbsolute(
             supervisor.server_executables[release_index],
             supervisor.replicas[replica_index].executable_target,
-            supervisor.shell.io,
+            supervisor.shell.io_std,
             .{},
         );
 
@@ -880,6 +880,7 @@ const Workload = struct {
         driver_release: Release,
         options: struct { seed: u64 },
     ) !*Workload {
+        assert(io.io_std != null);
         assert(std.mem.indexOfScalar(u8, driver_command, '"') == null);
 
         const arg_cluster = std.fmt.comptimePrint("{d}", .{constants.vortex.cluster_id});
@@ -894,13 +895,13 @@ const Workload = struct {
         try driver_argv.append(allocator, arg_cluster);
         try driver_argv.append(allocator, arg_addresses);
 
-        var driver = try std.process.spawn(io.io_std, .{
+        var driver = try std.process.spawn(io.io_std.?, .{
             .argv = driver_argv.items,
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .inherit,
         });
-        errdefer driver.kill(io.io_std);
+        errdefer driver.kill(io.io_std.?);
 
         var model = try Model.init(allocator);
         errdefer model.deinit(allocator);
@@ -935,7 +936,7 @@ const Workload = struct {
         std.posix.kill(workload.driver.id.?, std.posix.SIG.TERM) catch |err| {
             fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
         };
-        const workload_result = workload.driver.wait(workload.io.io_std) catch |err| {
+        const workload_result = workload.driver.wait(workload.io.io_std.?) catch |err| {
             fatal(.workload_exit_result, "workload: error waiting for driver: {any}", .{err});
         };
         if (!std.meta.eql(workload_result, .{ .signal = std.posix.SIG.TERM }) and

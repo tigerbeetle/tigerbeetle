@@ -2,8 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
+const stdx = @import("stdx");
 
-const Shell = @import("stdx").Shell;
+const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
@@ -42,7 +43,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -76,7 +77,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             log.info("testing docker image: '{s}'", .{image});
 
             for (0..5) |attempt| {
-                if (attempt > 0) try std.Io.sleep(shell.io, .fromSeconds(60), .awake);
+                if (attempt > 0) stdx.IO.sleep(.minute(1));
                 if (shell.exec("podman image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}
@@ -126,7 +127,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -136,7 +137,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io_std, tmp_dir) catch {};
 
     const base_dir = shell.cwd;
     try shell.pushd(tmp_dir);
@@ -150,7 +151,8 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         log.warn("waiting for 5 minutes for the {s} version to appear in nuget.org", .{
             options.release,
         });
-        try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
+
+        stdx.IO.sleep(.minutes(5));
     } else {
         switch (try nuget_install(shell, .{ .version = options.release })) {
             .ok => {},

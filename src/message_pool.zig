@@ -7,7 +7,7 @@ const constants = @import("constants.zig");
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
-const StackType = @import("./stack.zig").StackType;
+const StackType = stdx.StackType;
 
 comptime {
     // message_size_max must be a multiple of sector_size for Direct I/O

@@ -7,7 +7,7 @@ const maybe = vsr.stdx.maybe;
 
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Time = stdx.Time;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusType(IO);
@@ -112,7 +112,6 @@ pub const Runner = struct {
     pub fn init(
         self: *Runner,
         allocator: std.mem.Allocator,
-        io_std: std.Io,
         time: Time,
         options: struct {
             /// TigerBeetle cluster ID.
@@ -247,7 +246,7 @@ pub const Runner = struct {
             .flush_timeout_ticks = @divExact(30 * std.time.ms_per_s, constants.tick_ms),
         };
 
-        self.io = try IO.init(io_std, 32, 0);
+        self.io = try IO.init(32, 0, null);
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(allocator, .client);
@@ -258,7 +257,7 @@ pub const Runner = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.crypto_u128(io_std),
+                .id = self.io.crypto_random_int(u128),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
