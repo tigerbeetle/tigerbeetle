@@ -27,6 +27,33 @@ const ratio = stdx.PRNG.ratio;
 const log = std.log.scoped(.state_machine_fuzz);
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
+    const stats = try run(gpa, args.seed, args.events_max orelse 1000);
+    // Include zero counts so each run reports the complete status denominator.
+    for (std.enums.values(tb.CreateAccountStatus)) |status| {
+        log.info("status_count: operation=create_accounts status={s} count={}", .{
+            @tagName(status), stats.accounts.get(status),
+        });
+    }
+    for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
+        log.info("status_count: operation=create_transfers status={s} count={}", .{
+            @tagName(status), stats.transfers.get(status),
+        });
+    }
+    log.info("expiration coverage: pulses={} transfers={}", .{
+        stats.expiration_pulses,
+        stats.expiration_transfers,
+    });
+}
+
+const RunStats = struct {
+    accounts: std.EnumArray(tb.CreateAccountStatus, u64) = .initFill(0),
+    transfers: std.EnumArray(tb.CreateTransferStatus.Ordered, u64) = .initFill(0),
+    expiration_pulses: u64 = 0,
+    expiration_transfers: u64 = 0,
+};
+
+// Main and coverage tests use the same generation, import bias, and time advancement.
+fn run(gpa: std.mem.Allocator, seed: u64, events_max: usize) !RunStats {
     var world: World = undefined;
     try world.init(gpa);
     defer world.deinit(gpa);
@@ -47,46 +74,18 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     );
     defer gpa.free(reply_buffer);
 
-    var prng = stdx.PRNG.from_seed(args.seed);
+    var prng = stdx.PRNG.from_seed(seed);
     const options = Options.swarm(&prng);
     world.state_machine.prepare_timestamp = options.timestamp_start;
     // Count final reply statuses, including successful creates and linked-event rollbacks.
-    var accounts_stats = std.EnumArray(tb.CreateAccountStatus, u64).initFill(0);
-    var transfers_stats = std.EnumArray(tb.CreateTransferStatus.Ordered, u64).initFill(0);
+    var stats: RunStats = .{};
 
-    for (0..args.events_max orelse 1000) |_| {
+    for (0..events_max) |_| {
         const operation = prng.enum_weighted(
             World.StateMachine.Operation,
             options.operation_weights,
         );
-        const size: usize = size: {
-            if (!operation.is_multi_batch()) {
-                break :size build_batch(&prng, &options, operation, request_body);
-            }
-            assert(operation.is_multi_batch());
-
-            var body_encoder: MultiBatchEncoder = .init(request_body, .{
-                .element_size = operation.event_size(),
-            });
-
-            const batch_count = prng.enum_uniform(enum { one, random, max });
-            while (body_encoder.writable()) |writable| {
-                if (writable.len == 0) break;
-                const bytes_written: u32 = build_batch(&prng, &options, operation, writable);
-                body_encoder.add(bytes_written);
-                switch (batch_count) {
-                    .one => {
-                        if (body_encoder.batch_count == 1) break;
-                    },
-                    .random => if (prng.chance(.{ .numerator = 30, .denominator = 100 })) {
-                        break;
-                    },
-                    .max => {},
-                }
-            }
-
-            break :size body_encoder.finish();
-        };
+        const size = build_request(&prng, &options, operation, request_body);
 
         if (world.state_machine.input_valid(operation, request_buffer[0..size])) {
             if (operation == .create_transfers) {
@@ -100,7 +99,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                     for (stdx.bytes_as_slice(.exact, tb.Transfer, @constCast(batch))) |*transfer| {
                         // Keep IDs, accounts, and validation errors from ordinary generation.
                         // Bias imports to the gap exposed by expiry events, and its boundaries.
-                        if (prng.chance(ratio(1, 10))) transfer.flags.imported = true;
+                        if (prng.chance(options.imported_probability)) transfer.flags.imported = true;
                         if (transfer.flags.imported and prng.boolean()) {
                             transfer.timestamp = switch (prng.enum_uniform(enum {
                                 after_transfer,
@@ -125,7 +124,6 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             world.prepare(operation, request_buffer[0..size], elapsed_ns);
             const cdc_timestamp_before = world.cdc_timestamp_max();
             const reply_size = world.execute(
-                world.op,
                 operation,
                 request_buffer[0..size],
                 @ptrCast(reply_buffer),
@@ -137,7 +135,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 }) catch unreachable;
                 while (decoder.pop()) |batch| {
                     for (stdx.bytes_as_slice(.exact, tb.CreateAccountResult, batch)) |result| {
-                        accounts_stats.set(result.status, accounts_stats.get(result.status) + 1);
+                        stats.accounts.set(result.status, stats.accounts.get(result.status) + 1);
                     }
                 }
             }
@@ -149,7 +147,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 while (decoder.pop()) |batch| {
                     for (stdx.bytes_as_slice(.exact, tb.CreateTransferResult, batch)) |result| {
                         const status = result.status.to_ordered();
-                        transfers_stats.set(status, transfers_stats.get(status) + 1);
+                        stats.transfers.set(status, stats.transfers.get(status) + 1);
                         // Failed/exists events do not insert CDC. Linked rollbacks are
                         // reflected in their final statuses, so only created events advance it.
                         if (result.status == .created) {
@@ -176,21 +174,9 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         }
         world.tick();
     }
-    // Include zero counts so each run reports the complete status denominator.
-    for (std.enums.values(tb.CreateAccountStatus)) |status| {
-        log.info("status_count: operation=create_accounts status={s} count={}", .{
-            @tagName(status), accounts_stats.get(status),
-        });
-    }
-    for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
-        log.info("status_count: operation=create_transfers status={s} count={}", .{
-            @tagName(status), transfers_stats.get(status),
-        });
-    }
-    log.info("expiration coverage: pulses={} transfers={}", .{
-        world.expiration_pulses,
-        world.expiration_transfers,
-    });
+    stats.expiration_pulses = world.expiration_pulses;
+    stats.expiration_transfers = world.expiration_transfers;
+    return stats;
 }
 
 const World = struct {
@@ -245,7 +231,7 @@ const World = struct {
         };
         assert(world.state_machine.input_valid(operation, input[0..size]));
         world.prepare(operation, input[0..size], 0);
-        const reply_size = world.execute(world.op, operation, input[0..size], output);
+        const reply_size = world.execute(operation, input[0..size], output);
         world.tick();
         const reply = if (operation.is_multi_batch()) reply: {
             var decoder = MultiBatchDecoder.init(output[0..reply_size], .{
@@ -409,7 +395,6 @@ const World = struct {
 
     fn execute(
         world: *World,
-        op: u64,
         operation: StateMachine.Operation,
         message_body_used: []align(constants.cache_line_size) const u8,
         output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
@@ -425,8 +410,8 @@ const World = struct {
                     ctx.busy = false;
                 }
             }.callback,
-            op,
-            op,
+            world.op,
+            world.op,
             operation,
             message_body_used,
         );
@@ -442,7 +427,7 @@ const World = struct {
 
         const reply_size = world.state_machine.commit(
             1,
-            op,
+            world.op,
             timestamp,
             operation,
             message_body_used,
@@ -493,6 +478,7 @@ const Options = struct {
     transfer_id_max: u128,
     account_mutation_probability: MutationProbabilityType(tb.Account),
     transfer_mutation_probability: MutationProbabilityType(tb.Transfer),
+    imported_probability: Ratio,
     repeat_probability: Ratio,
     repeats_seed: u64,
     reads: ReadOptions,
@@ -517,6 +503,10 @@ const Options = struct {
             .account_mutation_probability = mutation_probability_swarm(prng, tb.Account),
             .transfer_mutation_probability = mutation_probability_swarm(prng, tb.Transfer),
             .repeats_seed = prng.int(u64),
+            .imported_probability = ratio(
+                prng.int_inclusive(u8, 80),
+                100,
+            ),
             .repeat_probability = ratio(
                 prng.int_inclusive(u8, 80),
                 100,
@@ -632,76 +622,10 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
     const transfers = stdx.bytes_as_slice(.inexact, tb.Transfer, buffer);
     const count = prng.int_inclusive(u32, @intCast(transfers.len));
     for (transfers[0..count]) |*transfer| {
-        const transfer_kind = prng.enum_weighted(TransferKind, options.transfers_weights);
-        switch (transfer_kind) {
-            .one_phase => {
-                if (prng.chance(options.repeat_probability)) {
-                    var prng_low_cardinality = stdx.PRNG.from_seed(
-                        prng.int_inclusive(u64, 10) ^ options.repeats_seed,
-                    );
-                    build_transfer(&prng_low_cardinality, options, transfer);
-                    if (prng.chance(ratio(2, 10))) {
-                        // Give small fields such as code and ledger the same chance as IDs.
-                        switch (prng.enum_uniform(std.meta.FieldEnum(tb.Transfer))) {
-                            .flags => transfer.flags = @bitCast(
-                                @as(u16, @bitCast(transfer.flags)) ^ prng.bit(u16),
-                            ),
-                            inline else => |field| {
-                                const value = &@field(transfer, @tagName(field));
-                                value.* ^= prng.bit(@TypeOf(value.*));
-                            },
-                        }
-                    }
-                } else {
-                    build_transfer(prng, options, transfer);
-                }
-            },
-            .two_phase => {
-                // Revisit a small pool of pending candidates across batches. The same candidate
-                // supplies the pending ID and accounts for a resolution, without consulting the
-                // model or guaranteeing that the pending transfer was successfully created.
-                var prng_low_cardinality = stdx.PRNG.from_seed(
-                    prng.int_inclusive(u64, 10) ^ options.repeats_seed,
-                );
-                const related = prng.chance(options.repeat_probability);
-                const prng_candidate = if (related) &prng_low_cardinality else prng;
-                transfer.* = std.mem.zeroes(tb.Transfer);
-                transfer.id = prng_candidate.range_inclusive(u128, 1, options.transfer_id_max);
-                transfer.debit_account_id = prng_candidate.range_inclusive(
-                    u128,
-                    1,
-                    options.account_id_max,
-                );
-                transfer.credit_account_id = prng_candidate.range_inclusive(
-                    u128,
-                    1,
-                    options.account_id_max,
-                );
-                const pending = prng.boolean();
-                if (pending) {
-                    transfer.flags = tb.TransferFlags{ .pending = true };
-                } else {
-                    transfer.flags = if (prng.boolean())
-                        tb.TransferFlags{ .post_pending_transfer = true }
-                    else
-                        tb.TransferFlags{ .void_pending_transfer = true };
-                    transfer.pending_id = if (related)
-                        transfer.id
-                    else
-                        prng.range_inclusive(u128, 1, options.transfer_id_max);
-                    transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
-                }
-                // Exercise partial posts, exact resolutions, excessive amounts, and voids with
-                // a different amount, even when amount mutation is disabled for this seed.
-                transfer.amount = if (pending)
-                    (if (prng.chance(ratio(1, 10))) std.math.maxInt(u128) else 2)
-                else
-                    prng.int_inclusive(u128, 3);
-                transfer.ledger = 1;
-                transfer.code = 1;
-                mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, transfer);
-            },
-        }
+        transfer.* = switch (prng.enum_weighted(TransferKind, options.transfers_weights)) {
+            .one_phase => build_transfer_one_phase(prng, options),
+            .two_phase => build_transfer_two_phase(prng, options),
+        };
         // Allow short expiry deadlines without constructing successful prerequisites.
         if (transfer.flags.pending and !transfer.flags.imported and
             prng.chance(options.small_timeout_probability))
@@ -712,20 +636,122 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
     return count * @sizeOf(tb.Transfer);
 }
 
-fn build_transfer(prng: *stdx.PRNG, options: *const Options, transfer: *tb.Transfer) void {
-    transfer.* = std.mem.zeroes(tb.Transfer);
+fn build_transfer_one_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+    const repeat = prng.chance(options.repeat_probability);
+    var prng_repeated: stdx.PRNG = if (repeat)
+        stdx.PRNG.from_seed(prng.int_inclusive(u64, 10) ^ options.repeats_seed)
+    else
+        undefined;
+    const prng_candidate = if (repeat) &prng_repeated else prng;
+
+    var transfer = build_transfer(prng_candidate, options);
+    // References are independent of flags and of whether the referenced event exists.
+    transfer.pending_id = if (prng_candidate.boolean())
+        0
+    else
+        prng_candidate.range_inclusive(u128, 1, options.transfer_id_max);
+    // Repeating the seed repeats the mutations too, including malformed fields.
+    mutate_event(prng_candidate, tb.Transfer, options.transfer_mutation_probability, &transfer);
+    if (repeat and prng.chance(ratio(2, 10))) {
+        mutate_transfer_once(prng, &transfer);
+    }
+    return transfer;
+}
+
+fn build_transfer_two_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+    // Choose a candidate pending transfer: its ID and both accounts.
+    // Reusing one of 11 seeds lets later posts/voids target the same candidate
+    // without tracking whether it was actually created.
+    var prng_repeated = stdx.PRNG.from_seed(
+        prng.int_inclusive(u64, 10) ^ options.repeats_seed,
+    );
+    const repeat_candidate = prng.chance(options.repeat_probability);
+    const prng_candidate = if (repeat_candidate) &prng_repeated else prng;
+    var transfer = build_transfer(prng_candidate, options);
+    const candidate_id = transfer.id;
+
+    // Either create the candidate or attempt to resolve a pending transfer.
+    if (prng.boolean()) {
+        transfer.flags = .{ .pending = true };
+        transfer.amount = if (prng.chance(ratio(1, 10))) std.math.maxInt(u128) else 2;
+    } else {
+        transfer.flags = if (prng.boolean())
+            .{ .post_pending_transfer = true }
+        else
+            .{ .void_pending_transfer = true };
+        // Repeated candidates retain matching accounts. Otherwise, try an
+        // unrelated pending ID. The resolution itself gets a separate ID.
+        transfer.pending_id = if (repeat_candidate)
+            candidate_id
+        else
+            prng.range_inclusive(u128, 1, options.transfer_id_max);
+        transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
+        // Cover partial, exact, and excessive amounts, including nonzero voids.
+        transfer.amount = prng.int_inclusive(u128, 3);
+    }
+
+    // Mutate last so any field, including the chosen flags, can be invalid.
+    mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, &transfer);
+    return transfer;
+}
+
+// Common defaults before choosing pending references, two-phase flags, or mutations.
+fn build_transfer(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+    var transfer = std.mem.zeroes(tb.Transfer);
     transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
     transfer.debit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
     transfer.credit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
-    // References are independent of flags and of whether the referenced event exists.
-    transfer.pending_id = if (prng.boolean())
-        0
-    else
-        prng.range_inclusive(u128, 1, options.transfer_id_max);
     transfer.amount = 1;
     transfer.ledger = 1;
     transfer.code = 1;
-    mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, transfer);
+    return transfer;
+}
+
+fn mutate_transfer_once(prng: *stdx.PRNG, transfer: *tb.Transfer) void {
+    // Give small fields such as code and ledger the same chance as IDs.
+    switch (prng.enum_uniform(std.meta.FieldEnum(tb.Transfer))) {
+        .flags => transfer.flags = @bitCast(
+            @as(u16, @bitCast(transfer.flags)) ^ prng.bit(u16),
+        ),
+        inline else => |field| {
+            const value = &@field(transfer, @tagName(field));
+            value.* ^= prng.bit(@TypeOf(value.*));
+        },
+    }
+}
+
+fn build_request(
+    prng: *stdx.PRNG,
+    options: *const Options,
+    operation: World.StateMachine.Operation,
+    request_body: []align(constants.cache_line_size) u8,
+) usize {
+    if (!operation.is_multi_batch()) {
+        return build_batch(prng, options, operation, request_body);
+    }
+    assert(operation.is_multi_batch());
+
+    var body_encoder: MultiBatchEncoder = .init(request_body, .{
+        .element_size = operation.event_size(),
+    });
+
+    const batch_count = prng.enum_uniform(enum { one, random, max });
+    while (body_encoder.writable()) |writable| {
+        if (writable.len == 0) break;
+        const bytes_written: u32 = build_batch(prng, options, operation, writable);
+        body_encoder.add(bytes_written);
+        switch (batch_count) {
+            .one => {
+                if (body_encoder.batch_count == 1) break;
+            },
+            .random => if (prng.chance(.{ .numerator = 30, .denominator = 100 })) {
+                break;
+            },
+            .max => {},
+        }
+    }
+
+    return body_encoder.finish();
 }
 
 fn build_batch(
@@ -748,32 +774,23 @@ fn build_batch(
         .deprecated_create_transfers_unbatched,
         => 0,
 
-        .lookup_accounts => build_lookup(prng, options, options.account_id_max, buffer),
-        .lookup_transfers => build_lookup(prng, options, options.transfer_id_max, buffer),
+        .lookup_accounts,
+        .deprecated_lookup_accounts_unbatched,
+        => build_lookup(prng, options, options.account_id_max, buffer),
+        .lookup_transfers,
+        .deprecated_lookup_transfers_unbatched,
+        => build_lookup(prng, options, options.transfer_id_max, buffer),
         .get_account_transfers,
         .get_account_balances,
-        => build_filter(prng, options, tb.AccountFilter, buffer),
-        .query_accounts, .query_transfers => build_filter(prng, options, tb.QueryFilter, buffer),
-        .get_change_events => build_filter(prng, options, tb.ChangeEventsFilter, buffer),
-
-        .deprecated_lookup_accounts_unbatched => build_lookup(
-            prng,
-            options,
-            options.account_id_max,
-            buffer,
-        ),
-        .deprecated_lookup_transfers_unbatched => build_lookup(
-            prng,
-            options,
-            options.transfer_id_max,
-            buffer,
-        ),
         .deprecated_get_account_transfers_unbatched,
         .deprecated_get_account_balances_unbatched,
         => build_filter(prng, options, tb.AccountFilter, buffer),
+        .query_accounts,
+        .query_transfers,
         .deprecated_query_accounts_unbatched,
         .deprecated_query_transfers_unbatched,
         => build_filter(prng, options, tb.QueryFilter, buffer),
+        .get_change_events => build_filter(prng, options, tb.ChangeEventsFilter, buffer),
     };
 }
 
@@ -889,130 +906,52 @@ test "int_edge_biased" {
     assert(std.mem.allEqual(bool, &found_max_int, true));
 }
 
-test "create_accounts options swarm coverage" {
+// Replay the main fuzzer so coverage includes import bias, multi-batches, and expiration.
+test "options swarm coverage" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    var covered = std.EnumArray(tb.CreateAccountStatus, bool).initFill(false);
-    for (0..100) |seed| {
-        defer assert(arena.reset(.retain_capacity));
-
-        var prng = stdx.PRNG.from_seed(seed);
-        const options = Options.swarm(&prng);
-        var world: World = undefined;
-        try world.init(arena.allocator());
-        defer world.deinit(arena.allocator());
-
-        var output: [constants.message_body_size_max]u8 align(constants.cache_line_size) =
-            undefined;
-        for (0..100) |_| {
-            var accounts: [8]tb.Account = undefined;
-            const size = build_create_accounts(&prng, &options, std.mem.asBytes(&accounts));
-            const count = @divExact(size, @sizeOf(tb.Account));
-            const results = world.request(.create_accounts, accounts[0..count], &output);
-            for (results) |result| covered.set(result.status, true);
-        }
-    }
-
-    for (std.enums.values(tb.CreateAccountStatus)) |status| {
-        // Those are the ones we ignore for now.
-        switch (status) {
-            .deprecated_ok => continue,
-            .imported_event_not_expected => continue,
-            .imported_event_timestamp_must_not_advance => continue,
-            .imported_event_timestamp_must_not_regress => continue,
-            else => {},
-        }
-        try std.testing.expect(covered.get(status));
-    }
-}
-
-// Let account and transfer history accumulate without constructing prerequisites for events.
-test "create_transfers options swarm" {
-    @setEvalBranchQuota(100_000);
-    // Reuse the fixture's storage allocation across seeds.
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
-    var required = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(true);
-    // Deprecated results are unreachable; expiry needs time advancement.
-    for ([_]tb.CreateTransferStatus.Ordered{
-        .deprecated_ok,
-        .deprecated_18,
-        .pending_transfer_expired,
-    }) |status| required.set(status, false);
-
-    // Try seeds that previously advanced coverage before discovering additional statuses.
+    var accounts_covered = std.EnumArray(tb.CreateAccountStatus, bool).initFill(false);
+    var transfers_covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
+    // Selected against 1,000 operations per seed; each seed adds status coverage.
     const seeds = [_]u64{
-        0,   1,    2,    3,    4,    6,    9,    16,   30,   31,
-        50,  71,   80,   92,   95,   102,  112,  113,  115,  144,
-        153, 212,  238,  303,  304,  307,  343,  346,  458,  591,
-        703, 1412, 1669, 1842, 2746, 3597, 3603, 3895, 4263, 12374,
-        503, // exists_with_different_user_data_128.
-        859, // id_must_not_be_int_max.
-        9897, // imported_event_timestamp_must_postdate_credit_account.
-        382538, // imported_event_timeout_must_be_zero.
+        34, // Broad account and transfer validation coverage.
+        14, // Imported timeout, pending amounts, posting, and expiration.
+        158, // Already voided, pending debit overflow, and duplicate user_data_128.
+        87, // Maximum account ID, imported credit timestamp, and posted credit overflow.
+        48, // Total credit and debit overflow.
+        194, // Maximum debit account ID and timeout overflow.
+        32, // Duplicate ledger.
+        144, // Maximum pending ID.
+        234, // Maximum credit account ID.
     };
-
-    var prng_seed = stdx.PRNG.from_seed_testing();
-
-    for (0..seeds.len + 1_000) |seed_index| {
-        const seed: u64 = if (seed_index < seeds.len)
-            seeds[seed_index]
-        else
-            prng_seed.int(u64);
+    for (seeds) |seed| {
         defer assert(arena.reset(.retain_capacity));
-
-        var prng = stdx.PRNG.from_seed(seed);
-        const options = Options.swarm(&prng);
-        var world: World = undefined;
-        try world.init(arena.allocator());
-        defer world.deinit(arena.allocator());
-        world.state_machine.prepare_timestamp = options.timestamp_start;
-
-        var output: [constants.message_body_size_max]u8 align(constants.cache_line_size) =
-            undefined;
-        for (0..100) |_| {
-            var accounts: [4]tb.Account = undefined;
-            const accounts_size = build_create_accounts(
-                &prng,
-                &options,
-                std.mem.asBytes(&accounts),
-            );
-            const accounts_count = @divExact(accounts_size, @sizeOf(tb.Account));
-            _ = world.request(.create_accounts, accounts[0..accounts_count], &output);
-
-            var transfers: [4]tb.Transfer = undefined;
-            const transfers_size = build_create_transfers(
-                &prng,
-                &options,
-                std.mem.asBytes(&transfers),
-            );
-            const transfers_count = @divExact(transfers_size, @sizeOf(tb.Transfer));
-            const transfer_results = world.request(
-                .create_transfers,
-                transfers[0..transfers_count],
-                &output,
-            );
-            for (transfer_results) |result| {
-                covered.set(result.status.to_ordered(), true);
-            }
+        const stats = try run(arena.allocator(), seed, 1000);
+        for (std.enums.values(tb.CreateAccountStatus)) |status| {
+            if (stats.accounts.get(status) > 0) accounts_covered.set(status, true);
         }
-        var iterator = covered.iterator();
-        var complete = true;
-        while (iterator.next()) |entry| {
-            if (required.get(entry.key) and !entry.value.*) complete = false;
+        for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
+            if (stats.transfers.get(status) > 0) transfers_covered.set(status, true);
         }
-        if (complete) break;
     }
 
+    var complete = true;
+    for (std.enums.values(tb.CreateAccountStatus)) |status| {
+        if (status == .deprecated_ok) continue;
+        if (!accounts_covered.get(status)) {
+            std.debug.print("uncovered account status: {s}\n", .{@tagName(status)});
+            complete = false;
+        }
+    }
     for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
-        if (required.get(status) and !covered.get(status)) {
-            std.debug.print("uncovered: {}\n", .{status});
-            return error.TestFailed;
+        if (status == .deprecated_ok or status == .deprecated_18) continue;
+        if (!transfers_covered.get(status)) {
+            std.debug.print("uncovered transfer status: {s}\n", .{@tagName(status)});
+            complete = false;
         }
     }
+    try std.testing.expect(complete);
 }
 
 // Exercise reads against existing history, so returning records and returning nothing both
