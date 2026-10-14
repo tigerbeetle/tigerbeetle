@@ -123,7 +123,7 @@ fn run_fuzz(options: struct {
     assert(batches.count() > 0);
     assert(batches.count() == encoder.batch_count);
     assert(expect_payload_size + expect_trailer_size <= buffer_expected.len);
-    assert(expect_payload_size == encoder.buffer_index);
+    assert(expect_payload_size == encoder.buffer_offset);
 
     const expect_padding: u32 = expect_payload_size % @sizeOf(u16);
     assert(expect_padding < @sizeOf(u16));
