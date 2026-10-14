@@ -26,20 +26,22 @@ const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.state_machine_fuzz);
 
+const batch_request_limit = 30;
+
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const stats = try run(gpa, args.seed, args.events_max orelse 1000);
-    // Include zero counts so each run reports the complete status denominator.
+
     for (std.enums.values(tb.CreateAccountStatus)) |status| {
-        log.info("status_count: operation=create_accounts status={s} count={}", .{
+        log.debug("status_count: operation=create_accounts status={s} count={}", .{
             @tagName(status), stats.accounts.get(status),
         });
     }
     for (std.enums.values(tb.CreateTransferStatus.Ordered)) |status| {
-        log.info("status_count: operation=create_transfers status={s} count={}", .{
+        log.debug("status_count: operation=create_transfers status={s} count={}", .{
             @tagName(status), stats.transfers.get(status),
         });
     }
-    log.info("expiration coverage: pulses={} transfers={}", .{
+    log.debug("expiration coverage: pulses={} transfers={}", .{
         stats.expiration_pulses,
         stats.expiration_transfers,
     });
@@ -54,8 +56,10 @@ const RunStats = struct {
 
 // Main and coverage tests use the same generation, import bias, and time advancement.
 fn run(gpa: std.mem.Allocator, seed: u64, events_max: usize) !RunStats {
+    var prng = stdx.PRNG.from_seed(seed);
+    const options = Options.swarm(&prng);
     var world: World = undefined;
-    try world.init(gpa);
+    try world.init(gpa, options.timestamp_start);
     defer world.deinit(gpa);
 
     const request_buffer = try gpa.alignedAlloc(
@@ -74,62 +78,67 @@ fn run(gpa: std.mem.Allocator, seed: u64, events_max: usize) !RunStats {
     );
     defer gpa.free(reply_buffer);
 
-    var prng = stdx.PRNG.from_seed(seed);
-    const options = Options.swarm(&prng);
-    world.state_machine.prepare_timestamp = options.timestamp_start;
     // Count final reply statuses, including successful creates and linked-event rollbacks.
     var stats: RunStats = .{};
 
     for (0..events_max) |_| {
+        defer world.tick();
+
         const operation = prng.enum_weighted(
             World.StateMachine.Operation,
             options.operation_weights,
         );
         const size = build_request(&prng, &options, operation, request_body);
 
-        if (world.state_machine.input_valid(operation, request_buffer[0..size])) {
-            if (operation == .create_transfers) {
-                var decoder = MultiBatchDecoder.init(request_buffer[0..size], .{
-                    .element_size = @sizeOf(tb.Transfer),
-                }) catch unreachable;
-                const transfer_max = if (world.state_machine.forest.grooves.transfers.objects
-                    .key_range) |range| range.key_max else 0;
-                const cdc_max = world.cdc_timestamp_max();
-                while (decoder.pop()) |batch| {
-                    for (stdx.bytes_as_slice(.exact, tb.Transfer, @constCast(batch))) |*transfer| {
-                        // Keep IDs, accounts, and validation errors from ordinary generation.
-                        // Bias imports to the gap exposed by expiry events, and its boundaries.
-                        if (prng.chance(options.imported_probability)) transfer.flags.imported = true;
-                        if (transfer.flags.imported and prng.boolean()) {
-                            transfer.timestamp = switch (prng.enum_uniform(enum {
-                                after_transfer,
-                                at_cdc,
-                                after_cdc,
-                            })) {
-                                .after_transfer => transfer_max + 1,
-                                .at_cdc => cdc_max,
-                                .after_cdc => cdc_max + 1,
-                            };
-                        }
+        if (!world.state_machine.input_valid(operation, request_buffer[0..size])) continue;
+
+        if (operation == .create_transfers) {
+            var decoder = MultiBatchDecoder.init(request_buffer[0..size], .{
+                .element_size = @sizeOf(tb.Transfer),
+            }) catch unreachable;
+            const transfer_max = if (world.state_machine.forest.grooves.transfers.objects
+                .key_range) |range| range.key_max else 0;
+            const cdc_max = world.cdc_timestamp_max();
+            while (decoder.pop()) |batch| {
+                for (stdx.bytes_as_slice(.exact, tb.Transfer, @constCast(batch))) |*transfer| {
+                    // Keep IDs, accounts, and validation errors from ordinary generation.
+                    // Bias imports to the gap exposed by expiry events, and its boundaries.
+                    if (prng.chance(options.imported_probability)) transfer.flags.imported = true;
+                    if (transfer.flags.imported and prng.boolean()) {
+                        transfer.timestamp = switch (prng.enum_uniform(enum {
+                            after_transfer,
+                            at_cdc,
+                            after_cdc,
+                        })) {
+                            .after_transfer => transfer_max + 1,
+                            .at_cdc => cdc_max,
+                            .after_cdc => cdc_max + 1,
+                        };
                     }
                 }
             }
-            const elapsed_ns: u64 = switch (prng.enum_weighted(TimeStep, options.time_weights)) {
-                .zero => 0,
-                .milliseconds_100 => 100 * std.time.ns_per_ms,
-                .milliseconds_900 => 900 * std.time.ns_per_ms,
-                .second => std.time.ns_per_s,
-                .seconds_3 => 3 * std.time.ns_per_s,
-            };
-            world.prepare(operation, request_buffer[0..size], elapsed_ns);
-            const cdc_timestamp_before = world.cdc_timestamp_max();
-            const reply_size = world.execute(
-                operation,
-                request_buffer[0..size],
-                @ptrCast(reply_buffer),
-            );
-            stdx.maybe(reply_size == 0);
-            if (operation == .create_accounts) {
+        }
+        const elapsed_ns: u64 = switch (prng.enum_weighted(TimeStep, options.time_weights)) {
+            .zero => 0,
+            .milliseconds_100 => 100 * std.time.ns_per_ms,
+            .milliseconds_900 => 900 * std.time.ns_per_ms,
+            .second => std.time.ns_per_s,
+            .seconds_3 => 3 * std.time.ns_per_s,
+        };
+
+        world.prepare(operation, request_buffer[0..size], elapsed_ns);
+
+        const cdc_timestamp_before = world.cdc_timestamp_max();
+
+        const reply_size = world.execute(
+            operation,
+            request_buffer[0..size],
+            @ptrCast(reply_buffer),
+        );
+        stdx.maybe(reply_size == 0);
+
+        switch (operation) {
+            .create_accounts => {
                 var decoder = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
                     .element_size = @sizeOf(tb.CreateAccountResult),
                 }) catch unreachable;
@@ -138,8 +147,8 @@ fn run(gpa: std.mem.Allocator, seed: u64, events_max: usize) !RunStats {
                         stats.accounts.set(result.status, stats.accounts.get(result.status) + 1);
                     }
                 }
-            }
-            if (operation == .create_transfers) {
+            },
+            .create_transfers => {
                 var decoder = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
                     .element_size = @sizeOf(tb.CreateTransferResult),
                 }) catch unreachable;
@@ -162,17 +171,18 @@ fn run(gpa: std.mem.Allocator, seed: u64, events_max: usize) !RunStats {
                         }
                     }
                 }
-            }
-            if (operation.is_multi_batch()) {
-                assert(reply_size > 0);
-                _ = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
-                    .element_size = operation.result_size(),
-                }) catch |err| switch (err) {
-                    error.MultiBatchInvalid => unreachable,
-                };
-            }
+            },
+            else => {},
         }
-        world.tick();
+
+        if (operation.is_multi_batch()) {
+            assert(reply_size > 0);
+            _ = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                .element_size = operation.result_size(),
+            }) catch |err| switch (err) {
+                error.MultiBatchInvalid => unreachable,
+            };
+        }
     }
     stats.expiration_pulses = world.expiration_pulses;
     stats.expiration_transfers = world.expiration_transfers;
@@ -217,22 +227,25 @@ const World = struct {
     ) []const operation.ResultType() {
         var input: [constants.message_body_size_max]u8 align(constants.cache_line_size) = undefined;
         const bytes = std.mem.sliceAsBytes(events);
-        const size = if (operation.is_multi_batch()) size: {
-            var encoder = MultiBatchEncoder.init(
-                &input,
-                .{ .element_size = operation.event_size() },
-            );
-            stdx.copy_disjoint(.inexact, u8, encoder.writable().?, bytes);
-            encoder.add(@intCast(bytes.len));
-            break :size encoder.finish();
-        } else size: {
-            stdx.copy_disjoint(.inexact, u8, &input, bytes);
-            break :size bytes.len;
+        const size = size: {
+            if (operation.is_multi_batch()) {
+                var encoder = MultiBatchEncoder.init(
+                    &input,
+                    .{ .element_size = operation.event_size() },
+                );
+                stdx.copy_disjoint(.inexact, u8, encoder.writable().?, bytes);
+                encoder.add(@intCast(bytes.len));
+                break :size encoder.finish();
+            } else {
+                stdx.copy_disjoint(.inexact, u8, &input, bytes);
+                break :size bytes.len;
+            }
         };
         assert(world.state_machine.input_valid(operation, input[0..size]));
         world.prepare(operation, input[0..size], 0);
         const reply_size = world.execute(operation, input[0..size], output);
         world.tick();
+
         const reply = if (operation.is_multi_batch()) reply: {
             var decoder = MultiBatchDecoder.init(output[0..reply_size], .{
                 .element_size = operation.result_size(),
@@ -251,7 +264,7 @@ const World = struct {
             0;
     }
 
-    fn init(world: *World, gpa: std.mem.Allocator) !void {
+    fn init(world: *World, gpa: std.mem.Allocator, timestamp_start: u64) !void {
         world.expiration_pulses = 0;
         world.expiration_transfers = 0;
         world.storage = try fixtures.init_storage(gpa, .{ .size = 512 * MiB });
@@ -281,8 +294,12 @@ const World = struct {
 
         fixtures.open_grid(&world.grid);
 
-        const batch_size_limit = 30 * @max(@sizeOf(tb.Account), @sizeOf(tb.Transfer));
+        const batch_size_limit = batch_request_limit * @max(
+            @sizeOf(tb.Account),
+            @sizeOf(tb.Transfer),
+        );
         assert(batch_size_limit <= constants.message_body_size_max);
+
         try world.state_machine.init(
             gpa,
             world.time_sim.interface(),
@@ -302,6 +319,7 @@ const World = struct {
         errdefer world.state_machine.deinit(gpa);
 
         world.state_machine_open();
+        world.state_machine.prepare_timestamp = timestamp_start;
     }
 
     pub fn deinit(ctx: *World, allocator: std.mem.Allocator) void {
@@ -623,8 +641,8 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
     const count = prng.int_inclusive(u32, @intCast(transfers.len));
     for (transfers[0..count]) |*transfer| {
         transfer.* = switch (prng.enum_weighted(TransferKind, options.transfers_weights)) {
-            .one_phase => build_transfer_one_phase(prng, options),
-            .two_phase => build_transfer_two_phase(prng, options),
+            .one_phase => draw_transfer_one_phase(prng, options),
+            .two_phase => draw_transfer_two_phase(prng, options),
         };
         // Allow short expiry deadlines without constructing successful prerequisites.
         if (transfer.flags.pending and !transfer.flags.imported and
@@ -636,7 +654,7 @@ fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u
     return count * @sizeOf(tb.Transfer);
 }
 
-fn build_transfer_one_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+fn draw_transfer_one_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
     const repeat = prng.chance(options.repeat_probability);
     var prng_repeated: stdx.PRNG = if (repeat)
         stdx.PRNG.from_seed(prng.int_inclusive(u64, 10) ^ options.repeats_seed)
@@ -644,7 +662,7 @@ fn build_transfer_one_phase(prng: *stdx.PRNG, options: *const Options) tb.Transf
         undefined;
     const prng_candidate = if (repeat) &prng_repeated else prng;
 
-    var transfer = build_transfer(prng_candidate, options);
+    var transfer = draw_transfer(prng_candidate, options);
     // References are independent of flags and of whether the referenced event exists.
     transfer.pending_id = if (prng_candidate.boolean())
         0
@@ -658,7 +676,7 @@ fn build_transfer_one_phase(prng: *stdx.PRNG, options: *const Options) tb.Transf
     return transfer;
 }
 
-fn build_transfer_two_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+fn draw_transfer_two_phase(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
     // Choose a candidate pending transfer: its ID and both accounts.
     // Reusing one of 11 seeds lets later posts/voids target the same candidate
     // without tracking whether it was actually created.
@@ -667,7 +685,7 @@ fn build_transfer_two_phase(prng: *stdx.PRNG, options: *const Options) tb.Transf
     );
     const repeat_candidate = prng.chance(options.repeat_probability);
     const prng_candidate = if (repeat_candidate) &prng_repeated else prng;
-    var transfer = build_transfer(prng_candidate, options);
+    var transfer = draw_transfer(prng_candidate, options);
     const candidate_id = transfer.id;
 
     // Either create the candidate or attempt to resolve a pending transfer.
@@ -689,14 +707,14 @@ fn build_transfer_two_phase(prng: *stdx.PRNG, options: *const Options) tb.Transf
         // Cover partial, exact, and excessive amounts, including nonzero voids.
         transfer.amount = prng.int_inclusive(u128, 3);
     }
-
     // Mutate last so any field, including the chosen flags, can be invalid.
     mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, &transfer);
+
     return transfer;
 }
 
 // Common defaults before choosing pending references, two-phase flags, or mutations.
-fn build_transfer(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
+fn draw_transfer(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
     var transfer = std.mem.zeroes(tb.Transfer);
     transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
     transfer.debit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
@@ -927,6 +945,7 @@ test "options swarm coverage" {
     };
     for (seeds) |seed| {
         defer assert(arena.reset(.retain_capacity));
+
         const stats = try run(arena.allocator(), seed, 1000);
         for (std.enums.values(tb.CreateAccountStatus)) |status| {
             if (stats.accounts.get(status) > 0) accounts_covered.set(status, true);
@@ -958,7 +977,7 @@ test "options swarm coverage" {
 // remain represented as the generator changes.
 test "read options swarm" {
     var world: World = undefined;
-    try world.init(std.testing.allocator);
+    try world.init(std.testing.allocator, 0);
     defer world.deinit(std.testing.allocator);
 
     var output: [constants.message_body_size_max]u8 align(constants.cache_line_size) = undefined;
