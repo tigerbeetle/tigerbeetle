@@ -128,6 +128,7 @@ public class IntegrationTest {
         }
     }
 
+    @Test
     public void testConstructorCluster() throws Throwable {
         final var clusterId = UInt128.id();
         final var replicaAddresses = new String[] {"3001"};
