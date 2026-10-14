@@ -726,10 +726,11 @@ fn draw_transfer(prng: *stdx.PRNG, options: *const Options) tb.Transfer {
 }
 
 fn mutate_transfer_once(prng: *stdx.PRNG, transfer: *tb.Transfer) void {
+    const Flags = std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(transfer.flags)));
     // Give small fields such as code and ledger the same chance as IDs.
     switch (prng.enum_uniform(std.meta.FieldEnum(tb.Transfer))) {
         .flags => transfer.flags = @bitCast(
-            @as(u16, @bitCast(transfer.flags)) ^ prng.bit(u16),
+            @as(Flags, @bitCast(transfer.flags)) ^ prng.bit(Flags),
         ),
         inline else => |field| {
             const value = &@field(transfer, @tagName(field));
