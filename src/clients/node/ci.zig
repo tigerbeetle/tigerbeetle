@@ -117,7 +117,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
             return error.DownloadAttemptsExceeded;
         }
         // Wait before next attempt.
-        stdx.IO.sleep(.minutes(5));
+        stdx.IO.sleep(.seconds(5));
     }
 
     const local_path_relative = try shell.fmt(

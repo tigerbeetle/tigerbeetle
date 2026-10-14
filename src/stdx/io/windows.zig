@@ -1593,6 +1593,7 @@ pub const IO = struct {
     }
 
     pub fn sleep(duration: stdx.Duration) void {
+        assert(duration.ns > 0);
         const milliseconds = @divFloor(duration.ns, std.time.ns_per_ms);
         assert(milliseconds <= std.math.maxInt(os.windows.DWORD));
         os.windows.kernel32.Sleep(@intCast(milliseconds));

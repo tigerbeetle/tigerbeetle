@@ -1290,6 +1290,7 @@ pub const IO = struct {
     }
 
     pub fn sleep(duration: stdx.Duration) void {
+        assert(duration.ns > 0);
         const seconds = @divFloor(duration.ns, std.time.ns_per_s);
         const nanoseconds = duration.ns % std.time.ns_per_s;
 
@@ -1297,23 +1298,32 @@ pub const IO = struct {
             .sec = @intCast(seconds),
             .nsec = @intCast(nanoseconds),
         };
-        var remainder: std.posix.timespec = undefined;
-        while (true) {
-            const result = stdx.posix.errno(std.posix.system.nanosleep(&requested, &remainder));
-            switch (result) {
+
+        for (0..1_000) |_| {
+            var remaining: std.posix.timespec = undefined;
+
+            const return_code = std.posix.system.nanosleep(
+                &requested,
+                &remaining,
+            );
+
+            assert(remaining.nsec <= requested.nsec);
+            assert(remaining.sec <= requested.sec);
+
+            switch (stdx.posix.errno(return_code)) {
                 .FAULT => unreachable,
+                .SUCCESS => return,
                 .INVAL => {
                     // Sometimes Darwin returns EINVAL for no reason.
                     // We treat it as a spurious wakeup.
                     return;
                 },
                 .INTR => {
-                    requested = remainder;
+                    requested = remaining;
                     continue;
                 },
-                // This prong handles success as well as unexpected errors.
-                else => return,
+                else => @panic("sleep failed"),
             }
-        }
+        } else log.warn("sleep: wake up early", .{});
     }
 };

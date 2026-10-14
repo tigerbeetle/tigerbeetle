@@ -1712,7 +1712,7 @@ pub const IO = struct {
                     const result = try posix.read(fd, superblock);
                     assert(superblock_zone_size == result);
 
-                    if (!std.mem.allEqual(u8, superblock, 0)) {
+                    if (!stdx.zeroed(superblock)) {
                         std.debug.panic(
                             "Superblock on block device not empty. " ++
                                 "If this is the correct block device to use, " ++
@@ -1948,6 +1948,7 @@ pub const IO = struct {
     }
 
     pub fn sleep(duration: stdx.Duration) void {
+        assert(duration.ns > 0);
         const seconds = @divFloor(duration.ns, std.time.ns_per_s);
         const nanoseconds = duration.ns % std.time.ns_per_s;
 
@@ -1955,15 +1956,19 @@ pub const IO = struct {
             .sec = @intCast(seconds),
             .nsec = @intCast(nanoseconds),
         };
-        var remaining: linux.timespec = undefined;
 
-        while (true) {
+        for (0..1_000) |_| {
+            var remaining: linux.timespec = undefined;
+
             const return_code = linux.clock_nanosleep(
                 .MONOTONIC,
                 .{ .ABSTIME = false },
                 &requested,
                 &remaining,
             );
+
+            assert(remaining.nsec <= requested.nsec);
+            assert(remaining.sec <= requested.sec);
 
             switch (stdx.posix.errno(return_code)) {
                 .SUCCESS => return,
@@ -1974,9 +1979,9 @@ pub const IO = struct {
                 .FAULT => unreachable,
                 .INVAL => unreachable,
                 .OPNOTSUPP => unreachable,
-                else => return,
+                else => @panic("sleep failed"),
             }
-        }
+        } else log.warn("sleep: wake up early", .{});
     }
 
     fn erase_types(
