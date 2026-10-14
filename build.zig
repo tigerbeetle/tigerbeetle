@@ -1715,7 +1715,7 @@ fn build_tb_client(
 /// https://github.com/ziglang/zig/issues/18830), e.g., for byte-by-byte reproducible client builds,
 /// and (2) to align 8-byte align Mach-O members (Apple's ld rejects them in newer versions).
 ///
-/// `zig ar` uses basenames instead of full paths, aligns it, and with `D` zeroes timestamps/uids/modes.
+/// `zig ar` uses basenames instead of full paths, aligns it, and `D` zeroes timestamps/uids/modes.
 fn build_static_library(
     b: *std.Build,
     name: []const u8,
@@ -1797,6 +1797,7 @@ fn build_rust_client(
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
+            .stack_protector = false,
         });
         root_module.addImport("vsr", options.vsr_module);
         root_module.addOptions("vsr_options", options.vsr_options);
