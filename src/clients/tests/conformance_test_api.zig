@@ -37,19 +37,19 @@ const ct_compile_error = "conformance test suites are parsed, not compiled";
 /// Restricts the case to clients whose integers are unbounded so we can test for things like u128
 /// overflow.
 pub fn requires_unbounded_integers() void {
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// Restricts the case to clients that can pass a fractional value where an integer is expected, so
 /// we can test that it is rejected.
 pub fn requires_fractional_amounts() void {
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// Restricts the case to clients that pass an empty address to the native client, so that it fails
 /// as an invalid address.
 pub fn requires_empty_address_passthrough() void {
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// The client the test harness creates for each case.
@@ -63,137 +63,137 @@ pub fn create_client(arguments: struct {
     replica_addresses: []const u8,
 }) void {
     _ = arguments;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// The test server's address, which only exists at runtime.
 pub fn replica_addresses() []const u8 {
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// A runtime-generated TigerBeetle id.
 pub fn generate_id() u128 {
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// `count` runtime-generated ids, generated across several clock ticks. See
 /// `conformance_test_ast.ids_between_sleeps`.
 pub fn generate_ids(count: u32) []const u128 {
     _ = count;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn increment(reference: u64, by: u64) u64 {
     _ = reference;
     _ = by;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn decrement(reference: u64, by: u64) u64 {
     _ = reference;
     _ = by;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// Runs `call` `n` times, one thread each, on the shared client.
 pub fn concurrently(n: u32, call: anytype) void {
     _ = n;
     _ = call;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn sleep_ms(ms: u32) void {
     _ = ms;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// Compares only the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;
     _ = expected;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn assert_empty(actual: anytype) void {
     _ = actual;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn assert_ascending(ids: []const u128) void {
     _ = ids;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub fn assert_greater_than(actual: anytype, value: anytype) void {
     _ = actual;
     _ = value;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// The wrapped call must fail with any client error.
 pub fn assert_fail(call: anytype) void {
     _ = call;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 /// The wrapped call must fail with a specific client error.
 pub fn assert_fail_with(call: anytype, client_error: ClientError) void {
     _ = call;
     _ = client_error;
-    @panic(ct_compile_error);
+    @compileError(ct_compile_error);
 }
 
 pub const Client = struct {
     pub fn create_accounts(client: Client, accounts: anytype) []const CreateAccountResult {
         _ = client;
         _ = accounts;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn create_transfers(client: Client, transfers: anytype) []const CreateTransferResult {
         _ = client;
         _ = transfers;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn lookup_accounts(client: Client, ids: anytype) []const Account {
         _ = client;
         _ = ids;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn lookup_transfers(client: Client, ids: anytype) []const Transfer {
         _ = client;
         _ = ids;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn get_account_transfers(client: Client, filter: AccountFilter) []const Transfer {
         _ = client;
         _ = filter;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn get_account_balances(client: Client, filter: AccountFilter) []const AccountBalance {
         _ = client;
         _ = filter;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn query_accounts(client: Client, filter: QueryFilter) []const Account {
         _ = client;
         _ = filter;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn query_transfers(client: Client, filter: QueryFilter) []const Transfer {
         _ = client;
         _ = filter;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 
     pub fn close_client(client: Client) void {
         _ = client;
-        @panic(ct_compile_error);
+        @compileError(ct_compile_error);
     }
 };
