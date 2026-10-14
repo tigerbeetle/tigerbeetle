@@ -212,11 +212,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if ((language == language_requested or language_requested == null) and
-            language != .go and // TODO: Remove when 0.18.0 is released.
-            language != .ruby and // TODO: Remove when 0.18.0 is released.
-            language != .rust) // Rust isn't published yet.
-        {
+        if ((language == language_requested or language_requested == null)) {
             const ci = @field(LanguageCI, @tagName(language));
 
             // Before we run the published package we verify that it is identical to a local build.
@@ -249,8 +245,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language == language_requested or language_requested == null) and
             language != .rust and // TODO Remove once static linking removes full paths: https://github.com/ziglang/zig/issues/21496
-            language != .ruby) // TODO Remove when Ruby client is published.
-        {
+            language != .go and // TODO: Remove when 0.18.0 is released.
+            language != .ruby // TODO: Remove when 0.18.0 is released.
+        ) {
             const ci = @field(LanguageCI, @tagName(language));
             const release_published_latest = try ci.release_published_latest(shell);
 
