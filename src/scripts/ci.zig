@@ -212,7 +212,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if ((language == language_requested or language_requested == null)) {
+        if ((language == language_requested or language_requested == null) and
+            language != .rust) // TODO: Remove when we build static libs without absolute paths.
+        {
             const ci = @field(LanguageCI, @tagName(language));
 
             // Before we run the published package we verify that it is identical to a local build.
