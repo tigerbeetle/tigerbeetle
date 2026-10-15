@@ -1307,9 +1307,6 @@ pub const IO = struct {
                 &remaining,
             );
 
-            assert(remaining.nsec <= requested.nsec);
-            assert(remaining.sec <= requested.sec);
-
             switch (stdx.posix.errno(return_code)) {
                 .FAULT => unreachable,
                 .SUCCESS => return,
@@ -1319,6 +1316,13 @@ pub const IO = struct {
                     return;
                 },
                 .INTR => {
+                    const remaining_ns = @as(u64, @intCast(remaining.sec)) * std.time.ns_per_s +
+                        @as(u64, @intCast(remaining.nsec));
+                    const requested_ns = @as(u64, @intCast(requested.sec)) * std.time.ns_per_s +
+                        @as(u64, @intCast(requested.nsec));
+
+                    assert(remaining_ns <= requested_ns);
+
                     requested = remaining;
                     continue;
                 },
