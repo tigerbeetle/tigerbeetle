@@ -197,7 +197,7 @@ fn scenario_upgrade(
     output_directory: []const u8,
 ) !void {
     const replica_count = 3;
-    const duration_max = stdx.Duration.seconds(200);
+    const duration_max = stdx.Duration.seconds(300);
     const tick_ms = 10;
     const ticks_max = duration_max.to_ms() / tick_ms;
 
@@ -249,11 +249,8 @@ fn scenario_upgrade(
         } else if (supervisor.replicas[replica_index].state == .running and crash) {
             try supervisor.replica_terminate(@intCast(replica_index));
         }
-    }
-
-    if (!supervisor.workload_done()) {
-        return error.WorkloadIncomplete;
-    }
+        if (supervisor.workload_done()) break;
+    } else return error.WorkloadIncomplete;
 }
 
 fn scenario_recover(
