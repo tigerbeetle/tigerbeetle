@@ -240,8 +240,8 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
     }
 
     if (languages.contains(.rust)) {
-        var dist_dir_rust = try dist_dir.createDirPathOpen(shell.io, "rust", .{});
-        defer dist_dir_rust.close(shell.io);
+        var dist_dir_rust = try dist_dir.createDirPathOpen(shell.io_std, "rust", .{});
+        defer dist_dir_rust.close(shell.io_std);
 
         try build_rust(shell, info, dist_dir_rust);
     }

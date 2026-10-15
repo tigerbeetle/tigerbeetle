@@ -626,7 +626,7 @@ const AmqpContext = struct {
         tick_ms,
     );
 
-    pub fn init(self: *AmqpContext, gpa: std.mem.Allocator, io: std.Io) !void {
+    pub fn init(self: *AmqpContext, gpa: std.mem.Allocator, io_std: std.Io) !void {
         self.* = .{
             .busy = false,
             .message = null,
@@ -634,7 +634,7 @@ const AmqpContext = struct {
             .client = undefined,
         };
 
-        self.io = try stdx.IO.init(io, 32, 0);
+        self.io = try stdx.IO.init(32, 0, io_std);
         errdefer self.io.deinit();
 
         self.client = try amqp.Client.init(gpa, .{
@@ -787,11 +787,11 @@ const VSRContext = struct {
     pub fn init(
         self: *VSRContext,
         gpa: std.mem.Allocator,
-        io: std.Io,
+        io_std: std.Io,
         time: stdx.Time,
         port: u16,
     ) !void {
-        self.io = try stdx.IO.init(io, 32, 0);
+        self.io = try stdx.IO.init(32, 0, io_std);
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(gpa, .client);

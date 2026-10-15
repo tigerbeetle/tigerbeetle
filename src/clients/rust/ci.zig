@@ -51,7 +51,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     // also apply `--allow-dirty` like we do in release.zig
     try shell.exec("cargo package --allow-dirty", .{});
     const crate_path = "target/package/tigerbeetle-0.0.0.crate";
-    const crate_size = (try shell.cwd.statFile(shell.io, crate_path, .{})).size;
+    const crate_size = (try shell.cwd.statFile(shell.io_std, crate_path, .{})).size;
     if (crate_size > crates_io_upload_size_max) {
         log.err("crate too large for crates.io: size={} max={}", .{
             crate_size,
@@ -90,7 +90,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     _ = gpa;
 
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io_std, tmp_dir) catch {};
 
     const published_url = try shell.fmt(
         "https://static.crates.io/crates/tigerbeetle/tigerbeetle-{s}.crate",
@@ -98,7 +98,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     );
     const published_crate = try shell.fmt("{s}/published.crate", .{tmp_dir});
     const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
-    try shell.cwd.createDirPath(shell.io, published_dir);
+    try shell.cwd.createDirPath(shell.io_std, published_dir);
 
     // Multiple attempts in case of network errors.
     const attempts_max = 5;
@@ -112,7 +112,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         };
     } else return error.DownloadAttemptsExceeded;
 
-    try shell.cwd.writeFile(shell.io, .{
+    try shell.cwd.writeFile(shell.io_std, .{
         .sub_path = published_crate,
         .data = crate_published,
     });
@@ -122,12 +122,12 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         .{options.release},
     );
     const local_crate = try shell.cwd.realPathFileAlloc(
-        shell.io,
+        shell.io_std,
         local_path_relative,
         shell.arena.allocator(),
     );
     const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
-    try shell.cwd.createDirPath(shell.io, local_dir);
+    try shell.cwd.createDirPath(shell.io_std, local_dir);
 
     // Archive metadata might differ, so we extract and diff the files themselves.
     try shell.exec(

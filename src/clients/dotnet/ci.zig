@@ -77,7 +77,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             log.info("testing docker image: '{s}'", .{image});
 
             for (0..5) |attempt| {
-                if (attempt > 0) stdx.IO.sleep(.minute(1));
+                if (attempt > 0) stdx.IO.sleep(.minutes(1));
                 if (shell.exec("podman image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}

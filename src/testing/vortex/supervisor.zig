@@ -186,7 +186,7 @@ pub const Supervisor = struct {
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
 
-        io.* = try IO.init(128, 0, null);
+        io.* = try IO.init(128, 0, io_std);
         errdefer io.deinit();
 
         const replica_ports_actual =
