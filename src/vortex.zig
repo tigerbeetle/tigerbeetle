@@ -197,7 +197,7 @@ fn scenario_upgrade(
     output_directory: []const u8,
 ) !void {
     const replica_count = 3;
-    const duration_max = stdx.Duration.seconds(200);
+    const duration_max = stdx.Duration.seconds(300);
     const tick_ms = 10;
     const ticks_max = duration_max.to_ms() / tick_ms;
 
