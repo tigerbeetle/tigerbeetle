@@ -249,11 +249,8 @@ fn scenario_upgrade(
         } else if (supervisor.replicas[replica_index].state == .running and crash) {
             try supervisor.replica_terminate(@intCast(replica_index));
         }
-    }
-
-    if (!supervisor.workload_done()) {
-        return error.WorkloadIncomplete;
-    }
+        if (supervisor.workload_done()) break;
+    } else return error.WorkloadIncomplete;
 }
 
 fn scenario_recover(
