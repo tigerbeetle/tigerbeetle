@@ -68,7 +68,7 @@ pub fn main(init: std.process.Init) !void {
 
     const tmp_dir_path = try shell.fmt("{s}/{d}", .{
         cli_args.tmp,
-        stdx.crypto_random_int(init.io, u64),
+        shell.io.crypto_random_int(u64),
     });
     var tmp_dir = try std.Io.Dir.cwd().createDirPathOpen(init.io, tmp_dir_path, .{});
     defer {
@@ -100,7 +100,7 @@ pub fn main(init: std.process.Init) !void {
         }),
     }
 
-    const stat = try shell.cwd.statFile(shell.io, cli_args.output, .{});
+    const stat = try shell.cwd.statFile(shell.io_std, cli_args.output, .{});
     assert(stat.size <= multiversion_binary_size_max);
     assert(stat.size <= multiversion.multiversion_binary_platform_size_max(.{
         .macos = target == .macos,
@@ -135,7 +135,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
     };
 
     // Explicitly write out zeros for the header, to compute the checksum.
-    try shell.cwd.writeFile(shell.io, .{
+    try shell.cwd.writeFile(shell.io_std, .{
         .sub_path = sections.header_zero,
         .data = std.mem.asBytes(&std.mem.zeroes(MultiversionHeader)),
         .flags = .{ .exclusive = true },
@@ -196,7 +196,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
     header.checksum_header = header.calculate_header_checksum();
     try header.verify();
 
-    try shell.cwd.writeFile(shell.io, .{
+    try shell.cwd.writeFile(shell.io_std, .{
         .sub_path = sections.header,
         .data = std.mem.asBytes(&header),
         .flags = .{ .exclusive = true },
@@ -217,7 +217,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         .working = tigerbeetle_working,
     });
 
-    try shell.cwd.copyFile(tigerbeetle_working, shell.cwd, options.output, shell.io, .{});
+    try shell.cwd.copyFile(tigerbeetle_working, shell.cwd, options.output, shell.io_std, .{});
 
     if (self_check_enabled(options.target)) {
         try self_check(shell, options.output, past_versions.unpacked);
@@ -253,7 +253,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
     };
 
     // Explicitly write out zeros for the header, to compute the checksum.
-    try shell.cwd.writeFile(shell.io, .{
+    try shell.cwd.writeFile(shell.io_std, .{
         .sub_path = sections.header_zero,
         .data = std.mem.asBytes(&std.mem.zeroes(MultiversionHeader)),
         .flags = .{ .exclusive = true },
@@ -351,7 +351,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         header.checksum_header = header.calculate_header_checksum();
         try header.verify();
 
-        try shell.cwd.writeFile(shell.io, .{
+        try shell.cwd.writeFile(shell.io_std, .{
             .sub_path = header_name,
             .data = std.mem.asBytes(&header),
             .flags = .{ .exclusive = true },
@@ -432,7 +432,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     unpacked: []const []const u8,
 } {
     const past_binary_contents: []align(8) const u8 = try shell.cwd.readFileAllocOptions(
-        shell.io,
+        shell.io_std,
         options.tigerbeetle_past,
         shell.arena.allocator(),
         .limited(multiversion_binary_size_max),
@@ -501,12 +501,12 @@ fn build_multiversion_body(shell: *Shell, options: struct {
 
     if (builtin.os.tag != .windows) {
         const old_current_release_fd = try shell.cwd.openFile(
-            shell.io,
+            shell.io_std,
             old_current_release_output_name,
             .{ .mode = .write_only },
         );
-        defer old_current_release_fd.close(shell.io);
-        try old_current_release_fd.setPermissions(shell.io, .fromMode(0o755));
+        defer old_current_release_fd.close(shell.io_std);
+        try old_current_release_fd.setPermissions(shell.io_std, .fromMode(0o755));
     }
 
     // It's important to verify the previous current_release checksum - it can't be verified at
@@ -518,7 +518,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     ));
 
     const old_current_release_size: u32 = @intCast(
-        (try shell.cwd.statFile(shell.io, old_current_release_output_name, .{})).size,
+        (try shell.cwd.statFile(shell.io_std, old_current_release_output_name, .{})).size,
     );
 
     // You can have as many releases as you want, as long as it's 5 or less.
@@ -563,7 +563,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         });
         const permissions_exec: std.Io.File.Permissions =
             if (builtin.os.tag == .windows) .default_file else .fromMode(0o755);
-        try shell.cwd.writeFile(shell.io, .{
+        try shell.cwd.writeFile(shell.io_std, .{
             .sub_path = past_name,
             .data = past_binary_contents[arch_offsets.body_offset..][past_offset..][0..past_size],
             .flags = .{ .exclusive = true, .permissions = permissions_exec },
@@ -609,8 +609,12 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     assert(past_releases.count == past_count + 1); // +1 to include the old current release.
     try past_releases.verify();
 
-    const body_file = try shell.cwd.createFile(shell.io, options.output, .{ .exclusive = true });
-    defer body_file.close(shell.io);
+    const body_file = try shell.cwd.createFile(
+        shell.io_std,
+        options.output,
+        .{ .exclusive = true },
+    );
+    defer body_file.close(shell.io_std);
 
     for (
         past_releases.releases[0..past_releases.count],
@@ -623,14 +627,14 @@ fn build_multiversion_body(shell: *Shell, options: struct {
             @tagName(options.arch),
         });
         const contents = try shell.cwd.readFileAlloc(
-            shell.io,
+            shell.io_std,
             past_name,
             shell.arena.allocator(),
             // `.limited(size)` treats hitting the limit exactly as `error.StreamTooLong`,
             // so the limit must be one more than the exact expected file size.
             .limited(size + 1),
         );
-        try body_file.writePositionalAll(shell.io, contents, offset);
+        try body_file.writePositionalAll(shell.io_std, contents, offset);
     }
 
     return .{
@@ -669,7 +673,7 @@ fn macos_universal_binary_build(
     var current_offset: u32 = alignment;
     for (binaries, binary_headers) |binary, *binary_header| {
         const binary_size: u32 = @intCast(
-            (try shell.cwd.statFile(shell.io, binary.path, .{})).size,
+            (try shell.cwd.statFile(shell.io_std, binary.path, .{})).size,
         );
 
         // The Mach-O header is big-endian...
@@ -685,12 +689,12 @@ fn macos_universal_binary_build(
         current_offset = std.mem.alignForward(u32, current_offset, alignment);
     }
 
-    const output_file = try shell.project_root.createFile(shell.io, output_path, .{
+    const output_file = try shell.project_root.createFile(shell.io_std, output_path, .{
         .exclusive = true,
         .permissions = if (builtin.target.os.tag == .windows) .default_file else .fromMode(0o755),
     });
-    defer output_file.close(shell.io);
-    var output_writer = output_file.writer(shell.io, &.{});
+    defer output_file.close(shell.io_std);
+    var output_writer = output_file.writer(shell.io_std, &.{});
 
     const fat_header = std.macho.fat_header{
         .magic = std.macho.FAT_CIGAM,
@@ -706,7 +710,7 @@ fn macos_universal_binary_build(
 
     for (binaries, binary_headers) |binary, binary_header| {
         const binary_contents = try shell.project_root.readFileAlloc(
-            shell.io,
+            shell.io_std,
             binary.path,
             shell.arena.allocator(),
             .limited(multiversion_binary_size_max),
@@ -727,7 +731,7 @@ fn macos_universal_binary_extract(
     output_path: []const u8,
 ) !void {
     const binary_contents = try shell.cwd.readFileAlloc(
-        shell.io,
+        shell.io_std,
         input_path,
         shell.arena.allocator(),
         .limited(multiversion_binary_size_max),
@@ -753,7 +757,7 @@ fn macos_universal_binary_extract(
             const offset = @byteSwap(fat_arch.offset);
             const size = @byteSwap(fat_arch.size);
 
-            try shell.cwd.writeFile(shell.io, .{
+            try shell.cwd.writeFile(shell.io_std, .{
                 .sub_path = output_path,
                 .data = binary_contents[offset..][0..size],
                 .flags = .{ .exclusive = true },
@@ -798,7 +802,7 @@ fn self_check(shell: *Shell, tigerbeetle: []const u8, past_releases: []const []c
 
 fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
     const contents = try shell.cwd.readFileAlloc(
-        shell.io,
+        shell.io_std,
         path,
         shell.arena.allocator(),
         .limited(size_max),

@@ -2,15 +2,19 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
-
-const Tracer = @import("../trace.zig").Tracer;
 
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
 const is_linux = builtin.target.os.tag == .linux;
+
+/// The minimum size of an aligned kernel page and an Advanced Format disk sector:
+/// This is necessary for direct I/O without the kernel having to fix unaligned pages with a copy.
+/// The new Advanced Format sector size is backwards compatible with the old 512 byte sector size.
+/// This should therefore never be less than 4 KiB to be future-proof when server disks are swapped.
+pub const sector_size = 4096;
 
 pub const TCPOptions = struct {
     rcvbuf: c_int,
@@ -278,9 +282,21 @@ pub fn aof_blocking_open(io: std.Io, dir_fd: posix.fd_t, path: []const u8) !posi
     return file.handle;
 }
 
-pub const Stats = struct {
-    tracer: ?*Tracer = null,
+/// Returns a cryptographically random integer, see `crypto_random_bytes`.
+pub fn crypto_random_int(comptime IO: type, comptime T: type, io: *IO) T {
+    var buffer: [@sizeOf(T)]u8 = undefined;
+    io.crypto_random_bytes(&buffer);
+    const value = std.mem.readInt(T, &buffer, .little);
 
+    if (T == u128) {
+        // Broken CSPRNG is the likeliest explanation for zero or all ones.
+        assert(value != 0);
+        assert(value != std.math.maxInt(u128));
+    }
+    return value;
+}
+
+pub const Stats = struct {
     total: Timings = .{},
     window: Timings = .{},
 
@@ -295,14 +311,30 @@ pub const Stats = struct {
             total.time_kernel.ns +|= increment.time_kernel.ns;
         }
     };
+};
 
-    pub fn trace(stats: *Stats) void {
-        if (stats.tracer) |tracer| {
-            tracer.timing(.loop_run_for_ns, stats.window.time_run_for_ns);
-            tracer.timing(.loop_callbacks, stats.window.time_callbacks);
-            tracer.timing(.loop_kernel, stats.window.time_kernel);
-        }
-        stats.total.add(stats.window);
-        stats.window = .{};
-    }
+pub fn buffer_limit(buffer_len: usize) usize {
+    // Linux limits how much may be written in a `pwrite()/pread()` call, which is `0x7ffff000` on
+    // both 64-bit and 32-bit systems, due to using a signed C int as the return value, as well as
+    // stuffing the errno codes into the last `4096` values.
+    // Darwin limits writes to `0x7fffffff` bytes, more than that returns `EINVAL`.
+    // The corresponding POSIX limit is `std.math.maxInt(isize)`.
+    const limit = switch (builtin.target.os.tag) {
+        .linux => 0x7ffff000,
+        .macos, .ios, .watchos, .tvos => std.math.maxInt(i32),
+        else => std.math.maxInt(isize),
+    };
+    return @min(limit, buffer_len);
+}
+
+pub const DirectIO = enum {
+    direct_io_required,
+    direct_io_optional,
+    direct_io_disabled,
+};
+
+pub const OpenDataFilePurpose = union(enum) {
+    format: struct { superblock_zone_size: u32 },
+    open,
+    inspect,
 };

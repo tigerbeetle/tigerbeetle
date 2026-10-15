@@ -30,7 +30,7 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const IOPSType = stdx.IOPSType;
 
 const GridType = @import("./grid.zig").GridType;
@@ -92,9 +92,15 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
         reads: IOPSType(Read, grid_scrubber_reads_max) = .{},
 
         /// A list of reads that are in progress.
-        reads_busy: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_scrubber_reads_busy" }),
+        reads_busy: QueueType(Read) = QueueType(Read).init(.{
+            .name = "grid_scrubber_reads_busy",
+            .verify_push = constants.verify,
+        }),
         /// A list of reads that are ready to be released.
-        reads_done: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_scrubber_reads_done" }),
+        reads_done: QueueType(Read) = QueueType(Read).init(.{
+            .name = "grid_scrubber_reads_done",
+            .verify_push = constants.verify,
+        }),
 
         /// Track the progress through the grid.
         ///

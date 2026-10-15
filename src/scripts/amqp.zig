@@ -38,15 +38,15 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     for (images) |image| {
         log.info("image: {s}", .{image});
 
-        var rabbit_mq = try TmpRabbitMQ.init(gpa, shell.io, &shell.env, .{
+        var rabbit_mq = try TmpRabbitMQ.init(gpa, shell.io_std, &shell.env, .{
             .image = image,
         });
-        defer rabbit_mq.stop(gpa, shell.io, &shell.env) catch unreachable;
+        defer rabbit_mq.stop(gpa, shell.io_std, &shell.env) catch unreachable;
 
-        try run_protocol_test(gpa, shell.io, .{
+        try run_protocol_test(gpa, shell.io_std, .{
             .host = rabbit_mq.host,
         });
-        try run_serialization_test(gpa, shell.io, .{
+        try run_serialization_test(gpa, shell.io_std, .{
             .host = rabbit_mq.host,
         });
         try run_timeout_test(gpa, shell, .{
@@ -81,7 +81,7 @@ fn run_protocol_test(
 
     const default_exchange = "";
     const testing_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.crypto_u128(io),
+        context.io.crypto_random_int(u128),
     });
     defer gpa.free(testing_queue);
 
@@ -197,7 +197,7 @@ fn run_protocol_test(
     // Asserting the progress queue "drop head" behavior,
     // where only the last published message must remain.
     const progress_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.crypto_u128(io),
+        context.io.crypto_random_int(u128),
     });
     defer gpa.free(progress_queue);
 
@@ -283,7 +283,7 @@ fn run_serialization_test(
     try context.connect(options.host);
     const default_exchange = "";
     const queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.crypto_u128(io),
+        context.io.crypto_random_int(u128),
     });
     defer gpa.free(queue);
 
@@ -382,7 +382,7 @@ fn run_cdc_test(
     },
 ) !void {
     var amqp_context: AmqpContext = undefined;
-    try amqp_context.init(gpa, shell.io);
+    try amqp_context.init(gpa, shell.io_std);
     defer amqp_context.deinit(gpa);
 
     try amqp_context.connect(options.host);
@@ -393,7 +393,7 @@ fn run_cdc_test(
     var time_os: stdx.TimeOS = .{};
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.crypto_u128(shell.io),
+        amqp_context.io.crypto_random_int(u128),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -404,7 +404,7 @@ fn run_cdc_test(
         .arguments = .{},
     });
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = false,
         .prebuilt = null,
     });
@@ -426,7 +426,7 @@ fn run_cdc_test(
             .idle_interval_ms = 1,
         },
     );
-    defer cdc_job.kill(shell.io);
+    defer cdc_job.kill(shell.io_std);
 
     // Use the `benchmark` command to generate data.
     assert(options.transfer_count > 0);
@@ -443,7 +443,7 @@ fn run_cdc_test(
         },
     );
     defer {
-        const term = benchmark.wait(shell.io) catch unreachable;
+        const term = benchmark.wait(shell.io_std) catch unreachable;
         assert(term == .exited);
         assert(term.exited == 0);
     }
@@ -455,7 +455,7 @@ fn run_cdc_test(
     //   at most one batch is duplicated.
     // - Start multiple CDC jobs to stress the lock queue.
     var vsr_context: VSRContext = undefined;
-    try vsr_context.init(gpa, shell.io, time_os.interface(), tmp_beetle.port);
+    try vsr_context.init(gpa, shell.io_std, time_os.interface(), tmp_beetle.port);
     defer vsr_context.deinit(gpa);
 
     var count: u32 = 0;
@@ -467,7 +467,7 @@ fn run_cdc_test(
             for (0..10) |attempt| {
                 if (attempt > 0) {
                     // Waiting for events:
-                    try std.Io.sleep(shell.io, .fromMilliseconds(500), .awake);
+                    stdx.IO.sleep(.ms(500));
                 }
                 const events = try vsr_context.get_change_events(timestamp_previous + 1);
                 if (events.len > 0) break :events events;
@@ -506,7 +506,7 @@ fn run_cdc_test(
                 for (0..10) |attempt| {
                     if (attempt > 0) {
                         // Give the CDC job some time to finish publishing the messages.
-                        try std.Io.sleep(shell.io, .fromMilliseconds(500), .awake);
+                        stdx.IO.sleep(.ms(500));
                     }
                     if (amqp_context.get_message(.{
                         .queue = queue,
@@ -547,7 +547,7 @@ fn run_timeout_test(
     },
 ) !void {
     var amqp_context: AmqpContext = undefined;
-    try amqp_context.init(gpa, shell.io);
+    try amqp_context.init(gpa, shell.io_std);
     defer amqp_context.deinit(gpa);
 
     try amqp_context.connect(options.host);
@@ -559,7 +559,7 @@ fn run_timeout_test(
     const time = &time_os.interface();
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.crypto_u128(shell.io),
+        amqp_context.io.crypto_random_int(u128),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -570,7 +570,7 @@ fn run_timeout_test(
         .arguments = .{},
     });
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = false,
         .prebuilt = null,
     });
@@ -593,13 +593,13 @@ fn run_timeout_test(
             .tigerbeetle_timeout_seconds = 1,
         },
     );
-    defer cdc_job.kill(shell.io);
+    defer cdc_job.kill(shell.io_std);
 
     const timer = time.monotonic();
 
     // Kills the TigerBeetle cluster and waits for the CDC job to time out.
     tmp_beetle.deinit(gpa);
-    const result = try cdc_job.wait(shell.io);
+    const result = try cdc_job.wait(shell.io_std);
 
     const elapsed = timer.until(time.monotonic());
 
@@ -613,7 +613,7 @@ const AmqpContext = struct {
         body: ?[]const u8,
     };
 
-    io: vsr.io.IO,
+    io: stdx.IO,
     client: amqp.Client,
     busy: bool,
     message: ?Message,
@@ -626,7 +626,7 @@ const AmqpContext = struct {
         tick_ms,
     );
 
-    pub fn init(self: *AmqpContext, gpa: std.mem.Allocator, io: std.Io) !void {
+    pub fn init(self: *AmqpContext, gpa: std.mem.Allocator, io_std: std.Io) !void {
         self.* = .{
             .busy = false,
             .message = null,
@@ -634,7 +634,7 @@ const AmqpContext = struct {
             .client = undefined,
         };
 
-        self.io = try vsr.io.IO.init(io, 32, 0);
+        self.io = try stdx.IO.init(32, 0, io_std);
         errdefer self.io.deinit();
 
         self.client = try amqp.Client.init(gpa, .{
@@ -774,11 +774,11 @@ const VSRContext = struct {
     const Message = MessagePool.Message;
     const Client = vsr.ClientType(
         tb.Operation,
-        vsr.message_bus.MessageBusType(vsr.io.IO),
+        vsr.message_bus.MessageBusType(stdx.IO),
     );
 
     client: Client,
-    io: vsr.io.IO,
+    io: stdx.IO,
     message_pool: MessagePool,
     busy: bool,
     event_buffer: []tb.ChangeEvent,
@@ -787,11 +787,11 @@ const VSRContext = struct {
     pub fn init(
         self: *VSRContext,
         gpa: std.mem.Allocator,
-        io: std.Io,
+        io_std: std.Io,
         time: stdx.Time,
         port: u16,
     ) !void {
-        self.io = try vsr.io.IO.init(io, 32, 0);
+        self.io = try stdx.IO.init(32, 0, io_std);
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(gpa, .client);
@@ -803,7 +803,7 @@ const VSRContext = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.crypto_u128(io),
+                .id = self.io.crypto_random_int(u128),
                 .cluster = 0,
                 .replica_count = 1,
                 .aof_recovery = false,
@@ -933,7 +933,7 @@ const TmpRabbitMQ = struct {
         const shell = try Shell.create(gpa, io, environ_map);
         defer shell.destroy();
 
-        const id = stdx.crypto_u128(io);
+        const id = shell.io.crypto_random_int(u128);
 
         // Spawning a RabbitMQ server as a Docker container.
         _ = try try_execute(shell, "docker image pull {image}", .{ .image = options.image });
@@ -1040,7 +1040,7 @@ fn try_execute(
     var exec_result: ?std.process.RunResult = null;
     const attempt_max = 15;
     for (0..attempt_max) |attempt| {
-        if (attempt > 0) try std.Io.sleep(shell.io, .fromSeconds(1), .awake);
+        if (attempt > 0) stdx.IO.sleep(.seconds(1));
         exec_result = try shell.exec_raw(cmd, cmd_args);
         switch (exec_result.?.term) {
             .exited => |code| if (code == 0) return exec_result.?.stdout,

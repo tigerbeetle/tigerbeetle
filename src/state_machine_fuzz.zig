@@ -8,7 +8,7 @@ const constants = vsr.constants;
 const stdx = @import("stdx");
 
 const tb = @import("tigerbeetle.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
 const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;

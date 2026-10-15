@@ -32,7 +32,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     , .{});
 
     const changelog_current = try shell.project_root.readFileAlloc(
-        shell.io,
+        shell.io_std,
         "./CHANGELOG.md",
         shell.arena.allocator(),
         .limited(changelog_bytes_max),
@@ -45,7 +45,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
         .today = today,
     });
 
-    try shell.project_root.writeFile(shell.io, .{
+    try shell.project_root.writeFile(shell.io_std, .{
         .sub_path = "CHANGELOG.md",
         .data = changelog_new.written(),
     });

@@ -1,41 +1,49 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
-const constants = @import("../constants.zig");
 const common = @import("./common.zig");
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const TimeOS = stdx.TimeOS;
-const buffer_limit = @import("../io.zig").buffer_limit;
-const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
     pub const NextTickSource = common.NextTickSource;
+    pub const DirectIO = common.DirectIO;
+    pub const OpenDataFilePurpose = common.OpenDataFilePurpose;
+
+    pub const sector_size = common.sector_size;
 
     pub const dsync_all = false;
 
     kq: fd_t,
 
     /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
-    io_std: std.Io,
+    io_std: ?std.Io,
 
     event_id: Event = 0,
     time: TimeOS = .{},
     io_inflight: usize = 0,
-    timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
-    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
-    io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
+    timeouts: QueueType(Completion) = QueueType(Completion).init(
+        .{ .name = "io_timeouts", .verify_push = true },
+    ),
+    completed: QueueType(Completion) = QueueType(Completion).init(
+        .{ .name = "io_completed", .verify_push = true },
+    ),
+    io_pending: QueueType(Completion) = QueueType(Completion).init(
+        .{ .name = "io_pending", .verify_push = true },
+    ),
     run_for_ns_active: bool = false,
 
     stats: common.Stats = .{},
 
-    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
+    pub fn init(entries: u12, flags: u32, io_std: ?std.Io) !IO {
         _ = entries;
         _ = flags;
 
@@ -67,7 +75,6 @@ pub const IO = struct {
             assert(self.run_for_ns_active);
             self.run_for_ns_active = false;
         }
-        defer self.stats.trace();
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
@@ -602,7 +609,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -661,7 +668,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
             },
             struct {
                 fn do_operation(op: anytype) RecvError!usize {
@@ -694,7 +701,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
@@ -830,7 +837,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @as(u32, @intCast(common.buffer_limit(buffer.len))),
                 .offset = offset,
                 .dsync = options.dsync,
             },
@@ -997,7 +1004,6 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
-    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on darwin).
@@ -1017,7 +1023,7 @@ pub const IO = struct {
         _ = self;
 
         assert(relative_path.len > 0);
-        assert(size % constants.sector_size == 0);
+        assert(size % sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
@@ -1190,26 +1196,33 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
     ) std.Io.File.Writer.Error!void {
-        return common.aof_blocking_write_all(io.io_std, fd, buffer);
+        assert(io.io_std != null);
+        return common.aof_blocking_write_all(io.io_std.?, fd, buffer);
     }
 
     pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
+        assert(io.io_std != null);
+        return common.aof_blocking_pread_all(io.io_std.?, fd, buffer, offset);
     }
 
     pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_close(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
-        return common.aof_blocking_stat(io.io_std, path);
+        assert(io.io_std != null);
+        return common.aof_blocking_stat(io.io_std.?, path);
     }
 
     pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
-        return common.aof_blocking_fstat(io.io_std, fd);
+        assert(io.io_std != null);
+        return common.aof_blocking_fstat(io.io_std.?, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
+        assert(io.io_std != null);
+
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
@@ -1218,6 +1231,103 @@ pub const IO = struct {
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std.?, dir_fd, file_path);
+    }
+
+    pub fn crypto_random_bytes(_: *IO, buffer: []u8) void {
+        assert(buffer.len > 0);
+        assert(buffer.len <= std.math.maxInt(u32));
+
+        assert(builtin.link_libc);
+        assert(@TypeOf(posix.system.arc4random_buf) != void);
+
+        posix.system.arc4random_buf(buffer.ptr, buffer.len);
+        return;
+    }
+
+    pub fn crypto_random_int(io: *IO, comptime T: type) T {
+        return common.crypto_random_int(IO, T, io);
+    }
+
+    pub fn futex_wait(value: *const std.atomic.Value(u32), expect: u32) void {
+        const flags: std.c.UL = .{
+            .op = .COMPARE_AND_WAIT,
+            .NO_ERRNO = true,
+        };
+        const result = std.c.__ulock_wait(flags, @ptrCast(value), expect, 0);
+
+        switch (stdx.posix.errno(result)) {
+            .SUCCESS => {},
+            // Wait was interrupted by the OS or other spurious signalling.
+            .INTR => {},
+            // Address of the futex was paged out. This is unlikely, but possible in theory, and
+            // pthread/libdispatch on darwin bother to handle it. In this case we'll return
+            // without waiting, but the caller should retry anyway.
+            .FAULT => {},
+            .TIMEDOUT => unreachable, // Timeout is hardcoded to 0 above.
+            else => unreachable,
+        }
+    }
+
+    pub fn futex_wake(value: *const std.atomic.Value(u32), waiters_max: u16) void {
+        const flags: std.c.UL = .{
+            .op = .COMPARE_AND_WAIT,
+            .NO_ERRNO = true,
+            .WAKE_ALL = waiters_max > 1,
+        };
+
+        const result = std.c.__ulock_wake(flags, @ptrCast(value), 0);
+
+        switch (stdx.posix.errno(result)) {
+            .SUCCESS => {},
+            .INTR => {}, // spurious wake()
+            .NOENT => {}, // nothing was woken up
+            .ALREADY => unreachable, // only for UL.Op.WAKE_THREAD
+            // __ulock_wake doesn't generate EFAULT according to darwin pthread_cond_t
+            .FAULT => unreachable,
+            else => unreachable,
+        }
+    }
+
+    pub fn sleep(duration: stdx.Duration) void {
+        assert(duration.ns > 0);
+        const seconds = @divFloor(duration.ns, std.time.ns_per_s);
+        const nanoseconds = duration.ns % std.time.ns_per_s;
+
+        var requested = std.posix.timespec{
+            .sec = @intCast(seconds),
+            .nsec = @intCast(nanoseconds),
+        };
+
+        for (0..1_000) |_| {
+            var remaining: std.posix.timespec = undefined;
+
+            const return_code = std.posix.system.nanosleep(
+                &requested,
+                &remaining,
+            );
+
+            switch (stdx.posix.errno(return_code)) {
+                .FAULT => unreachable,
+                .SUCCESS => return,
+                .INVAL => {
+                    // Sometimes Darwin returns EINVAL for no reason.
+                    // We treat it as a spurious wakeup.
+                    return;
+                },
+                .INTR => {
+                    const remaining_ns = @as(u64, @intCast(remaining.sec)) * std.time.ns_per_s +
+                        @as(u64, @intCast(remaining.nsec));
+                    const requested_ns = @as(u64, @intCast(requested.sec)) * std.time.ns_per_s +
+                        @as(u64, @intCast(requested.nsec));
+
+                    assert(remaining_ns <= requested_ns);
+
+                    requested = remaining;
+                    continue;
+                },
+                else => @panic("sleep failed"),
+            }
+        } else log.warn("sleep: wake up early", .{});
     }
 };

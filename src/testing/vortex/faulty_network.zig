@@ -20,7 +20,7 @@
 //! full message before piping it through.
 const std = @import("std");
 const stdx = @import("stdx");
-const IO = @import("../../io.zig").IO;
+const IO = stdx.IO;
 const constants = @import("constants.zig");
 
 const assert = std.debug.assert;

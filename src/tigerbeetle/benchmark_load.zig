@@ -34,7 +34,7 @@ const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Time = stdx.Time;
 const Duration = stdx.Duration;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -115,7 +115,7 @@ pub fn main(
             time,
             &message_pools.slice()[i],
             .{
-                .id = stdx.crypto_u128(io.io_std),
+                .id = io.crypto_random_int(u128),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
                 .aof_recovery = false,
@@ -184,11 +184,12 @@ pub fn main(
 
     const use_tbid = cli_args.id_order == .tbid;
     const account_id_start: ?u128 = if (use_tbid)
-        stdx.crypto_u128(io.io_std)
+        io.crypto_random_int(u128)
     else
         null;
 
-    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+    assert(io.io_std != null);
+    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std.?, &.{});
 
     var benchmark = Benchmark{
         .io = io,

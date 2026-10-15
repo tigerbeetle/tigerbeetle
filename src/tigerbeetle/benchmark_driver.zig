@@ -15,6 +15,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const assert = std.debug.assert;
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const cli = @import("./cli.zig");
@@ -24,15 +25,16 @@ const log = std.log;
 
 pub fn command_benchmark(
     allocator: Allocator,
-    io: *vsr.io.IO,
+    io: *stdx.IO,
     time: stdx.Time,
     args: *const cli.Command.Benchmark,
 ) !void {
+    assert(io.io_std != null);
     // Note: we intentionally don't use a temporary directory for this data file, and instead just
     // put it into CWD, as performance of TigerBeetle very much depends on a specific file system.
     const data_file = args.file orelse data_file: {
         var random_bytes: [4]u8 = undefined;
-        io.io_std.random(&random_bytes);
+        io.crypto_random_bytes(&random_bytes);
         const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
         break :data_file "0_0-" ++ random_suffix ++ ".tigerbeetle.benchmark";
     };
@@ -40,7 +42,7 @@ pub fn command_benchmark(
     var data_file_created = false;
     defer {
         if (data_file_created and args.file == null) {
-            std.Io.Dir.cwd().deleteFile(io.io_std, data_file) catch {};
+            std.Io.Dir.cwd().deleteFile(io.io_std.?, data_file) catch {};
         }
     }
 
@@ -51,14 +53,14 @@ pub fn command_benchmark(
 
     var maybe_stat_empty: ?std.Io.File.Stat = null;
     if (args.addresses == null) {
-        const me = try std.process.executablePathAlloc(io.io_std, allocator);
+        const me = try std.process.executablePathAlloc(io.io_std.?, allocator);
         defer allocator.free(me);
 
-        try format(allocator, io.io_std, .{ .tigerbeetle = me, .data_file = data_file });
+        try format(allocator, io.io_std.?, .{ .tigerbeetle = me, .data_file = data_file });
         data_file_created = true;
-        maybe_stat_empty = try std.Io.Dir.cwd().statFile(io.io_std, data_file, .{});
+        maybe_stat_empty = try std.Io.Dir.cwd().statFile(io.io_std.?, data_file, .{});
 
-        tigerbeetle_process = try start(allocator, io.io_std, .{
+        tigerbeetle_process = try start(allocator, io.io_std.?, .{
             .tigerbeetle = me,
             .data_file = data_file,
             .args = args,
@@ -91,7 +93,7 @@ pub fn command_benchmark(
         &.{tigerbeetle_process.?.address};
     try benchmark_load.main(allocator, io, time, addresses, args);
 
-    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std.?, &.{});
     const stdout = &stdout_writer.interface;
 
     if (tigerbeetle_process) |*p| {
@@ -104,7 +106,7 @@ pub fn command_benchmark(
     }
 
     if (data_file_created) {
-        const stat = try std.Io.Dir.cwd().statFile(io.io_std, data_file, .{});
+        const stat = try std.Io.Dir.cwd().statFile(io.io_std.?, data_file, .{});
         if (maybe_stat_empty) |stat_empty| {
             try stdout.print("\ndatafile empty = {} bytes\n", .{
                 stat_empty.size,

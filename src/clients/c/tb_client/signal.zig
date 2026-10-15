@@ -2,9 +2,8 @@ const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
 
-const vsr = @import("../tb_client.zig").vsr;
 const TimeOS = stdx.TimeOS;
-const IO = vsr.io.ClientIO;
+const IO = stdx.ClientIO;
 
 const Atomic = std.atomic.Value;
 
@@ -167,7 +166,7 @@ test "signal" {
 
         fn run_test() !void {
             var self: Context = .{
-                .io = try IO.init(std.testing.io, 32, 0),
+                .io = try IO.init(32, 0, null),
                 .main_thread_id = std.Thread.getCurrentId(),
                 .signal = undefined,
             };
@@ -203,7 +202,7 @@ test "signal" {
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
             while (self.signal.status() != .shutdown_completed) {
-                std.Io.sleep(std.testing.io, .fromNanoseconds(delay + 1), .awake) catch {};
+                IO.sleep(.{ .ns = delay + 1 });
 
                 // Triggering the event:
                 self.signal.notify();

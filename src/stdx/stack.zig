@@ -1,8 +1,6 @@
 const std = @import("std");
-const stdx = @import("stdx");
+const stdx = @import("./stdx.zig");
 const assert = std.debug.assert;
-
-const constants = @import("./constants.zig");
 
 pub const StackLink = extern struct {
     next: ?*StackLink = null,
@@ -71,12 +69,11 @@ const StackAny = struct {
     count: u32 = 0,
     capacity: u32,
 
-    // If the number of elements is large, the constants.verify check in push() can be too
-    // expensive. Allow the user to gate it.
+    // If the number of elements is large make sure to avoid verifying the push.
     verify_push: bool,
 
     fn push(self: *StackAny, link: *StackLink) void {
-        if (constants.verify and self.verify_push) assert(!self.contains(link));
+        if (self.verify_push) assert(!self.contains(link));
 
         assert((self.count == 0) == (self.head == null));
         assert(link.next == null);
@@ -120,7 +117,6 @@ const StackAny = struct {
 
 test "Stack: fuzz" {
     // Fuzzy test to compare behavior of Stack against std.ArrayList (reference model).
-    comptime assert(constants.verify);
 
     const allocator = std.testing.allocator;
 

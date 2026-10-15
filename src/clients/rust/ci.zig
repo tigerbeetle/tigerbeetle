@@ -1,8 +1,8 @@
 const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
-
 const stdx = @import("stdx");
+
 const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
@@ -36,7 +36,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             .line_length_max = 100,
         }));
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -51,7 +51,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     // also apply `--allow-dirty` like we do in release.zig
     try shell.exec("cargo package --allow-dirty", .{});
     const crate_path = "target/package/tigerbeetle-0.0.0.crate";
-    const crate_size = (try shell.cwd.statFile(shell.io, crate_path, .{})).size;
+    const crate_size = (try shell.cwd.statFile(shell.io_std, crate_path, .{})).size;
     if (crate_size > crates_io_upload_size_max) {
         log.err("crate too large for crates.io: size={} max={}", .{
             crate_size,
@@ -70,13 +70,13 @@ fn file_contains(
         line_length_max: u32 = 100,
     },
 ) !bool {
-    const file = try shell.cwd.openFile(shell.io, path, .{});
-    defer file.close(shell.io);
+    const file = try shell.cwd.openFile(shell.io_std, path, .{});
+    defer file.close(shell.io_std);
 
     const line_buffer = try gpa.alloc(u8, options.line_length_max + 1);
     defer gpa.free(line_buffer);
 
-    var file_reader = file.reader(shell.io, line_buffer);
+    var file_reader = file.reader(shell.io_std, line_buffer);
     while (try file_reader.interface.takeDelimiter('\n')) |line| {
         if (std.mem.indexOf(u8, line, options.needle) != null) return true;
     }
@@ -90,7 +90,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     _ = gpa;
 
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io_std, tmp_dir) catch {};
 
     const published_url = try shell.fmt(
         "https://static.crates.io/crates/tigerbeetle/tigerbeetle-{s}.crate",
@@ -98,7 +98,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     );
     const published_crate = try shell.fmt("{s}/published.crate", .{tmp_dir});
     const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
-    try shell.cwd.createDirPath(shell.io, published_dir);
+    try shell.cwd.createDirPath(shell.io_std, published_dir);
 
     // Multiple attempts in case of network errors.
     const attempts_max = 5;
@@ -112,7 +112,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         };
     } else return error.DownloadAttemptsExceeded;
 
-    try shell.cwd.writeFile(shell.io, .{
+    try shell.cwd.writeFile(shell.io_std, .{
         .sub_path = published_crate,
         .data = crate_published,
     });
@@ -122,12 +122,12 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         .{options.release},
     );
     const local_crate = try shell.cwd.realPathFileAlloc(
-        shell.io,
+        shell.io_std,
         local_path_relative,
         shell.arena.allocator(),
     );
     const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
-    try shell.cwd.createDirPath(shell.io, local_dir);
+    try shell.cwd.createDirPath(shell.io_std, local_dir);
 
     // Archive metadata might differ, so we extract and diff the files themselves.
     try shell.exec(
@@ -154,7 +154,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io_std, tmp_dir) catch {};
 
     const base_dir = shell.cwd;
     try shell.pushd(tmp_dir);
@@ -171,7 +171,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             log.warn("waiting for 5 minutes for the {s} version to appear on crates.io", .{
                 options.release,
             });
-            try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
+            stdx.IO.sleep(.minutes(5));
         }
     } else {
         shell.exec("cargo add tigerbeetle@={release}", .{
@@ -182,7 +182,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         };
     }
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });

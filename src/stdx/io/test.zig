@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const os = std.os;
 const testing = std.testing;
 const assert = std.debug.assert;
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
 const maybe = stdx.maybe;
 const MiB = stdx.MiB;
@@ -23,7 +23,7 @@ pub const tcp_options: IO.TCPOptions = .{
 };
 
 test "TCP socket buffer options" {
-    var io = try IO.init(std.testing.io, 32, 0);
+    var io = try IO.init(32, 0, null);
     defer io.deinit();
 
     var options = tcp_options;
@@ -54,7 +54,7 @@ test "open/write/read/close/statx" {
 
         fn run_test() !void {
             var self: Context = .{
-                .io = try IO.init(std.testing.io, 32, 0),
+                .io = try IO.init(32, 0, null),
             };
             defer self.io.deinit();
 
@@ -185,7 +185,7 @@ test "accept/connect/send/receive" {
         received: usize = 0,
 
         fn run_test(loopback: stdx.IPAddress) !void {
-            var io = try IO.init(std.testing.io, 32, 0);
+            var io = try IO.init(32, 0, null);
             defer io.deinit();
 
             const address: stdx.SocketAddress = .{ .ip = loopback, .port = 0 };
@@ -303,7 +303,7 @@ test "timeout" {
             var time_os: TimeOS = .{};
             var self: Context = .{
                 .time = time_os.interface(),
-                .io = try IO.init(std.testing.io, 32, 0),
+                .io = try IO.init(32, 0, null),
             };
             defer self.io.deinit();
 
@@ -365,7 +365,7 @@ test "event" {
 
         fn run_test() !void {
             var self: Context = .{
-                .io = try IO.init(std.testing.io, 32, 0),
+                .io = try IO.init(32, 0, null),
                 .main_thread_id = std.Thread.getCurrentId(),
             };
             defer self.io.deinit();
@@ -395,7 +395,7 @@ test "event" {
         fn trigger_event(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
             while (self.count < events_count) {
-                std.Io.sleep(testing.io, .fromNanoseconds(delay + 1), .awake) catch {};
+                IO.sleep(.{ .ns = delay + 1 });
 
                 // Triggering the event:
                 self.io.event_trigger(self.event, &self.event_completion);
@@ -430,7 +430,7 @@ test "submission queue full" {
         count: u32 = 0,
 
         fn run_test() !void {
-            var self: Context = .{ .io = try IO.init(std.testing.io, 1, 0) };
+            var self: Context = .{ .io = try IO.init(1, 0, null) };
             defer self.io.deinit();
 
             var completions: [count]IO.Completion = undefined;
@@ -478,7 +478,7 @@ test "tick to wait" {
         received: bool = false,
 
         fn run_test() !void {
-            var self: Context = .{ .io = try IO.init(std.testing.io, 1, 0) };
+            var self: Context = .{ .io = try IO.init(1, 0, null) };
             defer self.io.deinit();
 
             const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
@@ -628,7 +628,7 @@ test "pipe data over socket" {
             @memset(tx_buf, 1);
             @memset(rx_buf, 0);
             var self = Context{
-                .io = try IO.init(std.testing.io, 32, 0),
+                .io = try IO.init(32, 0, null),
                 .tx = .{ .buffer = tx_buf },
                 .rx = .{ .buffer = rx_buf },
             };
@@ -778,7 +778,7 @@ test "flush checks timeouts even when completions are queued" {
         timeout_fired: bool = false,
 
         fn run_test() !void {
-            var self: Context = .{ .io = try IO.init(std.testing.io, 32, 0) };
+            var self: Context = .{ .io = try IO.init(32, 0, null) };
             defer self.io.deinit();
 
             // next_tick goes directly into the completed queue.
@@ -819,7 +819,7 @@ test "chained zero-delay callbacks complete in a single flush" {
         const chain_length = 10;
 
         fn run_test() !void {
-            var self: Context = .{ .io = try IO.init(std.testing.io, 32, 0) };
+            var self: Context = .{ .io = try IO.init(32, 0, null) };
             defer self.io.deinit();
 
             // Start the chain with a single next_tick.

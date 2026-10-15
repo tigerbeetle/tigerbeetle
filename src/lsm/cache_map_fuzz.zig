@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const TestTable = @import("cache_map.zig").TestTable;
 const TestCacheMap = @import("cache_map.zig").TestCacheMap;

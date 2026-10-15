@@ -6,7 +6,7 @@ const log = std.log.scoped(.fuzz_ewah);
 const stdx = @import("stdx");
 
 const ewah = @import("./ewah.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const MiB = stdx.MiB;
 

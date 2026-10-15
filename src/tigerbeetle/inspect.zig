@@ -17,7 +17,7 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Tracer = vsr.trace.Tracer;
 const Storage = @import("main.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
@@ -40,8 +40,9 @@ pub fn command_inspect(
     tracer: *Tracer,
     cli_args: *const cli.Command.Inspect,
 ) !void {
+    assert(io.io_std != null);
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std.?, &stdout_buffer);
 
     const inspect_result = run_inspect(allocator, io, tracer, cli_args, &stdout_writer.interface);
     const flush_result: @TypeOf(inspect_result) = stdout_writer.interface.flush();

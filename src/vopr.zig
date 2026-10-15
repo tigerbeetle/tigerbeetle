@@ -6,12 +6,12 @@ const maybe = stdx.maybe;
 const mem = std.mem;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
-const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
+const range_inclusive_ms = stdx.fuzz.range_inclusive_ms;
 
 const constants = @import("constants.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const Header = vsr.Header;
 
 pub const vsr_options = .{
@@ -124,7 +124,12 @@ pub fn main(init: std.process.Init) !void {
 
     log_performance_mode = cli_args.performance;
 
-    const seed_random = stdx.crypto_random_int(init.io, u64);
+    const seed_random = b: {
+        var io: stdx.IO = try .init(32, 0, null);
+        defer io.deinit();
+
+        break :b io.crypto_random_int(u64);
+    };
     const seed = seed_from_arg: {
         const seed_argument = cli_args.seed orelse break :seed_from_arg seed_random;
         break :seed_from_arg vsr.testing.parse_seed(seed_argument);

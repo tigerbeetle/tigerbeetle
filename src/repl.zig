@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Time = stdx.Time;
 const StaticAllocator = @import("static_allocator.zig");
 const MessagePool = vsr.message_pool.MessagePool;
@@ -641,7 +641,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
 
-            const client_id = stdx.crypto_u128(io.io_std);
+            const client_id = io.crypto_random_int(u128);
             const client = try Client.init(
                 allocator,
                 time,
@@ -692,9 +692,10 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         pub fn run(repl: *Repl, statements: []const u8) !void {
+            assert(repl.io.io_std != null);
             repl.interactive = statements.len == 0;
             // No corresponding deinit.
-            try Terminal.init(&repl.terminal, repl.io.io_std, repl.interactive);
+            try Terminal.init(&repl.terminal, repl.io.io_std.?, repl.interactive);
 
             try Completion.init(&repl.completion);
 

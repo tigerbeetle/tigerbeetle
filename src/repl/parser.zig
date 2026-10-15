@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 
 const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const tb = vsr.tigerbeetle;

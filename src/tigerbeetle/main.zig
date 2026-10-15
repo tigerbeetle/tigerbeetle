@@ -14,7 +14,7 @@ const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
 const inspect = @import("inspect.zig");
 
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 const Time = stdx.Time;
 const TimeOS = stdx.TimeOS;
 const Tracer = vsr.trace.Tracer;
@@ -86,7 +86,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    var command = cli.parse_args(&flags, io_std, init.args);
+    var command = cli.parse_args(&flags, init.args);
 
     if (command == .version) {
         try command_version(gpa, io_std, init.args, init.environ, command.version.verbose);
@@ -107,7 +107,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .format, .recover => 2048,
         else => 128,
     };
-    var io = try IO.init(io_std, io_entries, 0);
+    var io = try IO.init(io_entries, 0, io_std);
     defer io.deinit();
 
     var time_os: TimeOS = .{};
@@ -158,7 +158,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     switch (command) {
         .version => unreachable, // Handled earlier.
         inline .format, .start, .recover => |*args, command_storage| {
-            const direct_io: vsr.io.DirectIO =
+            const direct_io: IO.DirectIO =
                 if (!constants.direct_io)
                     .direct_io_disabled
                 else if (args.development)
@@ -170,7 +170,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 .path = args.path,
                 .size_min = data_file_size_min,
                 .purpose = switch (command_storage) {
-                    .format, .recover => .format,
+                    .format, .recover => .{ .format = .{
+                        .superblock_zone_size = vsr.superblock.superblock_zone_size,
+                    } },
                     .start => .open,
                     else => comptime unreachable,
                 },
@@ -212,7 +214,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             );
             try stdout.flush();
         },
-        .amqp => |*args| try command_amqp(gpa, io_std, time, args),
+        .amqp => |*args| try command_amqp(gpa, time, args),
     }
 }
 
@@ -280,8 +282,16 @@ fn command_format(
     storage: *Storage,
     args: *const cli.Command.Format,
 ) !void {
+    const cluster = args.cluster orelse b: {
+        const cluster_random = storage.io.crypto_random_int(u128);
+
+        assert(cluster_random != 0);
+        std.log.info("generated random cluster id: {}\n", .{cluster_random});
+        break :b cluster_random;
+    };
+
     try vsr.format(Storage, gpa, storage, .{
-        .cluster = args.cluster,
+        .cluster = cluster,
         .replica = args.replica,
         .replica_count = args.replica_count,
         .release = config.process.release,
@@ -290,7 +300,7 @@ fn command_format(
 
     log.info("{}: formatted: cluster={} replica_count={}", .{
         args.replica,
-        args.cluster,
+        cluster,
         args.replica_count,
     });
 }
@@ -305,6 +315,7 @@ fn command_start(
     storage: *Storage,
     args: *const cli.Command.Start,
 ) !void {
+    assert(io.io_std != null);
     var counting_allocator = vsr.CountingAllocator.init(base_allocator);
     const gpa = counting_allocator.allocator();
 
@@ -352,7 +363,7 @@ fn command_start(
         });
     }
 
-    const random_nonce = stdx.crypto_u128(io.io_std);
+    const random_nonce = io.crypto_random_int(u128);
 
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
@@ -380,7 +391,7 @@ fn command_start(
         }
 
         self_exe_path = try vsr.multiversion.self_exe_path(
-            io.io_std,
+            io.io_std.?,
             process_args,
             process_environ,
             gpa,
@@ -527,9 +538,9 @@ fn command_start(
     if (args.addresses.zero) {
         const port_actual = replica.message_bus.accept_address.?.port;
         const stdout = std.Io.File.stdout();
-        var stdout_writer = stdout.writerStreaming(io.io_std, &.{});
+        var stdout_writer = stdout.writerStreaming(io.io_std.?, &.{});
         try stdout_writer.interface.print("{}\n", .{port_actual});
-        stdout.close(io.io_std);
+        stdout.close(io.io_std.?);
 
         // While it is possible to integrate stdin with our io_uring loop, using a dedicated
         // thread is simpler, and gives us _un_graceful shutdown, which is exactly what we want
@@ -541,7 +552,7 @@ fn command_start(
                 log.info("stdin closed, exiting", .{});
                 std.process.exit(0);
             }
-        }.thread_main, .{io.io_std});
+        }.thread_main, .{io.io_std.?});
         watchdog.detach();
     }
 
@@ -575,14 +586,20 @@ fn command_start(
         }
     }
 
-    // Enable tracing for the event loop. Internally, it'll emit its statistics every time
-    // run_for_ns() is called.
-    io.stats.tracer = tracer;
-
     while (true) {
         replica.tick();
         try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        emit_stats(tracer, &io.stats);
     }
+}
+
+fn emit_stats(tracer: *Tracer, stats: *IO.Stats) void {
+    tracer.timing(.loop_run_for_ns, stats.window.time_run_for_ns);
+    tracer.timing(.loop_callbacks, stats.window.time_callbacks);
+    tracer.timing(.loop_kernel, stats.window.time_kernel);
+
+    stats.total.add(stats.window);
+    stats.window = .{};
 }
 
 fn command_reformat(
@@ -600,7 +617,7 @@ fn command_reformat(
         time,
         &message_pool,
         .{
-            .id = stdx.crypto_u128(io.io_std),
+            .id = io.crypto_random_int(u128),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
             .aof_recovery = false,
@@ -667,14 +684,12 @@ fn command_repl(
 
 fn command_amqp(
     gpa: mem.Allocator,
-    io_std: std.Io,
     time: Time,
     args: *const cli.Command.AMQP,
 ) !void {
     var runner: vsr.cdc.Runner = undefined;
     try runner.init(
         gpa,
-        io_std,
         time,
         .{
             .cluster_id = args.cluster,

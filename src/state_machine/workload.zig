@@ -33,7 +33,7 @@ const Auditor = accounting_auditor.AccountingAuditor;
 const ResultsSparseIteratorType = accounting_auditor.ResultsSparseIteratorType;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const PriorityQueue = std.PriorityQueue;
 

@@ -7,7 +7,7 @@ const log = std.log.scoped(.amqp);
 
 const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
-const IO = vsr.io.IO;
+const IO = stdx.IO;
 
 const spec = @import("./amqp/spec.zig");
 const protocol = @import("./amqp/protocol.zig");

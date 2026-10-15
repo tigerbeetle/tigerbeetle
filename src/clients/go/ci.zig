@@ -49,7 +49,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -74,7 +74,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });

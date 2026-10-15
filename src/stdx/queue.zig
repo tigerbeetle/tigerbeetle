@@ -1,8 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const constants = @import("./constants.zig");
-
 const QueueLink = extern struct {
     next: ?*QueueLink = null,
 };
@@ -18,7 +16,7 @@ pub fn QueueType(comptime T: type) type {
 
         pub inline fn init(options: struct {
             name: ?[]const u8,
-            verify_push: bool = true,
+            verify_push: bool,
         }) Queue {
             return .{ .any = .{
                 .name = options.name,
@@ -102,12 +100,11 @@ const QueueAny = struct {
     // This should only be null if you're sure we'll never want to monitor `count`.
     name: ?[]const u8,
 
-    // If the number of elements is large, the constants.verify check in push() can be too
-    // expensive. Allow the user to gate it. Could also be a comptime param?
+    // If the number of elements is large make sure to avoid verifying the push.
     verify_push: bool = true,
 
     pub fn push(self: *QueueAny, link: *QueueLink) void {
-        if (constants.verify and self.verify_push) assert(!self.contains(link));
+        if (self.verify_push) assert(!self.contains(link));
 
         assert(link.next == null);
         if (self.in) |in| {
@@ -122,7 +119,7 @@ const QueueAny = struct {
     }
 
     pub fn push_first(self: *QueueAny, link: *QueueLink) void {
-        if (constants.verify and self.verify_push) assert(!self.contains(link));
+        if (self.verify_push) assert(!self.contains(link));
 
         assert(link.next == null);
 
@@ -167,7 +164,7 @@ const QueueAny = struct {
     pub fn insert_after(self: *QueueAny, after: *QueueLink, insert: *QueueLink) void {
         assert(insert.next == null);
         assert(insert != after);
-        if (constants.verify and self.verify_push) {
+        if (self.verify_push) {
             assert(self.contains(after));
             assert(!self.contains(insert));
         }
@@ -294,8 +291,8 @@ test "Queue: push/pop/peek/remove/empty" {
 }
 
 test "Queue: fuzz" {
-    const stdx = @import("stdx");
-    const fuzz = @import("./testing/fuzz.zig");
+    const stdx = @import("./stdx.zig");
+    const fuzz = stdx.fuzz;
     const N = 1000;
 
     const Item = struct {
@@ -309,7 +306,7 @@ test "Queue: fuzz" {
     var prng = stdx.PRNG.from_seed_testing();
 
     for (0..200) |_| {
-        var queue = Queue.init(.{ .name = "fuzz" });
+        var queue = Queue.init(.{ .name = "fuzz", .verify_push = true });
         var model = Model{};
 
         var items = try gpa.alloc(Item, N);

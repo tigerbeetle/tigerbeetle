@@ -490,7 +490,10 @@ pub const cache_line_size = config.cluster.cache_line_size;
 /// This is necessary for direct I/O without the kernel having to fix unaligned pages with a copy.
 /// The new Advanced Format sector size is backwards compatible with the old 512 byte sector size.
 /// This should therefore never be less than 4 KiB to be future-proof when server disks are swapped.
-pub const sector_size = 4096;
+pub const sector_size = stdx.IO.sector_size;
+comptime {
+    assert(sector_size == 4096);
+}
 
 /// Whether to perform direct I/O to the underlying disk device:
 /// This enables several performance optimizations:

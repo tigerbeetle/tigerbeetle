@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("stdx");
 const constants = @import("./constants.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const TimeOS = stdx.TimeOS;
 
 const log = std.log.scoped(.fuzz);
@@ -82,13 +82,13 @@ pub fn main(init: std.process.Init) !void {
         .smoke => {
             assert(cli_args.seed == null);
             assert(cli_args.events_max == null);
-            try main_smoke(gpa, init.io);
+            try main_smoke(gpa);
         },
-        else => try main_single(gpa, init.io, cli_args),
+        else => try main_single(gpa, cli_args),
     }
 }
 
-fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
+fn main_smoke(gpa: std.mem.Allocator) !void {
     var time: TimeOS = .{};
     const timer_all = time.monotonic();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
@@ -118,7 +118,6 @@ fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
 
         const timer_single = time.monotonic();
         try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
-            .io = io,
             .seed = 123,
             .events_max = events_max,
         });
@@ -134,10 +133,15 @@ fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
     log.info("done in {f}", .{elapsed});
 }
 
-fn main_single(gpa: std.mem.Allocator, io: std.Io, cli_args: CLIArgs) !void {
+fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(cli_args.fuzzer != .smoke);
 
-    const seed = cli_args.seed orelse stdx.crypto_random_int(io, u64);
+    const seed = cli_args.seed orelse b: {
+        var io: stdx.IO = try .init(32, 0, null);
+        defer io.deinit();
+
+        break :b io.crypto_random_int(u64);
+    };
     log.info("Fuzz seed = {}", .{seed});
 
     var time: TimeOS = .{};
@@ -150,7 +154,6 @@ fn main_single(gpa: std.mem.Allocator, io: std.Io, cli_args: CLIArgs) !void {
             }
         },
         inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
-            .io = io,
             .seed = seed,
             .events_max = cli_args.events_max,
         }),

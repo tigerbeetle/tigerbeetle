@@ -6,7 +6,7 @@ const maybe = stdx.maybe;
 const os = std.os;
 const posix = stdx.posix;
 const constants = @import("constants.zig");
-const IO = @import("io.zig").IO;
+const IO = stdx.IO;
 const Timeout = @import("./vsr.zig").Timeout;
 
 const elf = std.elf;
@@ -719,6 +719,7 @@ pub const MultiversionOS = struct {
         exe_path: [:0]const u8,
         exe_path_format: enum { detect, native },
     ) !MultiversionOS {
+        assert(io.io_std != null);
         assert(std.fs.path.isAbsolute(exe_path));
 
         const multiversion_binary_size_max_by_format = switch (exe_path_format) {
@@ -741,7 +742,7 @@ pub const MultiversionOS = struct {
         );
         errdefer allocator.free(source_buffer);
 
-        const nonce = stdx.crypto_u128(io.io_std);
+        const nonce = io.crypto_random_int(u128);
 
         const target_path: [:0]const u8 = switch (builtin.target.os.tag) {
             .linux => try allocator.dupeZ(u8, multiversion_uuid),
@@ -779,14 +780,14 @@ pub const MultiversionOS = struct {
                 const permissions: std.Io.File.Permissions =
                     if (builtin.target.os.tag == .macos) .fromMode(0o755) else .default_file;
                 const file = std.Io.Dir.createFileAbsolute(
-                    io.io_std,
+                    io.io_std.?,
                     target_path,
                     .{ .read = true, .truncate = true, .permissions = permissions },
                 ) catch |e| std.debug.panic(
                     "error in target_fd open: {}",
                     .{e},
                 );
-                try file.setLength(io.io_std, multiversion_binary_size_max);
+                try file.setLength(io.io_std.?, multiversion_binary_size_max);
 
                 break :blk file.handle;
             },
@@ -1039,7 +1040,7 @@ pub const MultiversionOS = struct {
             ),
             .macos, .windows => {
                 const file =
-                    std.Io.Dir.openFileAbsolute(self.io.io_std, self.exe_path, .{}) catch |e|
+                    std.Io.Dir.openFileAbsolute(self.io.io_std.?, self.exe_path, .{}) catch |e|
                         std.debug.panic("error in binary_open: {}", .{e});
                 self.binary_open_callback(&self.completion, file.handle);
             },
@@ -1233,7 +1234,7 @@ pub const MultiversionOS = struct {
             .handle = self.target_fd,
             .flags = .{ .nonblocking = false },
         };
-        try target_file.writePositionalAll(self.io.io_std, source_buffer, 0);
+        try target_file.writePositionalAll(self.io.io_std.?, source_buffer, 0);
 
         self.target_header = header;
         self.target_body_offset = active.body_offset;
@@ -1386,22 +1387,22 @@ pub const MultiversionOS = struct {
         // around, so that it's at the start, then truncate the descriptor so there's nothing
         // trailing.
         const bytes_read = try target_file.readPositionalAll(
-            self.io.io_std,
+            self.io.io_std.?,
             self.source_buffer[0..binary_size],
             self.target_body_offset.? + binary_offset,
         );
         assert(bytes_read == binary_size);
 
-        try target_file.writePositionalAll(self.io.io_std, self.source_buffer[0..binary_size], 0);
+        try target_file.writePositionalAll(self.io.io_std.?, self.source_buffer[0..binary_size], 0);
 
         // Zero the remaining bytes in the file.
-        try target_file.setLength(self.io.io_std, binary_size);
+        try target_file.setLength(self.io.io_std.?, binary_size);
 
         // Ensure the checksum matches the header. This could have been done above, but
         // do it in a separate step to make sure.
         const written_checksum = blk: {
             const bytes_read_for_checksum = try target_file.readPositionalAll(
-                self.io.io_std,
+                self.io.io_std.?,
                 self.source_buffer[0..binary_size],
                 0,
             );
@@ -1462,7 +1463,7 @@ pub const MultiversionOS = struct {
 
                 const pipe_name: [*:0]const u16 =
                     std.unicode.utf8ToUtf16LeStringLiteral("\\\\.\\pipe\\") ++
-                    random_wstr(self.io.io_std);
+                    random_wstr(self.io);
 
                 // Use pipe to send our HANDLE to the child, see `wait_for_parent_to_exit`.
                 const pipe = stdx.windows.CreateNamedPipeW(
@@ -1618,12 +1619,12 @@ pub fn self_exe_path(
     return try allocator.dupeZ(u8, native_self_exe_path);
 }
 
-pub fn random_wstr(io_std: std.Io) [32]u16 {
+pub fn random_wstr(io: *IO) [32]u16 {
     var result: [32]u16 = @splat(std.unicode.utf8ToUtf16LeStringLiteral("0")[0]);
 
     var buffer_utf8: [31]u8 = undefined;
     const name_utf8 =
-        stdx.array_print(31, &buffer_utf8, "{d}", .{stdx.crypto_random_int(io_std, u64)});
+        stdx.array_print(31, &buffer_utf8, "{d}", .{io.crypto_random_int(u64)});
     var fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(&result));
     _ = std.unicode.utf8ToUtf16LeAllocZ(fba.allocator(), name_utf8) catch |err| switch (err) {
         error.InvalidUtf8, error.OutOfMemory => unreachable,
@@ -2104,7 +2105,7 @@ pub fn print_information(
     exe_path: []const u8,
     output: *std.Io.Writer,
 ) !void {
-    var io = try IO.init(io_std, 32, 0);
+    var io = try IO.init(32, 0, io_std);
     defer io.deinit();
 
     const absolute_exe_path = try std.Io.Dir.cwd().realPathFileAlloc(io_std, exe_path, gpa);
