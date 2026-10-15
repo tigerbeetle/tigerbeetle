@@ -406,7 +406,9 @@ fn command_start(
         );
         // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
         // enabled even if the first version fails to load.
-        multiversion_os.?.open_sync() catch {};
+        multiversion_os.?.open_sync() catch |err| {
+            log.warn("multiversioning: error opening binary: {s}", .{@errorName(err)});
+        };
 
         break :blk multiversion_os.?.multiversion();
     };
