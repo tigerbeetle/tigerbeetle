@@ -1889,7 +1889,7 @@ pub const IO = struct {
         for (0..buffer.len) |_| {
             const remaining = buffer[position..];
             const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
-            switch (stdx.posix.errno(return_code)) {
+            switch (std.os.linux.errno(return_code)) {
                 .SUCCESS => {
                     assert(return_code <= std.math.maxInt(u32));
                     const bytes: u32 = @intCast(return_code);
@@ -1939,7 +1939,7 @@ pub const IO = struct {
             waiters_max,
         );
 
-        switch (stdx.posix.errno(return_code)) {
+        switch (std.os.linux.errno(return_code)) {
             .SUCCESS => {}, // successful wake up
             .INVAL => {}, // invalid futex_wait() on ptr done elsewhere
             .FAULT => {}, // pointer became invalid while doing the wake
@@ -1967,7 +1967,7 @@ pub const IO = struct {
                 &remaining,
             );
 
-            switch (stdx.posix.errno(return_code)) {
+            switch (std.os.linux.errno(return_code)) {
                 .SUCCESS => return,
                 .INTR => {
                     const remaining_ns = @as(u64, @intCast(remaining.sec)) * std.time.ns_per_s +
