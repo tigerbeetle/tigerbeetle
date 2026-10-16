@@ -46,12 +46,6 @@ pub fn requires_fractional_amounts() void {
     @compileError(ct_compile_error);
 }
 
-/// Restricts the case to clients that pass an empty address to the native client, so that it fails
-/// as an invalid address.
-pub fn requires_empty_address_passthrough() void {
-    @compileError(ct_compile_error);
-}
-
 /// The client the test harness creates for each case.
 /// NOTE: This doesn't do anything in the emitters. I just tried to avoid having an implicit client
 /// magically available in all test.
