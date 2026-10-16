@@ -1256,7 +1256,7 @@ pub const IO = struct {
         };
         const result = std.c.__ulock_wait(flags, @ptrCast(value), expect, 0);
 
-        switch (stdx.posix.errno(result)) {
+        switch (std.c.errno(result)) {
             .SUCCESS => {},
             // Wait was interrupted by the OS or other spurious signalling.
             .INTR => {},
@@ -1278,7 +1278,7 @@ pub const IO = struct {
 
         const result = std.c.__ulock_wake(flags, @ptrCast(value), 0);
 
-        switch (stdx.posix.errno(result)) {
+        switch (std.c.errno(result)) {
             .SUCCESS => {},
             .INTR => {}, // spurious wake()
             .NOENT => {}, // nothing was woken up
@@ -1307,7 +1307,7 @@ pub const IO = struct {
                 &remaining,
             );
 
-            switch (stdx.posix.errno(return_code)) {
+            switch (std.c.errno(return_code)) {
                 .FAULT => unreachable,
                 .SUCCESS => return,
                 .INVAL => {
