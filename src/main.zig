@@ -76,6 +76,7 @@ const World = struct {
 
     fn check_hash_link(world: *World, index: u64) void {
         if (index == 0) return;
+        if (index >= world.log.len) return;
         if (world.log[index - 1].is_reserved()) return;
         if (world.log[index].is_reserved()) return;
         assert(world.log[index - 1].checksum == world.log[index].parent);
@@ -111,7 +112,7 @@ const Replica = struct {
             .op = replica.committed_last.op + 1,
             .view = replica.view_max,
             .checksum = payload, //TODO: proper checksum
-            .parent = replica.committed_last.parent,
+            .parent = replica.committed_last.checksum,
             .payload = payload,
         };
     }
