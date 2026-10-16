@@ -163,7 +163,7 @@ pub const Driver = struct {
             if (step == 0) break;
 
             const size_next = if (pass) size + step else size - step;
-            if (size > driver.buffer.len) break;
+            if (size_next > driver.buffer.len) break;
             const outcome = try driver.run_multiple(.{
                 .size = size_next,
                 .attempts = options.attempts,
