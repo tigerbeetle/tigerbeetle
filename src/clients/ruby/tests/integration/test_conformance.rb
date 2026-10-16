@@ -3,18 +3,9 @@
 ##               Do not manually modify.                ##
 ##########################################################
 
-require "minitest/autorun"
-require "tigerbeetle"
+require_relative "tiger_beetle_integration_test"
 
-class TestConformance < Minitest::Test
-  def setup
-    @tb_address = ENV.fetch("TB_ADDRESS", "3000")
-    @client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)
-  end
-
-  def teardown
-    @client&.close
-  end
+class TestConformance < TigerBeetleIntegrationTest
 
   # Suite: create_client
 

@@ -23,7 +23,7 @@ const (
 	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
 
-func WithClient(t testing.TB, withClient func(Client)) {
+func startServer(t testing.TB) string {
 	tigerbeetlePath := os.Getenv("TIGERBEETLE_BINARY")
 	if tigerbeetlePath == "" {
 		t.Fatalf("TIGERBEETLE_BINARY environmental variable is required")
@@ -86,7 +86,11 @@ func WithClient(t testing.TB, withClient func(Client)) {
 		t.Fatal(err)
 	}
 
-	addresses := strings.TrimSpace(port)
+	return strings.TrimSpace(port)
+}
+
+func WithClient(t testing.TB, withClient func(Client)) {
+	addresses := startServer(t)
 	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), addresses)
 	if err != nil {
 		t.Fatal(err)

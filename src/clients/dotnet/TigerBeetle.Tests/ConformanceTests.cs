@@ -5,8 +5,6 @@
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
-using System.Diagnostics;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,13 +13,13 @@ namespace TigerBeetle.Tests;
 [TestClass]
 public class ConformanceTests
 {
-    private static TBConformanceServer server = null!;
+    private static TBServer server = null!;
     private Client client = null!;
 
     [ClassInitialize]
     public static void Initialize(TestContext _)
     {
-        server = new TBConformanceServer();
+        server = new TBServer();
     }
 
     [ClassCleanup]
@@ -12179,58 +12177,4 @@ public class ConformanceTests
         client.Close();
     }
 #pragma warning restore CS1998
-
-    private class TBConformanceServer : IDisposable
-    {
-        private readonly Process process;
-        private readonly string dataFile;
-
-        public string Address { get; }
-
-        public TBConformanceServer()
-        {
-            dataFile = Path.GetRandomFileName();
-            var tigerbeetleBinary = Environment.GetEnvironmentVariable("TIGERBEETLE_BINARY");
-            if (tigerbeetleBinary == null)
-            {
-                throw new InvalidOperationException(
-                    "TIGERBEETLE_BINARY environmental variable is required"
-                );
-            }
-
-            {
-                using var format = new Process();
-                format.StartInfo.FileName = tigerbeetleBinary;
-                format.StartInfo.Arguments =
-                    $"format --cluster=0 --replica=0 --replica-count=1 --development ./{dataFile}";
-                format.StartInfo.RedirectStandardError = true;
-                format.Start();
-                var formatStderr = format.StandardError.ReadToEnd();
-                format.WaitForExit();
-                if (format.ExitCode != 0)
-                {
-                    throw new InvalidOperationException(
-                        $"format failed, ExitCode={format.ExitCode} stderr:\n{formatStderr}"
-                    );
-                }
-            }
-
-            process = new Process();
-            process.StartInfo.FileName = tigerbeetleBinary;
-            process.StartInfo.Arguments = $"start --addresses=0 --development ./{dataFile}";
-            process.StartInfo.RedirectStandardInput = true;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.Start();
-
-            Address = process.StandardOutput.ReadLine()!.Trim();
-        }
-
-        public void Dispose()
-        {
-            process.Kill();
-            process.WaitForExit();
-            process.Dispose();
-            File.Delete($"./{dataFile}");
-        }
-    }
 }

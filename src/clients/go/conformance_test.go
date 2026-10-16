@@ -6,15 +6,7 @@
 package tigerbeetle_go
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
-	"fmt"
-	"math/rand"
-	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +15,7 @@ import (
 )
 
 func TestConformance(t *testing.T) {
-	port := startConformanceServer(t)
+	port := startServer(t)
 
 	test := func(name string, body func(t *testing.T, client Client)) {
 		t.Run(name, func(t *testing.T) {
@@ -6374,74 +6366,6 @@ func TestConformance(t *testing.T) {
 		client.Close()
 		client.Close()
 	})
-}
-
-func startConformanceServer(t *testing.T) string {
-	var tigerbeetlePath string
-	if runtime.GOOS == "windows" {
-		tigerbeetlePath = "../../../tigerbeetle.exe"
-	} else {
-		tigerbeetlePath = "../../../tigerbeetle"
-	}
-
-	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)
-	replicaCountArg := fmt.Sprintf("--replica-count=%d", TIGERBEETLE_REPLICA_COUNT)
-	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
-
-	fileName := fmt.Sprintf("./%d_%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID, rand.Int())
-	t.Cleanup(func() {
-		_ = os.Remove(fileName)
-	})
-
-	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, replicaCountArg, fileName)
-	var tbErr bytes.Buffer
-	tbInit.Stdout = &tbErr
-	tbInit.Stderr = &tbErr
-	if err := tbInit.Run(); err != nil {
-		fmt.Println(fmt.Sprint(err) + ": " + tbErr.String())
-		t.Fatal(err)
-	}
-
-	tbStart := exec.Command(tigerbeetlePath,
-		"start",
-		"--development",
-		"--addresses=0",
-		fileName)
-
-	if testing.Verbose() {
-		tbStart.Stderr = os.Stderr
-	}
-
-	// Stdin is not used,
-	// but when running with `--addresses=0`, the replica exits if stdin is closed.
-	stdin, err := tbStart.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = stdin
-
-	// Stdout is used to read the assigned TCP port.
-	stdout, err := tbStart.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := tbStart.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := tbStart.Process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	reader := bufio.NewReader(stdout)
-	port, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return strings.TrimSpace(port)
 }
 
 func newClient(t *testing.T, port string) Client {

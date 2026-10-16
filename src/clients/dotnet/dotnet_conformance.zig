@@ -40,8 +40,6 @@ fn emit(printer: *Printer) !void {
         \\
         \\using Microsoft.VisualStudio.TestTools.UnitTesting;
         \\using System;
-        \\using System.Diagnostics;
-        \\using System.IO;
         \\using System.Threading;
         \\using System.Threading.Tasks;
         \\
@@ -50,13 +48,13 @@ fn emit(printer: *Printer) !void {
         \\[TestClass]
         \\public class ConformanceTests
         \\{
-        \\    private static TBConformanceServer server = null!;
+        \\    private static TBServer server = null!;
         \\    private Client client = null!;
         \\
         \\    [ClassInitialize]
         \\    public static void Initialize(TestContext _)
         \\    {
-        \\        server = new TBConformanceServer();
+        \\        server = new TBServer();
         \\    }
         \\
         \\    [ClassCleanup]
@@ -137,7 +135,6 @@ fn emit(printer: *Printer) !void {
         }
     }
     try printer.write("#pragma warning restore CS1998\n");
-    try emit_server(printer);
     try printer.write("}\n");
 }
 
@@ -629,87 +626,4 @@ fn dotnet_operation_name(name: ast.Call.Name) []const u8 {
         .query_transfers => "QueryTransfers",
         .close_client => unreachable,
     };
-}
-
-fn emit_server(printer: *Printer) !void {
-    try printer.write_empty_line();
-    try printer.write_indented("private class TBConformanceServer : IDisposable");
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("private readonly Process process;");
-    try printer.write_indented("private readonly string dataFile;");
-    try printer.write_empty_line();
-    try printer.write_indented("public string Address { get; }");
-    try printer.write_empty_line();
-    try printer.write_indented("public TBConformanceServer()");
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("dataFile = Path.GetRandomFileName();");
-    try printer.write_indented(
-        "var tigerbeetleBinary = Environment.GetEnvironmentVariable(\"TIGERBEETLE_BINARY\");",
-    );
-    try printer.write_indented("if (tigerbeetleBinary == null)");
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("throw new InvalidOperationException(");
-    printer.indent();
-    try printer.write_indented("\"TIGERBEETLE_BINARY environmental variable is required\"");
-    printer.dedent();
-    try printer.write_indented(");");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("using var format = new Process();");
-    try printer.write_indented("format.StartInfo.FileName = tigerbeetleBinary;");
-    try printer.write_indented("format.StartInfo.Arguments =");
-    printer.indent();
-    try printer.write_indented(
-        "$\"format --cluster=0 --replica=0 --replica-count=1 --development ./{dataFile}\";",
-    );
-    printer.dedent();
-    try printer.write_indented("format.StartInfo.RedirectStandardError = true;");
-    try printer.write_indented("format.Start();");
-    try printer.write_indented("var formatStderr = format.StandardError.ReadToEnd();");
-    try printer.write_indented("format.WaitForExit();");
-    try printer.write_indented("if (format.ExitCode != 0)");
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("throw new InvalidOperationException(");
-    printer.indent();
-    try printer.write_indented(
-        "$\"format failed, ExitCode={format.ExitCode} stderr:\\n{formatStderr}\"",
-    );
-    printer.dedent();
-    try printer.write_indented(");");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("process = new Process();");
-    try printer.write_indented("process.StartInfo.FileName = tigerbeetleBinary;");
-    try printer.write_indented(
-        "process.StartInfo.Arguments = $\"start --addresses=0 --development ./{dataFile}\";",
-    );
-    try printer.write_indented("process.StartInfo.RedirectStandardInput = true;");
-    try printer.write_indented("process.StartInfo.RedirectStandardOutput = true;");
-    try printer.write_indented("process.Start();");
-    try printer.write_empty_line();
-    try printer.write_indented("Address = process.StandardOutput.ReadLine()!.Trim();");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("public void Dispose()");
-    try printer.write_indented("{");
-    printer.indent();
-    try printer.write_indented("process.Kill();");
-    try printer.write_indented("process.WaitForExit();");
-    try printer.write_indented("process.Dispose();");
-    try printer.write_indented("File.Delete($\"./{dataFile}\");");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("}");
 }

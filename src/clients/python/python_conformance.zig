@@ -68,9 +68,7 @@ fn emit(printer: *Printer) !void {
             \\def client():
             \\    client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
             \\    yield client
-            \\    # Workaround until #3943 has been merged.
-            \\    if client._client_key in tb.ClientSync._clients:
-            \\        client.close()
+            \\    client.close()
             \\
             ,
             .asynchronous =>
@@ -86,9 +84,7 @@ fn emit(printer: *Printer) !void {
             \\            try:
             \\                await case(client)
             \\            finally:
-            \\                # Workaround until #3943 has been merged.
-            \\                if client._client_key in tb.ClientAsync._clients:
-            \\                    await client.close()
+            \\                await client.close()
             \\        asyncio.run(run())
             \\    # PEP 362: Stop pytest from treating the test's `client` parameter as a fixture.
             \\    test.__signature__ = inspect.Signature()
