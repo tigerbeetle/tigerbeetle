@@ -1072,7 +1072,7 @@ fn build_test(
                 const script_run = std.Build.Step.Run.create(b, step_name);
 
                 const tools = comptime if (std.mem.eql(u8, language, "java"))
-                    .{"maven@3.5"}
+                    .{"maven@3.5.0"}
                 else
                     .{};
                 script_run.addArgs(&(.{ "mise", "exec", language_version } ++ tools ++ .{"--"}));
