@@ -126,8 +126,15 @@ test('create_client_rejects_more_addresses_than_replicas', async (client) => {
   )
 })
 
-// Omitted: "rejects an empty address"
-// Reason: requires empty address passthrough
+test('create_client_rejects_an_empty_address', async (client) => {
+  assert.throws(
+    () => createClient({
+      cluster_id: 0n,
+      replica_addresses: [''],
+    }),
+    { message: 'Invalid replica address.' },
+  )
+})
 
 test('create_client_rejects_empty_addresses', async (client) => {
   assert.throws(

@@ -26,8 +26,6 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
         // Amounts are `bigint`s: arbitrary precision, but integral only.
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => false,
-        // The binding rejects an empty `replica_addresses` buffer itself.
-        .requires_empty_address_passthrough => false,
     };
 }
 
