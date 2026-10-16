@@ -299,8 +299,7 @@ const CLIArgs = union(enum) {
             \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
             \\
             \\  integrity
-            \\        Scans the data file and checks all internal checksums to verify internal
-            \\        integrity.
+            \\        Scans the data file and checks internal checksums and invariants.
             \\
         ;
     };
