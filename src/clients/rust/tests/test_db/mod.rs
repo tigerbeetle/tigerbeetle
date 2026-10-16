@@ -32,7 +32,8 @@ pub fn get_test_db() -> &'static TestDb {
 
     unsafe {
         TEST_DB.once.call_once(|| {
-            *(&mut *TEST_DB.value.get()) = Some(TestDb::new().expect(error_msg));
+            *(&mut *TEST_DB.value.get()) =
+                Some(TestDb::new("TB_ADDRESS_TESTS", "testdb").expect(error_msg));
         });
 
         (&*TEST_DB.value.get()).as_ref().expect(error_msg)
@@ -43,77 +44,47 @@ pub struct TestDb {
     port: u16,
     // Keep the server's stdin handle open as long as the test process is running,
     // at which point the server will terminate.
-    _server: Child,
-}
-
-pub fn tigerbeetle_bin() -> String {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}")
-}
-
-pub fn work_dir() -> &'static str {
-    env!("CARGO_TARGET_TMPDIR")
+    _server: Option<Child>,
 }
 
 impl TestDb {
-    pub fn new() -> Result<TestDb> {
-        // NB: There is one test database shared between all tests, and reused
-        // between test runs. If the tests choose their IDs correctly there
-        // should never be any collisions, and that one database should work
-        // forever, just taking up a lot of space.
-        let database_name = "0_0.testdb.tigerbeetle";
+    /// Create a unique development-mode server for a specific test.
+    pub fn new(port_env_var: &str, label_new: &str) -> Result<TestDb> {
+        if let Ok(port_existing) = std::env::var(port_env_var) {
+            return Ok(TestDb {
+                port: port_existing.parse()?,
+                _server: None,
+            });
+        }
 
-        if !Path::new(&format!("{}/{database_name}", work_dir())).try_exists()? {
-            let status = Command::new(tigerbeetle_bin())
-                .current_dir(work_dir())
+        if let Err(_) = std::env::var("AUTOSPAWN_TIGERBEETLE") {
+            panic!("Set the 'AUTOSPAWN_TIGERBEETLE' environment variable for manual tests.");
+        }
+
+        let work_dir = env!("CARGO_TARGET_TMPDIR");
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+
+        let database_name = format!("0_0.{label_new}.tigerbeetle");
+        let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
+
+        if !Path::new(&format!("{}/{database_name}", work_dir)).try_exists()? {
+            let status = Command::new(tigerbeetle_bin.as_str())
+                .current_dir(work_dir)
                 .args([
                     "format",
                     "--replica-count=1",
                     "--replica=0",
                     "--cluster=0",
-                    database_name,
+                    database_name.as_str(),
                 ])
                 .status()?;
             assert!(status.success());
         }
 
-        let server = Self::start(&["--addresses=0", "--cache-grid=32MiB", database_name])?;
-
-        Ok(server)
-    }
-
-    /// Create a unique development-mode server for a specific test.
-    pub fn new_development(label: &str) -> Result<TestDb> {
-        let database_name = format!("0_0.{label}.tigerbeetle");
-
-        // Always start fresh for development instances.
-        let _ = std::fs::remove_file(format!("{}/{database_name}", work_dir()));
-
-        let status = Command::new(tigerbeetle_bin())
-            .current_dir(work_dir())
-            .args([
-                "format",
-                "--replica-count=1",
-                "--replica=0",
-                "--cluster=0",
-                "--development",
-                &database_name,
-            ])
-            .status()?;
-        assert!(status.success());
-
-        let server = Self::start(&["--addresses=0", "--development", &database_name])?;
-
-        Ok(server)
-    }
-
-    pub fn start(args: &[&str]) -> Result<TestDb> {
-        let mut server = Command::new(tigerbeetle_bin())
-            .current_dir(work_dir())
-            // magic address 0: tell us the port to use,
-            // shutdown when stdin closes
-            .args(["start"])
-            .args(args)
+        let mut server = Command::new(tigerbeetle_bin.as_str())
+            .current_dir(work_dir)
+            // magic address 0: tell us the port to use, shutdown when stdin closes
+            .args(&["start", "--addresses=0", "--development", &database_name])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
@@ -126,7 +97,7 @@ impl TestDb {
 
         Ok(TestDb {
             port,
-            _server: server,
+            _server: Some(server),
         })
     }
 

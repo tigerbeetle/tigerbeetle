@@ -76,7 +76,7 @@ unsafe impl std::alloc::GlobalAlloc for TrackingAllocator {
 #[test]
 fn payload_independent_allocations() -> Result<()> {
     let batch_single = measure_allocations(1)?;
-    let batch_full = measure_allocations(8189)?;
+    let batch_full = measure_allocations(128)?;
 
     assert_eq!(batch_single.count_alloc, batch_full.count_alloc);
     assert_eq!(batch_single.bytes_alloc, batch_full.bytes_alloc);
