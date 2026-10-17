@@ -303,7 +303,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 &trailer.read,
                 address,
                 checksum,
-                .{ .cache_read = true, .cache_write = false },
+                .lookup_only,
             );
         }
 

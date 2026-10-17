@@ -63,7 +63,7 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
                 &it.read,
                 address,
                 checksum.value,
-                .{ .cache_read = true, .cache_write = true },
+                .lookup_and_admit,
             );
         }
 

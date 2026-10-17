@@ -74,6 +74,15 @@ pub fn GridType(comptime Storage: type) type {
             from_local_or_global_storage: *const fn (*Grid.Read, BlockPtrConst) void,
         };
 
+        pub const CachePolicy = enum {
+            /// Skip the cache lookup and do not cache the block read from storage.
+            bypass,
+            /// Check the cache, but do not cache the block read from storage.
+            lookup_only,
+            /// Check the cache and cache the block read from storage.
+            lookup_and_admit,
+        };
+
         pub const Read = struct {
             callback: ReadBlockCallback,
             address: u64,
@@ -92,8 +101,7 @@ pub fn GridType(comptime Storage: type) type {
             /// - the read may complete after a future checkpoint.
             /// - callback == .from_local_storage
             coherent: bool,
-            cache_read: bool,
-            cache_write: bool,
+            cache: CachePolicy,
             pending: ReadPending = .{},
             resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{
                 .name = null,
@@ -1194,10 +1202,7 @@ pub fn GridType(comptime Storage: type) type {
             read: *Grid.Read,
             address: u64,
             checksum: u128,
-            options: struct {
-                cache_read: bool,
-                cache_write: bool,
-            },
+            cache: CachePolicy,
         ) void {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
@@ -1226,14 +1231,13 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .checksum = checksum,
                 .coherent = callback == .from_local_or_global_storage,
-                .cache_read = options.cache_read,
-                .cache_write = options.cache_write,
+                .cache = cache,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
                 .checkpoint_durable = grid.free_set.checkpoint_durable,
                 .grid = grid,
             };
 
-            if (options.cache_read) {
+            if (cache != .bypass) {
                 grid.on_next_tick(read_block_tick_callback, &read.next_tick);
             } else {
                 read_block_tick_callback(&read.next_tick);
@@ -1288,9 +1292,8 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // When Read.cache_read is set, the caller of read_block()
-            // is responsible for calling us via next_tick().
-            if (read.cache_read) {
+            // Cache lookups run on the next tick to avoid synchronous callbacks.
+            if (read.cache != .bypass) {
                 if (grid.read_block_from_cache(
                     read.address,
                     read.checksum,
@@ -1381,7 +1384,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_queue.remove(read);
 
             if (result == .valid) {
-                if (read.cache_write) {
+                if (read.cache == .lookup_and_admit) {
                     grid.cache_upsert(read.address, block);
                 }
             } else {

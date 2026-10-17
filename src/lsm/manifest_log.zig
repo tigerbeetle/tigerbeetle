@@ -334,7 +334,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 &manifest_log.read,
                 block_reference.address,
                 block_reference.checksum,
-                .{ .cache_read = true, .cache_write = true },
+                .lookup_and_admit,
             );
         }
 
@@ -719,7 +719,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     &manifest_log.read,
                     oldest_address,
                     oldest_checksum,
-                    .{ .cache_read = true, .cache_write = true },
+                    .lookup_and_admit,
                 );
             }
         }
