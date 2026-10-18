@@ -15,9 +15,29 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
 }) !void {
     try shell.exec_zig("build clients:rust -Drelease", .{});
-    try shell.exec("cargo test --all", .{});
     try shell.exec("cargo fmt --check", .{});
     try shell.exec("cargo clippy -- -D clippy::all", .{});
+
+    {
+        var beetle_tests = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
+            .development = true,
+            .prebuilt = options.tigerbeetle,
+        });
+        defer beetle_tests.deinit(gpa);
+        errdefer beetle_tests.log_stderr();
+
+        var beetle_eviction_test = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
+            .development = true,
+            .prebuilt = options.tigerbeetle,
+        });
+        defer beetle_eviction_test.deinit(gpa);
+        errdefer beetle_eviction_test.log_stderr();
+
+        try shell.env.put("TB_ADDRESS", beetle_tests.port_str);
+        try shell.env.put("TB_ADDRESS_EVICTION_TEST", beetle_eviction_test.port_str);
+
+        try shell.exec("cargo test --all", .{});
+    }
 
     inline for (.{
         "basic",

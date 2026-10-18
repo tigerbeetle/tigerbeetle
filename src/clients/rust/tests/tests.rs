@@ -686,7 +686,7 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
     // Reverse because later transactions most likely to be lost.
     ids.reverse();
 
-    for next_ids in ids.chunks(8189) {
+    for next_ids in ids.chunks(128) {
         let results = block_on(client.lookup_accounts(next_ids))?;
         if results.len() < next_ids.len() {
             // This is what we expect.
@@ -761,8 +761,8 @@ struct PagingTestParams {
 }
 
 fn make_paging_test_transfers(client: &tb::Client) -> Result<PagingTestParams> {
-    let batch_size: usize = 1234;
-    let transfer_count: usize = 5678;
+    let batch_size: usize = 123;
+    let transfer_count: usize = 4567;
     let account_id1 = tb::id();
     let account_id2 = tb::id();
 
@@ -828,7 +828,7 @@ fn paging_forward() -> Result<()> {
         &client,
         tb::AccountFilter {
             account_id: test_params.account_id1,
-            limit: 1000,
+            limit: 128,
             flags: tb::AccountFilterFlags::Debits,
             ..Default::default()
         },
@@ -855,7 +855,7 @@ fn paging_reverse() -> Result<()> {
         &client,
         tb::AccountFilter {
             account_id: test_params.account_id1,
-            limit: 1000,
+            limit: 128,
             flags: tb::AccountFilterFlags::Debits | tb::AccountFilterFlags::Reversed,
             ..Default::default()
         },
@@ -1329,7 +1329,7 @@ fn client_evicted() -> Result<()> {
     let _guard = DB_LOCK.write().unwrap();
 
     // Use a separate server to avoid evicting the shared test client.
-    let server = TestDb::new_development("client_evicted")?;
+    let server = TestDb::new("TB_ADDRESS_EVICTION_TEST", "client_evicted")?;
     let address = server.address();
 
     let client_evict = tb::Client::new(0, &address)?;
