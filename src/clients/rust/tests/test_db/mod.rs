@@ -1,5 +1,4 @@
 use std::cell::UnsafeCell;
-use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
 use std::path::Path;
@@ -33,7 +32,7 @@ pub fn get_test_db() -> &'static TestDb {
     unsafe {
         TEST_DB.once.call_once(|| {
             *(&mut *TEST_DB.value.get()) =
-                Some(TestDb::new("TB_ADDRESS_TESTS", "testdb").expect(error_msg));
+                Some(TestDb::new("TB_ADDRESS", "testdb").expect(error_msg));
         });
 
         (&*TEST_DB.value.get()).as_ref().expect(error_msg)
@@ -57,33 +56,41 @@ impl TestDb {
             });
         }
 
-        if let Err(_) = std::env::var("AUTOSPAWN_TIGERBEETLE") {
-            panic!("Set the 'AUTOSPAWN_TIGERBEETLE' environment variable for manual tests.");
-        }
+        // We should only ever create databases for local tests, never in CI.
+        // In CI, always rely on TigerBeetle servers started and cleaned-up by the zig CI code.
+        // Specifying the tigerbeetle binary is useful for running tests locally during development.
+        let tigerbeetle_bin = match std::env::var("TIGERBEETLE_BINARY") {
+            Ok(tigerbeetle_bin) => tigerbeetle_bin,
+            Err(_) => panic!(
+                "Set either the {} or TIGERBEETLE_BINARY environment variable to execute tests.",
+                port_env_var
+            ),
+        };
 
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-
         let database_name = format!("0_0.{label_new}.tigerbeetle");
-        let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
+        let database_path = format!("{}/{database_name}", work_dir);
 
-        if !Path::new(&format!("{}/{database_name}", work_dir)).try_exists()? {
-            let status = Command::new(tigerbeetle_bin.as_str())
-                .current_dir(work_dir)
-                .args([
-                    "format",
-                    "--replica-count=1",
-                    "--replica=0",
-                    "--cluster=0",
-                    database_name.as_str(),
-                ])
-                .status()?;
-            assert!(status.success());
+        if Path::new(&database_path).try_exists()? {
+            std::fs::remove_file(Path::new(&database_path))
+                .expect("could not remove old database file");
         }
+
+        let status = Command::new(tigerbeetle_bin.as_str())
+            .current_dir(work_dir)
+            .args([
+                "format",
+                "--replica-count=1",
+                "--replica=0",
+                "--cluster=0",
+                database_name.as_str(),
+            ])
+            .status()?;
+        assert!(status.success());
 
         let mut server = Command::new(tigerbeetle_bin.as_str())
             .current_dir(work_dir)
-            // magic address 0: tell us the port to use, shutdown when stdin closes
+            // Magic address 0: tell us the port to use, shutdown when stdin closes.
             .args(&["start", "--addresses=0", "--development", &database_name])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

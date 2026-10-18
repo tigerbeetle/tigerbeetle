@@ -33,7 +33,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         defer beetle_eviction_test.deinit(gpa);
         errdefer beetle_eviction_test.log_stderr();
 
-        try shell.env.put("TB_ADDRESS_TESTS", beetle_tests.port_str);
+        try shell.env.put("TB_ADDRESS", beetle_tests.port_str);
         try shell.env.put("TB_ADDRESS_EVICTION_TEST", beetle_eviction_test.port_str);
 
         try shell.exec("cargo test --all", .{});
