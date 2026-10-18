@@ -76,57 +76,24 @@ pub const TimeOS = struct {
     }
 
     fn monotonic_windows() u64 {
-        assert(is_windows);
+        comptime assert(is_windows);
         // Uses QueryPerformanceCounter() on windows due to it being the highest precision timer
         // available while also accounting for time spent suspended by default:
         //
         // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#remarks
-
-        // QPF need not be globally cached either as it ends up being a load from read-only memory
-        // mapped to all processed by the kernel called KUSER_SHARED_DATA (See "QpcFrequency")
-        //
-        // https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
-        // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
-        const qpc = stdx.windows.QueryPerformanceCounter();
-        const qpf = stdx.windows.QueryPerformanceFrequency();
-
-        // 10Mhz (1 qpc tick every 100ns) is a common QPF on modern systems.
-        // We can optimize towards this by converting to ns via a single multiply.
-        //
-        // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
-        const common_qpf = 10_000_000;
-        if (qpf == common_qpf) return qpc * (std.time.ns_per_s / common_qpf);
-
-        // Convert qpc to nanos using fixed point to avoid expensive extra divs and
-        // overflow.
-        const scale = (std.time.ns_per_s << 32) / qpf;
-        return @as(u64, @truncate((@as(u96, qpc) * scale) >> 32));
+        return stdx.os.windows.query_performance_counter_ns();
     }
 
     fn monotonic_darwin() u64 {
-        assert(is_darwin);
-        // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
+        comptime assert(is_darwin);
         //
         // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
-        const darwin = struct {
-            const mach_timebase_info_t = system.mach_timebase_info_data;
-            extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) system.kern_return_t;
-            extern "c" fn mach_continuous_time() u64;
-        };
-
-        // mach_timebase_info() called through libc already does global caching for us
-        //
-        // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
-        var info: darwin.mach_timebase_info_t = undefined;
-        if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
-
-        const now = darwin.mach_continuous_time();
-        return (now * info.numer) / info.denom;
+        return stdx.os.darwin.mach_continuous_time_ns();
     }
 
     fn monotonic_linux() u64 {
-        assert(is_linux);
+        comptime assert(is_linux);
         // The true monotonic clock on Linux is not in fact CLOCK_MONOTONIC:
         //
         // CLOCK_MONOTONIC excludes elapsed time while the system is suspended (e.g. VM migration).
@@ -135,9 +102,8 @@ pub const TimeOS = struct {
         //
         // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC, see
         // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
-        var ts: posix.timespec = undefined;
-        const rc = std.os.linux.clock_gettime(posix.CLOCK.BOOTTIME, &ts);
-        if (std.os.linux.errno(rc) != .SUCCESS) @panic("CLOCK_BOOTTIME required");
+        const ts = stdx.os.clock_gettime(.boottime) catch
+            @panic("CLOCK_BOOTTIME required");
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
@@ -155,24 +121,13 @@ pub const TimeOS = struct {
     }
 
     fn realtime_windows() i64 {
-        // TODO(zig): Maybe use `std.time.nanoTimestamp()`.
-        // https://github.com/ziglang/zig/pull/22871
-        assert(is_windows);
-        var ft: os.windows.FILETIME = undefined;
-        stdx.windows.GetSystemTimePreciseAsFileTime(&ft);
-        const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
-
-        // FileTime is in units of 100 nanoseconds
-        // and uses the NTFS/Windows epoch of 1601-01-01 instead of Unix Epoch 1970-01-01.
-        const epoch_adjust = std.time.epoch.windows * (std.time.ns_per_s / 100);
-        return (@as(i64, @bitCast(ft64)) + epoch_adjust) * 100;
+        comptime assert(is_windows);
+        return stdx.os.windows.get_system_time_precise_as_file_time_ns();
     }
 
     fn realtime_unix() i64 {
-        assert(is_darwin or is_linux);
-        var ts: posix.timespec = undefined;
-        const rc = system.clock_gettime(posix.CLOCK.REALTIME, &ts);
-        if (posix.errno(rc) != .SUCCESS) unreachable;
+        comptime assert(is_darwin or is_linux);
+        const ts = stdx.os.clock_gettime(.realtime) catch unreachable;
         return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
     }
 };
