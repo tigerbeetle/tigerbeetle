@@ -59,7 +59,10 @@ pub const IO = struct {
         errdefer posix.close(epoll_fd);
 
         const timer_create_result = linux.timerfd_create(
-            linux.timerfd_clockid_t.MONOTONIC,
+            // We must ensure to use the same time source as `time` (which is BOOTTIME) to match
+            // the expiry timestamps used in `timer_arm`. With BOOTTIME vs. MONOTONIC in particular,
+            // timeouts would diverge further and further whenever the system suspends.
+            linux.timerfd_clockid_t.BOOTTIME,
             .{ .CLOEXEC = true, .NONBLOCK = true },
         );
         const timer_fd: fd_t = switch (linux.errno(timer_create_result)) {
