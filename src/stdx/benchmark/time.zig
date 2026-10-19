@@ -10,9 +10,6 @@ const builtin = @import("builtin");
 const stdx = @import("../stdx.zig");
 
 const os = std.os;
-const posix = std.posix;
-const system = posix.system;
-const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;

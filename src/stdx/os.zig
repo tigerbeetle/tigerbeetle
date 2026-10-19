@@ -159,7 +159,6 @@ pub const darwin = struct {
 pub const windows = struct {
     const ntdll = std.os.windows.ntdll;
 
-    const TRUE: std.os.windows.BOOL = .TRUE;
     const FALSE: std.os.windows.BOOL = .FALSE;
 
     const FILETIME = std.os.windows.FILETIME;

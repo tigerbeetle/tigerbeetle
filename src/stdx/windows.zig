@@ -1,6 +1,5 @@
 const std = @import("std");
 const windows = std.os.windows;
-const assert = std.debug.assert;
 
 pub extern "kernel32" fn GetCommandLineW() callconv(.winapi) windows.LPWSTR;
 

@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);

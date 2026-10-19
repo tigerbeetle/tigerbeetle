@@ -4,8 +4,6 @@ const builtin = @import("builtin");
 const stdx = @import("./stdx.zig");
 
 const os = std.os;
-const posix = std.posix;
-const system = posix.system;
 const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
@@ -87,7 +85,8 @@ pub const TimeOS = struct {
                 // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
                 const ts = stdx.os.clock_gettime(.boottime) catch
                     @panic("CLOCK_BOOTTIME required");
-                break :b @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+                break :b @as(u64, @intCast(ts.sec)) * std.time.ns_per_s +
+                    @as(u64, @intCast(ts.nsec));
             }
             @compileError("unsupported OS");
         };
