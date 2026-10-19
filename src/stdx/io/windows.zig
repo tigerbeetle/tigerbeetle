@@ -41,7 +41,7 @@ pub const IO = struct {
     run_for_ns_active: bool = false,
 
     stats: common.Stats = .{},
-    cng_device: fd_t,
+    cng_device: stdx.os.windows.CNGDevice,
 
     pub fn init(entries: u12, flags: u32, io_std: ?std.Io) !IO {
         _ = entries;
@@ -50,8 +50,10 @@ pub const IO = struct {
         _ = try os.windows.WSAStartup(2, 2);
         errdefer os.windows.WSACleanup() catch unreachable;
 
-        const cng_device = get_cng_device();
-        errdefer os.windows.CloseHandle(cng_device);
+        var cng_device = stdx.os.windows.CNGDevice.open() catch |err| switch (err) {
+            error.CNGDeviceNotAvailable => @panic("cng device unavailable"),
+        };
+        errdefer cng_device.deinit();
 
         const iocp = try os.windows.CreateIoCompletionPort(
             os.windows.INVALID_HANDLE_VALUE,
@@ -69,9 +71,7 @@ pub const IO = struct {
         os.windows.CloseHandle(self.iocp);
         self.iocp = os.windows.INVALID_HANDLE_VALUE;
 
-        assert(self.cng_device != os.windows.INVALID_HANDLE_VALUE);
-        os.windows.CloseHandle(self.cng_device);
-        self.cng_device = os.windows.INVALID_HANDLE_VALUE;
+        self.cng_device.deinit();
 
         os.windows.WSACleanup() catch unreachable;
     }
@@ -1539,29 +1539,7 @@ pub const IO = struct {
     pub fn crypto_random_bytes(io: *IO, buffer: []u8) void {
         assert(buffer.len > 0);
         assert(buffer.len <= std.math.maxInt(u32));
-        assert(io.cng_device != os.windows.INVALID_HANDLE_VALUE);
-
-        const cng_device = io.cng_device;
-        var io_status_block: os.windows.IO_STATUS_BLOCK = undefined;
-        for (0..1_000) |_| {
-            const status = os.windows.ntdll.NtDeviceIoControlFile(
-                cng_device,
-                null,
-                null,
-                null,
-                &io_status_block,
-                os.windows.IOCTL.KSEC.GEN_RANDOM,
-                null,
-                0,
-                buffer.ptr,
-                @intCast(buffer.len),
-            );
-            switch (status) {
-                .SUCCESS => break,
-                .CANCELLED => continue,
-                else => @panic("crypto_random_bytes: entropy unavailable"),
-            }
-        }
+        io.cng_device.getrandom(buffer);
     }
 
     pub fn crypto_random_int(io: *IO, comptime T: type) T {
@@ -1599,39 +1577,6 @@ pub const IO = struct {
         os.windows.kernel32.Sleep(@intCast(milliseconds));
     }
 };
-
-fn get_cng_device() IO.fd_t {
-    var fd: IO.fd_t = undefined;
-
-    var io_status_block: os.windows.IO_STATUS_BLOCK = undefined;
-    const object_name = os.windows.UNICODE_STRING.init(
-        &.{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'C', 'N', 'G' },
-    );
-    for (0..1_000) |_| {
-        const status = os.windows.ntdll.NtOpenFile(
-            &fd,
-            .{
-                .STANDARD = .{ .SYNCHRONIZE = true },
-                .SPECIFIC = .{ .FILE = .{ .READ_DATA = true } },
-            },
-            &.{ .ObjectName = @constCast(&object_name) },
-            &io_status_block,
-            .VALID_FLAGS,
-            .{ .IO = .SYNCHRONOUS_NONALERT },
-        );
-
-        switch (status) {
-            .SUCCESS => {
-                return fd;
-            },
-            .CANCELLED => {
-                continue;
-            },
-            else => break,
-        }
-    }
-    @panic("get_cng_device: cng device unavailable");
-}
 
 // TODO: use posix.getsockoptError when fixed for windows in stdlib.
 fn getsockoptError(socket: posix.socket_t) IO.ConnectError!void {
