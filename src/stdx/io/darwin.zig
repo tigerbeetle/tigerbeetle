@@ -1238,11 +1238,7 @@ pub const IO = struct {
         assert(buffer.len > 0);
         assert(buffer.len <= std.math.maxInt(u32));
 
-        assert(builtin.link_libc);
-        assert(@TypeOf(posix.system.arc4random_buf) != void);
-
-        posix.system.arc4random_buf(buffer.ptr, buffer.len);
-        return;
+        return stdx.os.getrandom(buffer);
     }
 
     pub fn crypto_random_int(io: *IO, comptime T: type) T {

@@ -16,9 +16,10 @@
 //!
 //! Design:
 //! - Naming matches original syscalls, but abides by our naming conventions.
+//! - For cross-platform functionality, default to syscall name on Linux.
 //! - Signatures and semantics may be slightly adjusted for convenience. For example, we use UNIX
 //!   epoch Windows.
-//! - Avoid exposing platform specfic types like `std.posix.clockid_t` publicly.
+//! - Avoid exposing platform specific types like `std.posix.clockid_t` publicly.
 //! - But code is only opportunistically cross platform, anything non-trivial is caller's job to
 //!   unify.
 //! - Link to original OS documentation.
@@ -32,17 +33,18 @@ const builtin = @import("builtin");
 const posix = std.posix;
 const assert = std.debug.assert;
 
-const native_os = builtin.os.tag;
-const is_linux = native_os == .linux;
-const is_windows = native_os == .windows;
-const is_darwin = native_os.isDarwin();
+// Subset of Zig targets, supported by TigerBeetle.
+const native_os: enum { linux, darwin, windows } = switch (builtin.os.tag) {
+    .linux => .linux,
+    .windows => .windows,
+    else => |tag| if (tag.isDarwin()) .darwin else @compileError("unsupported os"),
+};
 
-const system = if (is_linux)
-    std.os.linux
-else if (is_darwin)
-    std.c
-else
-    void;
+const system = switch (native_os) {
+    .linux => std.os.linux,
+    .darwin => std.c,
+    .windows => void,
+};
 
 pub const ClockID = enum {
     realtime,
@@ -57,7 +59,7 @@ pub const TimeSpec = struct {
 /// https://man7.org/linux/man-pages/man3/clock_gettime.3.html
 /// https://manp.gs/mac/3/clock_gettime
 pub fn clock_gettime(comptime clock: ClockID) error{ClockUnavailable}!TimeSpec {
-    comptime assert(is_linux or is_darwin);
+    comptime assert(native_os == .linux or native_os == .darwin);
 
     const clock_id = switch (clock) {
         .boottime => posix.CLOCK.BOOTTIME,
@@ -74,6 +76,52 @@ pub fn clock_gettime(comptime clock: ClockID) error{ClockUnavailable}!TimeSpec {
         },
         else => return error.ClockUnavailable,
     }
+}
+
+pub fn getrandom(buffer: []u8) void {
+    comptime assert(native_os == .linux or native_os == .darwin);
+    assert(buffer.len > 0);
+    assert(buffer.len <= std.math.maxInt(u32));
+    switch (native_os) {
+        .linux => getrandom_linux(buffer),
+        .darwin => getrandom_darwin(buffer),
+        .windows => comptime unreachable,
+    }
+}
+
+/// https://man7.org/linux/man-pages/man2/getrandom.2.html
+fn getrandom_linux(buffer: []u8) void {
+    comptime assert(native_os == .linux);
+    var position: u32 = 0;
+    for (0..buffer.len) |_| {
+        const remaining = buffer[position..];
+        const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
+        switch (std.os.linux.errno(return_code)) {
+            .SUCCESS => {
+                assert(return_code <= std.math.maxInt(u32));
+                const bytes: u32 = @intCast(return_code);
+                position += bytes;
+                assert(bytes > 0);
+                if (position < buffer.len) continue;
+                assert(position == buffer.len);
+                break;
+            },
+            .INTR => {
+                continue;
+            },
+            else => @panic("crypto_random_bytes: entropy unavailable"),
+        }
+    } else @panic("crypto_random_bytes: entropy unavailable");
+}
+
+/// https://manp.gs/mac/3/arc4random_buf
+fn getrandom_darwin(buffer: []u8) void {
+    comptime assert(native_os == .darwin);
+    // Blessed be sane API design!
+    //
+    //    These functions are always successful, and
+    //    no return value is reserved to indicate an error.
+    std.c.arc4random_buf(buffer.ptr, buffer.len);
 }
 
 pub const darwin = struct {
@@ -94,14 +142,14 @@ pub const darwin = struct {
     // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
     // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
     pub fn mach_continuous_time_ns() u64 {
-        comptime assert(is_darwin);
+        comptime assert(native_os == .darwin);
         const info = timebase_info();
         const ticks = darwin.mach_continuous_time();
         return (ticks * info.numer) / info.denom;
     }
 
     pub fn mach_absolute_time_ns() u64 {
-        comptime assert(is_darwin);
+        comptime assert(native_os == .darwin);
         const info = timebase_info();
         const ticks = darwin.mach_absolute_time();
         return (ticks * info.numer) / info.denom;
@@ -134,7 +182,7 @@ pub const windows = struct {
     }
 
     pub fn query_performance_counter_ns() u64 {
-        comptime assert(is_windows);
+        comptime assert(native_os == .windows);
         const counter = QueryPerformanceCounter();
         // QPF need not be globally cached as it ends up being a load from read-only memory
         // mapped to all processed by the kernel called KUSER_SHARED_DATA (See "QpcFrequency")
