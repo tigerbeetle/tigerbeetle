@@ -238,26 +238,23 @@ pub const windows = struct {
             const object_name = UNICODE_STRING.init(
                 &.{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'C', 'N', 'G' },
             );
-            for (0..1_000) |_| {
-                const status = ntdll.NtOpenFile(
-                    &result.handle,
-                    .{
-                        .STANDARD = .{ .SYNCHRONIZE = true },
-                        .SPECIFIC = .{ .FILE = .{ .READ_DATA = true } },
-                    },
-                    &.{ .ObjectName = @constCast(&object_name) },
-                    &io_status_block,
-                    .VALID_FLAGS,
-                    .{ .IO = .SYNCHRONOUS_NONALERT },
-                );
+            const status = ntdll.NtOpenFile(
+                &result.handle,
+                .{
+                    .STANDARD = .{ .SYNCHRONIZE = true },
+                    .SPECIFIC = .{ .FILE = .{ .READ_DATA = true } },
+                },
+                &.{ .ObjectName = @constCast(&object_name) },
+                &io_status_block,
+                .VALID_FLAGS,
+                .{ .IO = .SYNCHRONOUS_NONALERT },
+            );
 
-                switch (status) {
-                    .SUCCESS => return result,
-                    .CANCELLED => continue,
-                    else => break,
-                }
+            switch (status) {
+                .SUCCESS => return result,
+                .CANCELLED => unreachable,
+                else => return error.CNGDeviceNotAvailable,
             }
-            return error.CNGDeviceNotAvailable;
         }
 
         pub fn deinit(cng: *CNGDevice) void {
@@ -273,24 +270,22 @@ pub const windows = struct {
 
             // https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/std/Io/Threaded.zig#L17013
             var io_status_block: IO_STATUS_BLOCK = undefined;
-            for (0..1_000) |_| {
-                const status = ntdll.NtDeviceIoControlFile(
-                    cng.handle,
-                    null,
-                    null,
-                    null,
-                    &io_status_block,
-                    IOCTL.KSEC.GEN_RANDOM,
-                    null,
-                    0,
-                    buffer.ptr,
-                    @intCast(buffer.len),
-                );
-                switch (status) {
-                    .SUCCESS => break,
-                    .CANCELLED => continue,
-                    else => @panic("getrandom: entropy unavailable"),
-                }
+            const status = ntdll.NtDeviceIoControlFile(
+                cng.handle,
+                null,
+                null,
+                null,
+                &io_status_block,
+                IOCTL.KSEC.GEN_RANDOM,
+                null,
+                0,
+                buffer.ptr,
+                @intCast(buffer.len),
+            );
+            switch (status) {
+                .SUCCESS => {},
+                .CANCELLED => unreachable,
+                else => @panic("getrandom: entropy unavailable"),
             }
         }
     };
