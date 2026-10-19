@@ -96,28 +96,21 @@ fn getrandom_linux(buffer: []u8) void {
     assert(buffer.len > 0);
     assert(buffer.len <= std.math.maxInt(u32));
 
-    var offset: u32 = 0;
+    var remaining: []u8 = buffer;
     // No fixed upper bound because of EINTR.
-    while (buffer.len - offset > 0) {
-        const remaining = buffer[offset..];
-        assert(remaining.len > 0);
-
+    while (remaining.len > 0) {
         const flags: u32 = 0;
         const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, flags);
 
-        const size: u32 = switch (std.os.linux.errno(return_code)) {
-            .SUCCESS => b: {
-                assert(return_code <= std.math.maxInt(u32));
-                break :b @intCast(return_code);
-            },
+        const size_filled = switch (std.os.linux.errno(return_code)) {
+            .SUCCESS => return_code,
             .INTR => continue,
             else => @panic("getrandom: entropy unavailable"),
         };
 
-        assert(size > 0);
-        assert(size <= remaining.len);
-        offset += size;
-        assert(offset <= buffer.len);
+        assert(size_filled > 0);
+        assert(size_filled <= remaining.len);
+        remaining = remaining[size_filled..];
     }
 }
 
