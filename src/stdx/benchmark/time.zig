@@ -31,7 +31,7 @@ pub fn benchmark_monotonic(self: *BenchmarkTime) Instant {
         if (is_windows) break :b stdx.os.windows.query_performance_counter_ns();
         if (is_darwin) break :b stdx.os.darwin.mach_absolute_time_ns();
         if (is_linux) {
-            const ts = stdx.os.clock_gettime(.monotonoic);
+            const ts = stdx.os.clock_gettime(.monotonic);
             break :b @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
         }
         @compileError("unsupported OS");
