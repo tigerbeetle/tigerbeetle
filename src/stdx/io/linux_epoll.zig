@@ -1159,28 +1159,7 @@ pub const IO = struct {
     }
 
     pub fn crypto_random_bytes(_: *IO, buffer: []u8) void {
-        assert(buffer.len > 0);
-        assert(buffer.len <= std.math.maxInt(u32));
-        var position: u32 = 0;
-        for (0..buffer.len) |_| {
-            const remaining = buffer[position..];
-            const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
-            switch (std.os.linux.errno(return_code)) {
-                .SUCCESS => {
-                    assert(return_code <= std.math.maxInt(u32));
-                    const bytes: u32 = @intCast(return_code);
-                    position += bytes;
-                    assert(bytes > 0);
-                    if (position < buffer.len) continue;
-                    assert(position == buffer.len);
-                    break;
-                },
-                .INTR => {
-                    continue;
-                },
-                else => @panic("crypto_random_bytes: entropy unavailable"),
-            }
-        } else @panic("crypto_random_bytes: entropy unavailable");
+        stdx.os.getrandom(buffer);
     }
 
     pub fn crypto_random_int(io: *IO, comptime T: type) T {

@@ -30,6 +30,7 @@ pub const aegis = @import("vendored/aegis.zig");
 pub const fuzz = @import("testing/fuzz.zig");
 pub const Flags = @import("flags.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
+pub const os = @import("os.zig");
 pub const posix = @import("posix.zig");
 pub const Shell = @import("shell.zig");
 pub const unshare = @import("unshare.zig");

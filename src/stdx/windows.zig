@@ -1,10 +1,5 @@
 const std = @import("std");
 const windows = std.os.windows;
-const assert = std.debug.assert;
-
-pub extern "kernel32" fn GetSystemTimePreciseAsFileTime(
-    lpFileTime: *windows.FILETIME,
-) callconv(.winapi) void;
 
 pub extern "kernel32" fn GetCommandLineW() callconv(.winapi) windows.LPWSTR;
 
@@ -449,18 +444,6 @@ pub fn SetFileCompletionNotificationModes(handle: windows.HANDLE, flags: windows
             else => |err| unexpectedError(err),
         };
     }
-}
-
-pub fn QueryPerformanceFrequency() u64 {
-    var result: windows.LARGE_INTEGER = undefined;
-    assert(windows.ntdll.RtlQueryPerformanceFrequency(&result) != FALSE);
-    return @bitCast(result);
-}
-
-pub fn QueryPerformanceCounter() u64 {
-    var result: windows.LARGE_INTEGER = undefined;
-    assert(windows.ntdll.RtlQueryPerformanceCounter(&result) != FALSE);
-    return @bitCast(result);
 }
 
 /// Unlike `unexpectedError`, doesn't format the error code as a `Win32Error` tag name, which
