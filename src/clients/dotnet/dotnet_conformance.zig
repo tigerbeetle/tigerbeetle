@@ -368,12 +368,13 @@ fn emit_invocation(
                 try printer.print("Array.Empty<UInt128>()){s}\n", .{options.suffix});
                 return;
             }
-            try printer.write("new UInt128[] { ");
-            for (call.arguments, 0..) |argument, index| {
-                if (index > 0) try printer.write(", ");
-                try printer.write(try render_id(printer, argument));
+            try printer.write("new UInt128[] {\n");
+            printer.indent();
+            for (call.arguments) |argument| {
+                try printer.print_indented("{s},", .{try render_id(printer, argument)});
             }
-            try printer.print(" }}){s}\n", .{options.suffix});
+            printer.dedent();
+            try printer.print_indented("}}){s}", .{options.suffix});
         },
         .get_account_transfers, .get_account_balances, .query_accounts, .query_transfers => {
             assert(call.arguments.len == 1);
@@ -481,18 +482,20 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
         .fail => |failure| switch (failure.action) {
             .call => |call| {
                 const client_error = failure.client_error orelse unreachable;
-                const prefix = try printer.string_alloc("{s}<{s}>(() => ", .{
+                try printer.print_indented("{s}<{s}>(", .{
                     switch (variant) {
                         .synchronous => "Assert.ThrowsException",
                         .asynchronous => "await Assert.ThrowsExceptionAsync",
                     },
                     dotnet_exception_name(client_error),
                 });
+                printer.indent();
                 try emit_call(printer, call, variant, .{
-                    .prefix = prefix,
+                    .prefix = "() => ",
                     .suffix = ");",
                     .awaited = false,
                 });
+                printer.dedent();
             },
             .create_client => |arguments| {
                 try emit_create_client(printer, arguments, .{ .failure = failure.client_error });
@@ -591,11 +594,7 @@ fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
 
 fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
     if (fits_ulong(text)) return text;
-    const value = std.fmt.parseInt(u128, text, 10) catch unreachable;
-    return printer.string_alloc("new UInt128({d}UL, {d}UL)", .{
-        @as(u64, @truncate(value >> 64)),
-        @as(u64, @truncate(value)),
-    });
+    return printer.string_alloc("UInt128.Parse(\"{s}\")", .{text});
 }
 
 fn fits_ulong(text: []const u8) bool {

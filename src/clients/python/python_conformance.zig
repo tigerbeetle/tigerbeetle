@@ -384,9 +384,11 @@ fn emit_record(
     switch (record.type) {
         .AccountFilter, .QueryFilter => {
             for (filter_fields(record.type)) |field_name| {
-                const value = if (find_field(record, field_name)) |field|
-                    try render_typed_value(printer, field.field, field.value)
-                else if (std.mem.eql(u8, field_name, "flags"))
+                if (find_field(record, field_name)) |field| {
+                    try emit_field(printer, field);
+                    continue;
+                }
+                const value = if (std.mem.eql(u8, field_name, "flags"))
                     try printer.string_alloc("tb.{s}.NONE", .{
                         @tagName(flags_type(record.type)),
                     })
@@ -396,14 +398,34 @@ fn emit_record(
             }
         },
         else => {
-            for (record.fields) |field| {
-                const value = try render_typed_value(printer, field.field, field.value);
-                try printer.print_indented("{s}={s},", .{ field.field.name, value });
-            }
+            for (record.fields) |field| try emit_field(printer, field);
         },
     }
     printer.dedent();
     try printer.print_indented("){s}", .{options.suffix});
+}
+
+fn emit_field(printer: *Printer, field: ast.FieldValue) !void {
+    if (field.value == .record and
+        ast.Record.is_flags(field.value.record.type) and
+        field.value.record.fields.len > 1)
+    {
+        try emit_flags(printer, field.field.name, field.value.record);
+    } else {
+        const value = try render_typed_value(printer, field.field, field.value);
+        try printer.print_indented("{s}={s},", .{ field.field.name, value });
+    }
+}
+
+fn emit_flags(printer: *Printer, name: []const u8, flags: ast.Record) !void {
+    try printer.print_indented("{s}=(", .{name});
+    printer.indent();
+    try printer.write_indented(try render_flag(printer, flags.type, flags.fields[0]));
+    for (flags.fields[1..]) |flag| {
+        try printer.print_indented("| {s}", .{try render_flag(printer, flags.type, flag)});
+    }
+    printer.dedent();
+    try printer.write_indented("),");
 }
 
 fn emit_assertion(
@@ -567,14 +589,18 @@ fn render_flags(printer: *Printer, record: ast.Record) ![]const u8 {
     }
     var text = std.Io.Writer.Allocating.init(printer.arena.allocator());
     for (record.fields, 0..) |field, index| {
-        assert(field.value == .boolean and field.value.boolean);
         if (index > 0) try text.writer.writeAll(" | ");
-        try text.writer.print("tb.{s}.{s}", .{
-            @tagName(record.type),
-            try printer.to_case_alloc(.UPPER_CASE, field.field.name),
-        });
+        try text.writer.writeAll(try render_flag(printer, record.type, field));
     }
     return text.written();
+}
+
+fn render_flag(printer: *Printer, record_type: ast.Record.Type, flag: ast.FieldValue) ![]const u8 {
+    assert(flag.value == .boolean and flag.value.boolean);
+    return printer.string_alloc("tb.{s}.{s}", .{
+        @tagName(record_type),
+        try printer.to_case_alloc(.UPPER_CASE, flag.field.name),
+    });
 }
 
 fn render_field_access(

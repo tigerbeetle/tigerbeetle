@@ -47,6 +47,10 @@ public class ConformanceTest {
         client.close();
     }
 
+    private static byte[] u128(final String value) {
+        return UInt128.asBytes(new BigInteger(value));
+    }
+
     /////////////////
     // Sync client
     /////////////////
@@ -56,7 +60,7 @@ public class ConformanceTest {
     @Test
     public void testCreateClientCreatesAClientFromValidArguments()
             throws Exception {
-        new Client(UInt128.asBytes(0L), new String[] {server.getAddress()}).close();
+        new Client(u128("0"), new String[] {server.getAddress()}).close();
     }
 
     @Test
@@ -65,7 +69,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"not-an-address"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -76,7 +80,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"127.0.0.1:99999"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -87,7 +91,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
         assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
     }
@@ -98,7 +102,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {""}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -109,7 +113,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {",,"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -168,7 +172,7 @@ public class ConformanceTest {
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
@@ -236,7 +240,7 @@ public class ConformanceTest {
             throws Exception {
         final var resultsBatch = new AccountBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         final var results = client.createAccounts(resultsBatch);
@@ -250,7 +254,7 @@ public class ConformanceTest {
             throws Exception {
         final var resultsBatch = new AccountBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         final var results = client.createAccounts(resultsBatch);
@@ -398,7 +402,7 @@ public class ConformanceTest {
         assertEquals(1, accounts.getLength());
         assertTrue(accounts.next());
         assertArrayEquals(accountId, accounts.getId());
-        assertArrayEquals(UInt128.asBytes(0L), accounts.getUserData128());
+        assertArrayEquals(u128("0"), accounts.getUserData128());
         assertEquals(0L, accounts.getUserData64());
         assertEquals(0, accounts.getUserData32());
         assertEquals(1, accounts.getLedger());
@@ -605,7 +609,7 @@ public class ConformanceTest {
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -736,7 +740,7 @@ public class ConformanceTest {
         }
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -767,7 +771,7 @@ public class ConformanceTest {
         }
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -794,7 +798,7 @@ public class ConformanceTest {
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
-        resultsBatch.setDebitAccountId(UInt128.asBytes(0L));
+        resultsBatch.setDebitAccountId(u128("0"));
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
@@ -825,7 +829,7 @@ public class ConformanceTest {
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
-        resultsBatch.setDebitAccountId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setDebitAccountId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
@@ -852,7 +856,7 @@ public class ConformanceTest {
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
         resultsBatch.setDebitAccountId(debitAccountId);
-        resultsBatch.setCreditAccountId(UInt128.asBytes(0L));
+        resultsBatch.setCreditAccountId(u128("0"));
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
@@ -883,7 +887,7 @@ public class ConformanceTest {
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
         resultsBatch.setDebitAccountId(debitAccountId);
-        resultsBatch.setCreditAccountId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setCreditAccountId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
@@ -2405,7 +2409,7 @@ public class ConformanceTest {
     public void testGetAccountTransfersReturnsNoTransfersForAZeroAccountId()
             throws Exception {
         final var transfersFilter = new AccountFilter();
-        transfersFilter.setAccountId(UInt128.asBytes(0L));
+        transfersFilter.setAccountId(u128("0"));
         transfersFilter.setLimit(10);
         transfersFilter.setDebits(true);
         transfersFilter.setCredits(true);
@@ -3907,7 +3911,7 @@ public class ConformanceTest {
     public void testGetAccountBalancesReturnsNoBalancesForAZeroAccountId()
             throws Exception {
         final var balancesFilter = new AccountFilter();
-        balancesFilter.setAccountId(UInt128.asBytes(0L));
+        balancesFilter.setAccountId(u128("0"));
         balancesFilter.setLimit(10);
         balancesFilter.setDebits(true);
         balancesFilter.setCredits(true);
@@ -5455,7 +5459,7 @@ public class ConformanceTest {
         assertArrayEquals(accountBId, transfers1.getDebitAccountId());
         assertArrayEquals(accountAId, transfers1.getCreditAccountId());
         assertEquals(BigInteger.valueOf(50L), transfers1.getAmount());
-        assertArrayEquals(UInt128.asBytes(0L), transfers1.getUserData128());
+        assertArrayEquals(u128("0"), transfers1.getUserData128());
         assertEquals(0L, transfers1.getUserData64());
         assertEquals(0, transfers1.getUserData32());
         assertEquals(1, transfers1.getCode());
@@ -5834,7 +5838,7 @@ public class ConformanceTest {
     public void testUint128RangeAcceptsTheMaximumU128()
             throws Exception {
         final var accountsBatch = new IdBatch(1);
-        accountsBatch.add(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        accountsBatch.add(u128("340282366920938463463374607431768211455"));
         final var accounts = client.lookupAccounts(accountsBatch);
         assertEquals(0, accounts.getLength());
     }
@@ -6073,7 +6077,7 @@ public class ConformanceTest {
     @Test
     public void testCreateClientCreatesAClientFromValidArgumentsAsync()
             throws Exception {
-        new Client(UInt128.asBytes(0L), new String[] {server.getAddress()}).close();
+        new Client(u128("0"), new String[] {server.getAddress()}).close();
     }
 
     @Test
@@ -6082,7 +6086,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"not-an-address"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -6093,7 +6097,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"127.0.0.1:99999"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -6104,7 +6108,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
         assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
     }
@@ -6115,7 +6119,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {""}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -6126,7 +6130,7 @@ public class ConformanceTest {
         final var exception = assertThrows(
                 InitializationException.class,
                 () -> new Client(
-                        UInt128.asBytes(0L),
+                        u128("0"),
                         new String[] {",,"}));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
@@ -6185,7 +6189,7 @@ public class ConformanceTest {
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
@@ -6253,7 +6257,7 @@ public class ConformanceTest {
             throws Exception {
         final var resultsBatch = new AccountBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         final var results = client.createAccountsAsync(resultsBatch).get();
@@ -6267,7 +6271,7 @@ public class ConformanceTest {
             throws Exception {
         final var resultsBatch = new AccountBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         final var results = client.createAccountsAsync(resultsBatch).get();
@@ -6415,7 +6419,7 @@ public class ConformanceTest {
         assertEquals(1, accounts.getLength());
         assertTrue(accounts.next());
         assertArrayEquals(accountId, accounts.getId());
-        assertArrayEquals(UInt128.asBytes(0L), accounts.getUserData128());
+        assertArrayEquals(u128("0"), accounts.getUserData128());
         assertEquals(0L, accounts.getUserData64());
         assertEquals(0, accounts.getUserData32());
         assertEquals(1, accounts.getLedger());
@@ -6622,7 +6626,7 @@ public class ConformanceTest {
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -6753,7 +6757,7 @@ public class ConformanceTest {
         }
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(0L));
+        resultsBatch.setId(u128("0"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -6784,7 +6788,7 @@ public class ConformanceTest {
         }
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
-        resultsBatch.setId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setDebitAccountId(debitAccountId);
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
@@ -6811,7 +6815,7 @@ public class ConformanceTest {
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
-        resultsBatch.setDebitAccountId(UInt128.asBytes(0L));
+        resultsBatch.setDebitAccountId(u128("0"));
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
@@ -6842,7 +6846,7 @@ public class ConformanceTest {
         final var resultsBatch = new TransferBatch(1);
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
-        resultsBatch.setDebitAccountId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setDebitAccountId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setCreditAccountId(creditAccountId);
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
@@ -6869,7 +6873,7 @@ public class ConformanceTest {
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
         resultsBatch.setDebitAccountId(debitAccountId);
-        resultsBatch.setCreditAccountId(UInt128.asBytes(0L));
+        resultsBatch.setCreditAccountId(u128("0"));
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
@@ -6900,7 +6904,7 @@ public class ConformanceTest {
         resultsBatch.add();
         resultsBatch.setId(UInt128.id());
         resultsBatch.setDebitAccountId(debitAccountId);
-        resultsBatch.setCreditAccountId(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        resultsBatch.setCreditAccountId(u128("340282366920938463463374607431768211455"));
         resultsBatch.setAmount(BigInteger.valueOf(10L));
         resultsBatch.setLedger(1);
         resultsBatch.setCode(1);
@@ -8422,7 +8426,7 @@ public class ConformanceTest {
     public void testGetAccountTransfersReturnsNoTransfersForAZeroAccountIdAsync()
             throws Exception {
         final var transfersFilter = new AccountFilter();
-        transfersFilter.setAccountId(UInt128.asBytes(0L));
+        transfersFilter.setAccountId(u128("0"));
         transfersFilter.setLimit(10);
         transfersFilter.setDebits(true);
         transfersFilter.setCredits(true);
@@ -9930,7 +9934,7 @@ public class ConformanceTest {
     public void testGetAccountBalancesReturnsNoBalancesForAZeroAccountIdAsync()
             throws Exception {
         final var balancesFilter = new AccountFilter();
-        balancesFilter.setAccountId(UInt128.asBytes(0L));
+        balancesFilter.setAccountId(u128("0"));
         balancesFilter.setLimit(10);
         balancesFilter.setDebits(true);
         balancesFilter.setCredits(true);
@@ -11496,7 +11500,7 @@ public class ConformanceTest {
         assertArrayEquals(accountBId, transfers1.getDebitAccountId());
         assertArrayEquals(accountAId, transfers1.getCreditAccountId());
         assertEquals(BigInteger.valueOf(50L), transfers1.getAmount());
-        assertArrayEquals(UInt128.asBytes(0L), transfers1.getUserData128());
+        assertArrayEquals(u128("0"), transfers1.getUserData128());
         assertEquals(0L, transfers1.getUserData64());
         assertEquals(0, transfers1.getUserData32());
         assertEquals(1, transfers1.getCode());
@@ -11875,7 +11879,7 @@ public class ConformanceTest {
     public void testUint128RangeAcceptsTheMaximumU128Async()
             throws Exception {
         final var accountsBatch = new IdBatch(1);
-        accountsBatch.add(UInt128.asBytes(new BigInteger("340282366920938463463374607431768211455")));
+        accountsBatch.add(u128("340282366920938463463374607431768211455"));
         final var accounts = client.lookupAccountsAsync(accountsBatch).get();
         assertEquals(0, accounts.getLength());
     }
