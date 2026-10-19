@@ -92,6 +92,10 @@ fn emit(printer: *Printer) !void {
         \\        client.close();
         \\    }
         \\
+        \\    private static byte[] u128(final String value) {
+        \\        return UInt128.asBytes(new BigInteger(value));
+        \\    }
+        \\
     );
     for (std.enums.values(ClientVariant)) |variant| {
         try printer.write_empty_line();
@@ -1037,11 +1041,7 @@ fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
 }
 
 fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
-    const value = std.fmt.parseInt(u128, text, 10) catch unreachable;
-    if (value <= std.math.maxInt(u64)) {
-        return printer.string_alloc("UInt128.asBytes({d}L)", .{value});
-    }
-    return printer.string_alloc("UInt128.asBytes(new BigInteger(\"{d}\"))", .{value});
+    return printer.string_alloc("u128(\"{s}\")", .{text});
 }
 
 fn render_big_integer(printer: *Printer, text: []const u8) ![]const u8 {

@@ -36,6 +36,7 @@ fn emit(printer: *Printer) !void {
         \\##               Do not manually modify.                ##
         \\##########################################################
         \\
+        \\require "tigerbeetle/tb"
         \\require_relative "tiger_beetle_integration_test"
         \\
         \\class TestConformance < TigerBeetleIntegrationTest
@@ -88,15 +89,15 @@ fn emit_create_client(
     };
     switch (outcome) {
         .success => try printer.print_indented(
-            "TigerBeetle::Client.new(cluster_id: {s}, replica_addresses: {s}).close",
+            "TB::Client.new(cluster_id: {s}, replica_addresses: {s}).close",
             .{ arguments.cluster_id, replica_addresses },
         ),
         .failure => |client_error| {
             const error_class: []const u8, const message: ?[]const u8 =
                 if (client_error) |expected| switch (expected) {
-                    .address_invalid => .{ "TigerBeetle::InitError", "Init error: address_invalid" },
+                    .address_invalid => .{ "TB::InitError", "Init error: address_invalid" },
                     .address_limit_exceeded => .{
-                        "TigerBeetle::InitError",
+                        "TB::InitError",
                         "Init error: address_limit_exceeded",
                     },
                     .cluster_id_invalid => .{
@@ -110,7 +111,7 @@ fn emit_create_client(
                 error_class,
             });
             printer.indent();
-            try printer.write_indented("TigerBeetle::Client.new(");
+            try printer.write_indented("TB::Client.new(");
             printer.indent();
             try printer.print_indented("cluster_id: {s},", .{arguments.cluster_id});
             try printer.print_indented("replica_addresses: {s}", .{replica_addresses});
@@ -156,7 +157,7 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
             try printer.print_indented("sleep(0.001) if (index % {d}).zero?", .{
                 ast.ids_between_sleeps,
             });
-            try printer.write_indented("TigerBeetle.id");
+            try printer.write_indented("TB.id");
             printer.dedent();
             try printer.write_indented("end");
         },
@@ -263,12 +264,12 @@ fn emit_record(
     },
 ) !void {
     if (record.fields.len == 0) {
-        try printer.print_indented("{s}TigerBeetle::{s}.new{s}", .{
+        try printer.print_indented("{s}TB::{s}.new{s}", .{
             options.prefix, @tagName(record.type), options.suffix,
         });
         return;
     }
-    try printer.print_indented("{s}TigerBeetle::{s}.new(", .{
+    try printer.print_indented("{s}TB::{s}.new(", .{
         options.prefix, @tagName(record.type),
     });
     printer.indent();
@@ -339,7 +340,7 @@ fn emit_assertion(
         .fail => |failure| switch (failure.action) {
             .call => |call| {
                 if (failure.client_error) |client_error| {
-                    try printer.print_indented("assert_raises(TigerBeetle::{s}) do", .{
+                    try printer.print_indented("assert_raises(TB::{s}) do", .{
                         ruby_error_name(client_error),
                     });
                 } else {
@@ -401,7 +402,7 @@ fn render_expression(
     expression: ast.Expression,
 ) std.mem.Allocator.Error![]const u8 {
     switch (expression) {
-        .generate_id => return "TigerBeetle.id",
+        .generate_id => return "TB.id",
         .call, .generate_ids => unreachable,
         .record => |record| switch (record.type) {
             .U128 => {
@@ -452,7 +453,7 @@ fn render_flags(
     continuation_indent_level: u32,
 ) ![]const u8 {
     if (record.fields.len == 0) {
-        return printer.string_alloc("TigerBeetle::{s}::NONE", .{@tagName(record.type)});
+        return printer.string_alloc("TB::{s}::NONE", .{@tagName(record.type)});
     }
     var text = std.Io.Writer.Allocating.init(printer.arena.allocator());
     for (record.fields, 0..) |field, index| {
@@ -462,7 +463,7 @@ fn render_flags(
             try text.writer.writeAll(" |\n");
             try text.writer.splatByteAll(' ', width);
         }
-        try text.writer.print("TigerBeetle::{s}::{s}", .{
+        try text.writer.print("TB::{s}::{s}", .{
             @tagName(record.type), try printer.to_case_alloc(.UPPER_CASE, field.field.name),
         });
     }
@@ -477,7 +478,7 @@ fn render_typed_value(
 ) ![]const u8 {
     switch (value) {
         .enum_literal => |literal| {
-            return printer.string_alloc("TigerBeetle::{s}::{s}", .{
+            return printer.string_alloc("TB::{s}::{s}", .{
                 field.type.enum_name,
                 try printer.to_case_alloc(.UPPER_CASE, literal),
             });

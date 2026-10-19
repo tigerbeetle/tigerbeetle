@@ -293,7 +293,10 @@ def test_create_accounts_rejects_mutually_exclusive_flags(client):
                 id=tb.id(),
                 ledger=1,
                 code=1,
-                flags=tb.AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS | tb.AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS,
+                flags=(
+                    tb.AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS
+                    | tb.AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS
+                ),
             ),
         ]
     )
@@ -1021,7 +1024,10 @@ def test_create_transfers_rejects_mutually_exclusive_flags(client):
                 amount=10,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.POST_PENDING_TRANSFER | tb.TransferFlags.VOID_PENDING_TRANSFER,
+                flags=(
+                    tb.TransferFlags.POST_PENDING_TRANSFER
+                    | tb.TransferFlags.VOID_PENDING_TRANSFER
+                ),
             ),
         ]
     )
@@ -1657,7 +1663,10 @@ def test_get_account_transfers_returns_debit_and_credit_transfers_for_an_account
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 2
@@ -1715,7 +1724,10 @@ def test_get_account_transfers_returns_transfers_with_the_timestamps_of_their_cr
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 2
@@ -1899,7 +1911,11 @@ def test_get_account_transfers_returns_transfers_in_reverse_order_with_the_rever
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -1971,7 +1987,10 @@ def test_get_account_transfers_returns_only_debit_transfers_in_reverse_order(cli
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -2043,7 +2062,10 @@ def test_get_account_transfers_returns_only_credit_transfers_in_reverse_order(cl
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -2101,7 +2123,10 @@ def test_get_account_transfers_filters_transfers_by_code(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 1
@@ -2165,7 +2190,10 @@ def test_get_account_transfers_filters_transfers_by_user_data(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 1
@@ -2230,7 +2258,10 @@ def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cursor(c
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_1) == 2
@@ -2250,7 +2281,10 @@ def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cursor(c
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_2) == 1
@@ -2268,7 +2302,10 @@ def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cursor(c
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert page_3 == []
@@ -2331,7 +2368,11 @@ def test_get_account_transfers_pages_through_reversed_transfers_with_a_timestamp
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_1) == 2
@@ -2351,7 +2392,11 @@ def test_get_account_transfers_pages_through_reversed_transfers_with_a_timestamp
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_2) == 1
@@ -2369,7 +2414,11 @@ def test_get_account_transfers_pages_through_reversed_transfers_with_a_timestamp
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert page_3 == []
@@ -2385,7 +2434,10 @@ def test_get_account_transfers_returns_no_transfers_for_an_unused_account(client
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2401,7 +2453,10 @@ def test_get_account_transfers_returns_no_transfers_for_a_zero_account_id(client
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2461,7 +2516,10 @@ def test_get_account_transfers_returns_no_transfers_for_a_zero_limit(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=0,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2505,7 +2563,10 @@ def test_get_account_transfers_returns_no_transfers_when_the_timestamp_range_is_
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     transfer = matched[0]
@@ -2520,7 +2581,10 @@ def test_get_account_transfers_returns_no_transfers_when_the_timestamp_range_is_
             timestamp_min=transfer_timestamp + 1,
             timestamp_max=transfer_timestamp - 1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2564,7 +2628,10 @@ def test_get_account_transfers_returns_no_transfers_for_a_timestamp_minimum_of_u
             timestamp_min=18446744073709551615,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2608,7 +2675,10 @@ def test_get_account_transfers_returns_no_transfers_for_a_timestamp_maximum_of_u
             timestamp_min=0,
             timestamp_max=18446744073709551615,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2652,7 +2722,10 @@ def test_get_account_transfers_returns_no_transfers_for_an_inverted_timestamp_ra
             timestamp_min=18446744073709551614,
             timestamp_max=1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -2713,7 +2786,10 @@ def test_get_account_transfers_fails_when_the_limit_is_too_large(client):
                 timestamp_min=0,
                 timestamp_max=0,
                 limit=10000,
-                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+                flags=(
+                    tb.AccountFilterFlags.DEBITS
+                    | tb.AccountFilterFlags.CREDITS
+                ),
             )
         )
 
@@ -2767,7 +2843,10 @@ def test_get_account_balances_returns_a_balance_per_transfer_for_a_history_accou
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 2
@@ -2817,7 +2896,10 @@ def test_get_account_balances_returns_pending_balances_for_a_history_account(cli
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 1
@@ -2900,7 +2982,10 @@ def test_get_account_balances_pairs_each_balance_with_the_transfer_that_produced
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 4
@@ -2918,7 +3003,10 @@ def test_get_account_balances_pairs_each_balance_with_the_transfer_that_produced
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 4
@@ -3221,7 +3309,10 @@ def test_get_account_balances_pairs_debit_balances_with_debit_transfers_in_rever
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -3237,7 +3328,10 @@ def test_get_account_balances_pairs_debit_balances_with_debit_transfers_in_rever
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -3324,7 +3418,10 @@ def test_get_account_balances_pairs_credit_balances_with_credit_transfers_in_rev
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -3340,7 +3437,10 @@ def test_get_account_balances_pairs_credit_balances_with_credit_transfers_in_rev
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -3403,7 +3503,11 @@ def test_get_account_balances_returns_balances_in_reverse_order_with_the_reverse
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -3486,7 +3590,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_in_reverse_or
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 4
@@ -3504,7 +3612,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_in_reverse_or
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 4
@@ -3585,7 +3697,10 @@ def test_get_account_balances_pages_through_balances_with_a_timestamp_cursor(cli
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_1) == 2
@@ -3605,7 +3720,10 @@ def test_get_account_balances_pages_through_balances_with_a_timestamp_cursor(cli
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_2) == 1
@@ -3623,7 +3741,10 @@ def test_get_account_balances_pages_through_balances_with_a_timestamp_cursor(cli
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert page_3 == []
@@ -3687,7 +3808,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers_page_1) == 2
@@ -3703,7 +3827,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances_page_1) == 2
@@ -3728,7 +3855,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers_page_2) == 1
@@ -3743,7 +3873,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances_page_2) == 1
@@ -3763,7 +3896,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers_page_3 == []
@@ -3777,7 +3913,10 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_pages(
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances_page_3 == []
@@ -3838,7 +3977,11 @@ def test_get_account_balances_pages_through_reversed_balances_with_a_timestamp_c
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_1) == 2
@@ -3858,7 +4001,11 @@ def test_get_account_balances_pages_through_reversed_balances_with_a_timestamp_c
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_2) == 1
@@ -3876,7 +4023,11 @@ def test_get_account_balances_pages_through_reversed_balances_with_a_timestamp_c
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert page_3 == []
@@ -3940,7 +4091,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers_page_1) == 2
@@ -3956,7 +4111,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances_page_1) == 2
@@ -3981,7 +4140,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers_page_2) == 1
@@ -3996,7 +4159,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances_page_2) == 1
@@ -4016,7 +4183,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert transfers_page_3 == []
@@ -4030,7 +4201,11 @@ def test_get_account_balances_pairs_each_balance_with_its_transfer_across_revers
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert balances_page_3 == []
@@ -4074,7 +4249,10 @@ def test_get_account_balances_returns_no_balances_without_the_history_flag(clien
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4101,7 +4279,10 @@ def test_get_account_balances_returns_no_balances_for_an_account_with_no_transfe
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4117,7 +4298,10 @@ def test_get_account_balances_returns_no_balances_for_a_zero_account_id(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4178,7 +4362,10 @@ def test_get_account_balances_returns_no_balances_for_a_zero_limit(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=0,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4223,7 +4410,10 @@ def test_get_account_balances_returns_no_balances_when_the_timestamp_range_is_in
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     balance = matched[0]
@@ -4238,7 +4428,10 @@ def test_get_account_balances_returns_no_balances_when_the_timestamp_range_is_in
             timestamp_min=balance_timestamp + 1,
             timestamp_max=balance_timestamp - 1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4283,7 +4476,10 @@ def test_get_account_balances_returns_no_balances_for_a_timestamp_minimum_of_u64
             timestamp_min=18446744073709551615,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4328,7 +4524,10 @@ def test_get_account_balances_returns_no_balances_for_a_timestamp_maximum_of_u64
             timestamp_min=0,
             timestamp_max=18446744073709551615,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4373,7 +4572,10 @@ def test_get_account_balances_returns_no_balances_for_an_inverted_timestamp_rang
             timestamp_min=18446744073709551614,
             timestamp_max=1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -4435,7 +4637,10 @@ def test_get_account_balances_fails_when_the_limit_is_too_large(client):
                 timestamp_min=0,
                 timestamp_max=0,
                 limit=10000,
-                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+                flags=(
+                    tb.AccountFilterFlags.DEBITS
+                    | tb.AccountFilterFlags.CREDITS
+                ),
             )
         )
 
@@ -6114,7 +6319,11 @@ def test_closing_transfer_closes_both_accounts_with_a_pending_closing_transfer(c
                 amount=0,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.PENDING | tb.TransferFlags.CLOSING_DEBIT | tb.TransferFlags.CLOSING_CREDIT,
+                flags=(
+                    tb.TransferFlags.PENDING
+                    | tb.TransferFlags.CLOSING_DEBIT
+                    | tb.TransferFlags.CLOSING_CREDIT
+                ),
             ),
         ]
     )
@@ -6156,7 +6365,11 @@ def test_closing_transfer_reopens_both_accounts_when_the_closing_transfer_is_voi
                 amount=0,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.PENDING | tb.TransferFlags.CLOSING_DEBIT | tb.TransferFlags.CLOSING_CREDIT,
+                flags=(
+                    tb.TransferFlags.PENDING
+                    | tb.TransferFlags.CLOSING_DEBIT
+                    | tb.TransferFlags.CLOSING_CREDIT
+                ),
             ),
         ]
     )
@@ -6789,7 +7002,10 @@ async def test_create_accounts_rejects_mutually_exclusive_flags_async(client):
                 id=tb.id(),
                 ledger=1,
                 code=1,
-                flags=tb.AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS | tb.AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS,
+                flags=(
+                    tb.AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS
+                    | tb.AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS
+                ),
             ),
         ]
     )
@@ -7544,7 +7760,10 @@ async def test_create_transfers_rejects_mutually_exclusive_flags_async(client):
                 amount=10,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.POST_PENDING_TRANSFER | tb.TransferFlags.VOID_PENDING_TRANSFER,
+                flags=(
+                    tb.TransferFlags.POST_PENDING_TRANSFER
+                    | tb.TransferFlags.VOID_PENDING_TRANSFER
+                ),
             ),
         ]
     )
@@ -8197,7 +8416,10 @@ async def test_get_account_transfers_returns_debit_and_credit_transfers_for_an_a
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 2
@@ -8256,7 +8478,10 @@ async def test_get_account_transfers_returns_transfers_with_the_timestamps_of_th
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 2
@@ -8443,7 +8668,11 @@ async def test_get_account_transfers_returns_transfers_in_reverse_order_with_the
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -8516,7 +8745,10 @@ async def test_get_account_transfers_returns_only_debit_transfers_in_reverse_ord
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -8589,7 +8821,10 @@ async def test_get_account_transfers_returns_only_credit_transfers_in_reverse_or
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -8648,7 +8883,10 @@ async def test_get_account_transfers_filters_transfers_by_code_async(client):
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 1
@@ -8713,7 +8951,10 @@ async def test_get_account_transfers_filters_transfers_by_user_data_async(client
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 1
@@ -8779,7 +9020,10 @@ async def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cu
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_1) == 2
@@ -8799,7 +9043,10 @@ async def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cu
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_2) == 1
@@ -8817,7 +9064,10 @@ async def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cu
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert page_3 == []
@@ -8881,7 +9131,11 @@ async def test_get_account_transfers_pages_through_reversed_transfers_with_a_tim
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_1) == 2
@@ -8901,7 +9155,11 @@ async def test_get_account_transfers_pages_through_reversed_transfers_with_a_tim
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_2) == 1
@@ -8919,7 +9177,11 @@ async def test_get_account_transfers_pages_through_reversed_transfers_with_a_tim
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert page_3 == []
@@ -8936,7 +9198,10 @@ async def test_get_account_transfers_returns_no_transfers_for_an_unused_account_
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -8953,7 +9218,10 @@ async def test_get_account_transfers_returns_no_transfers_for_a_zero_account_id_
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9015,7 +9283,10 @@ async def test_get_account_transfers_returns_no_transfers_for_a_zero_limit_async
             timestamp_min=0,
             timestamp_max=0,
             limit=0,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9060,7 +9331,10 @@ async def test_get_account_transfers_returns_no_transfers_when_the_timestamp_ran
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     transfer = matched[0]
@@ -9075,7 +9349,10 @@ async def test_get_account_transfers_returns_no_transfers_when_the_timestamp_ran
             timestamp_min=transfer_timestamp + 1,
             timestamp_max=transfer_timestamp - 1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9120,7 +9397,10 @@ async def test_get_account_transfers_returns_no_transfers_for_a_timestamp_minimu
             timestamp_min=18446744073709551615,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9165,7 +9445,10 @@ async def test_get_account_transfers_returns_no_transfers_for_a_timestamp_maximu
             timestamp_min=0,
             timestamp_max=18446744073709551615,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9210,7 +9493,10 @@ async def test_get_account_transfers_returns_no_transfers_for_an_inverted_timest
             timestamp_min=18446744073709551614,
             timestamp_max=1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers == []
@@ -9273,7 +9559,10 @@ async def test_get_account_transfers_fails_when_the_limit_is_too_large_async(cli
                 timestamp_min=0,
                 timestamp_max=0,
                 limit=10000,
-                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+                flags=(
+                    tb.AccountFilterFlags.DEBITS
+                    | tb.AccountFilterFlags.CREDITS
+                ),
             )
         )
 
@@ -9328,7 +9617,10 @@ async def test_get_account_balances_returns_a_balance_per_transfer_for_a_history
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 2
@@ -9379,7 +9671,10 @@ async def test_get_account_balances_returns_pending_balances_for_a_history_accou
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 1
@@ -9463,7 +9758,10 @@ async def test_get_account_balances_pairs_each_balance_with_the_transfer_that_pr
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers) == 4
@@ -9481,7 +9779,10 @@ async def test_get_account_balances_pairs_each_balance_with_the_transfer_that_pr
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances) == 4
@@ -9787,7 +10088,10 @@ async def test_get_account_balances_pairs_debit_balances_with_debit_transfers_in
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -9803,7 +10107,10 @@ async def test_get_account_balances_pairs_debit_balances_with_debit_transfers_in
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -9891,7 +10198,10 @@ async def test_get_account_balances_pairs_credit_balances_with_credit_transfers_
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 2
@@ -9907,7 +10217,10 @@ async def test_get_account_balances_pairs_credit_balances_with_credit_transfers_
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -9971,7 +10284,11 @@ async def test_get_account_balances_returns_balances_in_reverse_order_with_the_r
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 2
@@ -10055,7 +10372,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_in_reve
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers) == 4
@@ -10073,7 +10394,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_in_reve
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances) == 4
@@ -10155,7 +10480,10 @@ async def test_get_account_balances_pages_through_balances_with_a_timestamp_curs
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_1) == 2
@@ -10175,7 +10503,10 @@ async def test_get_account_balances_pages_through_balances_with_a_timestamp_curs
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(page_2) == 1
@@ -10193,7 +10524,10 @@ async def test_get_account_balances_pages_through_balances_with_a_timestamp_curs
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert page_3 == []
@@ -10258,7 +10592,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers_page_1) == 2
@@ -10274,7 +10611,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances_page_1) == 2
@@ -10299,7 +10639,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(transfers_page_2) == 1
@@ -10314,7 +10657,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=cursor_1 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert len(balances_page_2) == 1
@@ -10334,7 +10680,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert transfers_page_3 == []
@@ -10348,7 +10697,10 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=cursor_2 + 1,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances_page_3 == []
@@ -10410,7 +10762,11 @@ async def test_get_account_balances_pages_through_reversed_balances_with_a_times
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_1) == 2
@@ -10430,7 +10786,11 @@ async def test_get_account_balances_pages_through_reversed_balances_with_a_times
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(page_2) == 1
@@ -10448,7 +10808,11 @@ async def test_get_account_balances_pages_through_reversed_balances_with_a_times
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert page_3 == []
@@ -10513,7 +10877,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers_page_1) == 2
@@ -10529,7 +10897,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=0,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances_page_1) == 2
@@ -10554,7 +10926,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(transfers_page_2) == 1
@@ -10569,7 +10945,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=cursor_1 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert len(balances_page_2) == 1
@@ -10589,7 +10969,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert transfers_page_3 == []
@@ -10603,7 +10987,11 @@ async def test_get_account_balances_pairs_each_balance_with_its_transfer_across_
             timestamp_min=0,
             timestamp_max=cursor_2 - 1,
             limit=2,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+                | tb.AccountFilterFlags.REVERSED
+            ),
         )
     )
     assert balances_page_3 == []
@@ -10648,7 +11036,10 @@ async def test_get_account_balances_returns_no_balances_without_the_history_flag
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10676,7 +11067,10 @@ async def test_get_account_balances_returns_no_balances_for_an_account_with_no_t
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10693,7 +11087,10 @@ async def test_get_account_balances_returns_no_balances_for_a_zero_account_id_as
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10756,7 +11153,10 @@ async def test_get_account_balances_returns_no_balances_for_a_zero_limit_async(c
             timestamp_min=0,
             timestamp_max=0,
             limit=0,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10802,7 +11202,10 @@ async def test_get_account_balances_returns_no_balances_when_the_timestamp_range
             timestamp_min=0,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     balance = matched[0]
@@ -10817,7 +11220,10 @@ async def test_get_account_balances_returns_no_balances_when_the_timestamp_range
             timestamp_min=balance_timestamp + 1,
             timestamp_max=balance_timestamp - 1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10863,7 +11269,10 @@ async def test_get_account_balances_returns_no_balances_for_a_timestamp_minimum_
             timestamp_min=18446744073709551615,
             timestamp_max=0,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10909,7 +11318,10 @@ async def test_get_account_balances_returns_no_balances_for_a_timestamp_maximum_
             timestamp_min=0,
             timestamp_max=18446744073709551615,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -10955,7 +11367,10 @@ async def test_get_account_balances_returns_no_balances_for_an_inverted_timestam
             timestamp_min=18446744073709551614,
             timestamp_max=1,
             limit=10,
-            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            flags=(
+                tb.AccountFilterFlags.DEBITS
+                | tb.AccountFilterFlags.CREDITS
+            ),
         )
     )
     assert balances == []
@@ -11019,7 +11434,10 @@ async def test_get_account_balances_fails_when_the_limit_is_too_large_async(clie
                 timestamp_min=0,
                 timestamp_max=0,
                 limit=10000,
-                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+                flags=(
+                    tb.AccountFilterFlags.DEBITS
+                    | tb.AccountFilterFlags.CREDITS
+                ),
             )
         )
 
@@ -12732,7 +13150,11 @@ async def test_closing_transfer_closes_both_accounts_with_a_pending_closing_tran
                 amount=0,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.PENDING | tb.TransferFlags.CLOSING_DEBIT | tb.TransferFlags.CLOSING_CREDIT,
+                flags=(
+                    tb.TransferFlags.PENDING
+                    | tb.TransferFlags.CLOSING_DEBIT
+                    | tb.TransferFlags.CLOSING_CREDIT
+                ),
             ),
         ]
     )
@@ -12775,7 +13197,11 @@ async def test_closing_transfer_reopens_both_accounts_when_the_closing_transfer_
                 amount=0,
                 ledger=1,
                 code=1,
-                flags=tb.TransferFlags.PENDING | tb.TransferFlags.CLOSING_DEBIT | tb.TransferFlags.CLOSING_CREDIT,
+                flags=(
+                    tb.TransferFlags.PENDING
+                    | tb.TransferFlags.CLOSING_DEBIT
+                    | tb.TransferFlags.CLOSING_CREDIT
+                ),
             ),
         ]
     )

@@ -86,19 +86,25 @@ fn emit(printer: *Printer) !void {
                     continue;
                 }
             }
-            try printer.print_indented("test(\"{s}_{s}\", func(t *testing.T, client Client) {{", .{
+            try printer.write_indented("test(");
+            printer.indent();
+            try printer.print_indented("\"{s}_{s}\",", .{
                 suite.name,
                 try printer.to_case_alloc(.snake_case, case.description),
             });
+            try printer.write_indented("func(t *testing.T, client Client) {");
             printer.indent();
             try emit_case(printer, case);
             printer.dedent();
-            try printer.write_indented("})");
+            try printer.write_indented("},");
+            printer.dedent();
+            try printer.write_indented(")");
         }
     }
     printer.dedent();
     try printer.write_indented("}");
     try emit_new_client(printer);
+    try emit_u128(printer);
 }
 
 fn emit_case(printer: *Printer, case: ast.Case) !void {
@@ -578,17 +584,7 @@ fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
     if (value <= std.math.maxInt(u64)) {
         return printer.string_alloc("ToUint128({s})", .{text});
     }
-
-    var bytes: [16]u8 = undefined;
-    std.mem.writeInt(u128, &bytes, value, .little);
-    var literal = std.Io.Writer.Allocating.init(printer.arena.allocator());
-    try literal.writer.writeAll("BytesToUint128([16]byte{");
-    for (bytes, 0..) |byte, index| {
-        if (index > 0) try literal.writer.writeAll(", ");
-        try literal.writer.print("0x{x:0>2}", .{byte});
-    }
-    try literal.writer.writeAll("})");
-    return literal.written();
+    return printer.string_alloc("u128(\"{x}\")", .{value});
 }
 
 fn go_operation_name(name: ast.Call.Name) []const u8 {
@@ -634,6 +630,21 @@ fn emit_new_client(printer: *Printer) !void {
     try printer.write_indented("}");
     try printer.write_empty_line();
     try printer.write_indented("return client");
+    printer.dedent();
+    try printer.write_indented("}");
+}
+
+fn emit_u128(printer: *Printer) !void {
+    try printer.write_empty_line();
+    try printer.write_indented("func u128(hex string) Uint128 {");
+    printer.indent();
+    try printer.write_indented("value, err := HexStringToUint128(hex)");
+    try printer.write_indented("if err != nil {");
+    printer.indent();
+    try printer.write_indented("panic(err)");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_indented("return value");
     printer.dedent();
     try printer.write_indented("}");
 }

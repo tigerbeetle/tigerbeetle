@@ -237,7 +237,7 @@ public class ConformanceTests
         var results = client.CreateAccounts(new Account[] {
             new()
             {
-                Id = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Id = UInt128.Parse("340282366920938463463374607431768211455"),
                 Ledger = 1,
                 Code = 1,
             },
@@ -386,7 +386,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = client.LookupAccounts(new UInt128[] { accountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            accountId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].UserData128);
@@ -400,7 +402,9 @@ public class ConformanceTests
     [TestMethod]
     public void LookupAccountsReturnsNoAccountsForAMissingId()
     {
-        var accounts = client.LookupAccounts(new UInt128[] { ID.Create() });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            ID.Create(),
+        });
         Assert.AreEqual(0, accounts.Length);
     }
 
@@ -423,7 +427,10 @@ public class ConformanceTests
                 Code = 2,
             },
         });
-        var accounts = client.LookupAccounts(new UInt128[] { account2Id, account1Id });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            account2Id,
+            account1Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account2Id, accounts[0].Id);
         Assert.AreEqual((uint)2, accounts[0].Ledger);
@@ -443,7 +450,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = client.LookupAccounts(new UInt128[] { accountId, accountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            accountId,
+            accountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((uint)1, accounts[0].Ledger);
@@ -464,7 +474,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = client.LookupAccounts(new UInt128[] { existingId, missingId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            existingId,
+            missingId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(existingId, accounts[0].Id);
     }
@@ -493,7 +506,9 @@ public class ConformanceTests
                 Flags = AccountFlags.History,
             },
         });
-        var accounts = client.LookupAccounts(new UInt128[] { accountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            accountId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPending);
@@ -750,7 +765,7 @@ public class ConformanceTests
         var results = client.CreateTransfers(new Transfer[] {
             new()
             {
-                Id = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Id = UInt128.Parse("340282366920938463463374607431768211455"),
                 DebitAccountId = debitAccountId,
                 CreditAccountId = creditAccountId,
                 Amount = 10,
@@ -812,7 +827,7 @@ public class ConformanceTests
             new()
             {
                 Id = ID.Create(),
-                DebitAccountId = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                DebitAccountId = UInt128.Parse("340282366920938463463374607431768211455"),
                 CreditAccountId = creditAccountId,
                 Amount = 10,
                 Ledger = 1,
@@ -874,7 +889,7 @@ public class ConformanceTests
             {
                 Id = ID.Create(),
                 DebitAccountId = debitAccountId,
-                CreditAccountId = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                CreditAccountId = UInt128.Parse("340282366920938463463374607431768211455"),
                 Amount = 10,
                 Ledger = 1,
                 Code = 1,
@@ -1320,7 +1335,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.LinkedEventChainOpen, results[0].Status);
-        var accounts = client.LookupAccounts(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -1374,7 +1392,10 @@ public class ConformanceTests
         Assert.AreEqual(2, results.Length);
         Assert.AreEqual(CreateTransferStatus.LinkedEventFailed, results[0].Status);
         Assert.AreEqual(CreateTransferStatus.ExistsWithDifferentFlags, results[1].Status);
-        var accounts = client.LookupAccounts(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -1478,7 +1499,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { transferId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual(debitAccountId, transfers[0].DebitAccountId);
@@ -1489,7 +1512,9 @@ public class ConformanceTests
     [TestMethod]
     public void LookupTransfersReturnsNoTransfersForAMissingId()
     {
-        var transfers = client.LookupTransfers(new UInt128[] { ID.Create() });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            ID.Create(),
+        });
         Assert.AreEqual(0, transfers.Length);
     }
 
@@ -1534,7 +1559,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { transfer2Id, transfer1Id });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transfer2Id,
+            transfer1Id,
+        });
         Assert.AreEqual(2, transfers.Length);
         Assert.AreEqual(transfer2Id, transfers[0].Id);
         Assert.AreEqual((UInt128)20, transfers[0].Amount);
@@ -1573,7 +1601,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { transferId, transferId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transferId,
+            transferId,
+        });
         Assert.AreEqual(2, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual((UInt128)10, transfers[0].Amount);
@@ -1613,7 +1644,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { transferId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(0, transfers.Length);
     }
 
@@ -1649,7 +1682,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { existingId, missingId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            existingId,
+            missingId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(existingId, transfers[0].Id);
     }
@@ -1696,7 +1732,9 @@ public class ConformanceTests
                 UserData32 = 54321,
             },
         });
-        var transfers = client.LookupTransfers(new UInt128[] { transferId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual(debitAccountId, transfers[0].DebitAccountId);
@@ -2711,12 +2749,13 @@ public class ConformanceTests
     [TestMethod]
     public void GetAccountTransfersFailsWhenTheLimitIsTooLarge()
     {
-        Assert.ThrowsException<TooMuchDataException>(() => client.GetAccountTransfers(new AccountFilter
-        {
-            AccountId = ID.Create(),
-            Limit = 10000,
-            Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
-        }));
+        Assert.ThrowsException<TooMuchDataException>(
+            () => client.GetAccountTransfers(new AccountFilter
+            {
+                AccountId = ID.Create(),
+                Limit = 10000,
+                Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
+            }));
     }
 
     // Suite: get_account_balances
@@ -4214,12 +4253,13 @@ public class ConformanceTests
     [TestMethod]
     public void GetAccountBalancesFailsWhenTheLimitIsTooLarge()
     {
-        Assert.ThrowsException<TooMuchDataException>(() => client.GetAccountBalances(new AccountFilter
-        {
-            AccountId = ID.Create(),
-            Limit = 10000,
-            Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
-        }));
+        Assert.ThrowsException<TooMuchDataException>(
+            () => client.GetAccountBalances(new AccountFilter
+            {
+                AccountId = ID.Create(),
+                Limit = 10000,
+                Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
+            }));
     }
 
     // Suite: query_accounts
@@ -4717,11 +4757,12 @@ public class ConformanceTests
     [TestMethod]
     public void QueryAccountsFailsWhenTheLimitIsTooLarge()
     {
-        Assert.ThrowsException<TooMuchDataException>(() => client.QueryAccounts(new QueryFilter
-        {
-            UserData128 = ID.Create(),
-            Limit = 10000,
-        }));
+        Assert.ThrowsException<TooMuchDataException>(
+            () => client.QueryAccounts(new QueryFilter
+            {
+                UserData128 = ID.Create(),
+                Limit = 10000,
+            }));
     }
 
     // Suite: query_transfers
@@ -5474,10 +5515,11 @@ public class ConformanceTests
     [TestMethod]
     public void QueryTransfersFailsWhenTheLimitIsTooLarge()
     {
-        Assert.ThrowsException<TooMuchDataException>(() => client.QueryTransfers(new QueryFilter
-        {
-            Limit = 10000,
-        }));
+        Assert.ThrowsException<TooMuchDataException>(
+            () => client.QueryTransfers(new QueryFilter
+            {
+                Limit = 10000,
+            }));
     }
 
     // Suite: two_phase_transfer
@@ -5532,7 +5574,10 @@ public class ConformanceTests
         var transferResult1 = transferResults1[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult1.Status);
         Assert.IsTrue(transferResult1.Timestamp > 0);
-        var accounts1 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts1 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts1.Length);
         Assert.AreEqual(accountAId, accounts1[0].Id);
         Assert.AreEqual((UInt128)100, accounts1[0].CreditsPosted);
@@ -5561,7 +5606,10 @@ public class ConformanceTests
         var transferResult2 = transferResults2[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult2.Status);
         Assert.IsTrue(transferResult2.Timestamp > 0);
-        var accounts2 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts2 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts2.Length);
         Assert.AreEqual(accountAId, accounts2[0].Id);
         Assert.AreEqual((UInt128)100, accounts2[0].CreditsPosted);
@@ -5573,7 +5621,9 @@ public class ConformanceTests
         Assert.AreEqual((UInt128)0, accounts2[1].CreditsPending);
         Assert.AreEqual((UInt128)100, accounts2[1].DebitsPosted);
         Assert.AreEqual((UInt128)50, accounts2[1].DebitsPending);
-        var transfers1 = client.LookupTransfers(new UInt128[] { transfer2Id });
+        var transfers1 = client.LookupTransfers(new UInt128[] {
+            transfer2Id,
+        });
         var transferLookup1 = transfers1[0];
         Assert.AreEqual(1, transfers1.Length);
         Assert.AreEqual(transfer2Id, transfers1[0].Id);
@@ -5591,7 +5641,7 @@ public class ConformanceTests
             new()
             {
                 Id = ID.Create(),
-                Amount = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Amount = UInt128.Parse("340282366920938463463374607431768211455"),
                 PendingId = transfer2Id,
                 Ledger = 1,
                 Code = 1,
@@ -5601,7 +5651,10 @@ public class ConformanceTests
         var commitResult = commitResults[0];
         Assert.AreEqual(CreateTransferStatus.Created, commitResult.Status);
         Assert.IsTrue(commitResult.Timestamp > 0);
-        var accounts3 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts3 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts3.Length);
         Assert.AreEqual(accountAId, accounts3[0].Id);
         Assert.AreEqual((UInt128)150, accounts3[0].CreditsPosted);
@@ -5643,7 +5696,10 @@ public class ConformanceTests
         var rejectResult = rejectResults[0];
         Assert.AreEqual(CreateTransferStatus.Created, rejectResult.Status);
         Assert.IsTrue(rejectResult.Timestamp > 0);
-        var accounts4 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts4 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts4.Length);
         Assert.AreEqual(accountAId, accounts4[0].Id);
         Assert.AreEqual((UInt128)150, accounts4[0].CreditsPosted);
@@ -5672,7 +5728,10 @@ public class ConformanceTests
         var transferResult4 = transferResults4[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult4.Status);
         Assert.IsTrue(transferResult4.Timestamp > 0);
-        var accounts5 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts5 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts5.Length);
         Assert.AreEqual(accountAId, accounts5[0].Id);
         Assert.AreEqual((UInt128)150, accounts5[0].CreditsPosted);
@@ -5685,7 +5744,10 @@ public class ConformanceTests
         Assert.AreEqual((UInt128)150, accounts5[1].DebitsPosted);
         Assert.AreEqual((UInt128)50, accounts5[1].DebitsPending);
         Thread.Sleep(1500);
-        var accounts6 = client.LookupAccounts(new UInt128[] { accountAId, accountBId });
+        var accounts6 = client.LookupAccounts(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts6.Length);
         Assert.AreEqual(accountAId, accounts6[0].Id);
         Assert.AreEqual((UInt128)150, accounts6[0].CreditsPosted);
@@ -5748,7 +5810,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var accounts = client.LookupAccounts(new UInt128[] { account1Id, account2Id });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.History | AccountFlags.Closed, accounts[0].Flags);
@@ -5805,7 +5870,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var accounts = client.LookupAccounts(new UInt128[] { account1Id, account2Id });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.History, accounts[0].Flags);
@@ -5852,7 +5920,10 @@ public class ConformanceTests
         Assert.AreEqual(2, results.Length);
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
         Assert.AreEqual(CreateAccountStatus.Created, results[1].Status);
-        var accounts = client.LookupAccounts(new UInt128[] { account1Id, account2Id });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.Imported, accounts[0].Flags);
@@ -5920,7 +5991,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var transfers = client.LookupTransfers(new UInt128[] { transferId });
+        var transfers = client.LookupTransfers(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual((UInt128)100, transfers[0].Amount);
@@ -5936,7 +6009,9 @@ public class ConformanceTests
     [TestMethod]
     public void Uint128RangeAcceptsTheMaximumU128()
     {
-        var accounts = client.LookupAccounts(new UInt128[] { new UInt128(18446744073709551615UL, 18446744073709551615UL) });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            UInt128.Parse("340282366920938463463374607431768211455"),
+        });
         Assert.AreEqual(0, accounts.Length);
     }
 
@@ -5989,7 +6064,10 @@ public class ConformanceTests
             }));
         }
         Task.WhenAll(tasks).Wait();
-        var accounts = client.LookupAccounts(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)1000, accounts[0].DebitsPosted);
@@ -6035,7 +6113,10 @@ public class ConformanceTests
             }));
         }
         Task.WhenAll(tasks).Wait();
-        var accounts = client.LookupAccounts(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -6081,7 +6162,10 @@ public class ConformanceTests
             }));
         }
         Task.WhenAll(tasks).Wait();
-        var accounts = client.LookupAccounts(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = client.LookupAccounts(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)10, accounts[0].DebitsPosted);
@@ -6097,7 +6181,10 @@ public class ConformanceTests
     public void CloseClientFailsOperationsAfterClose()
     {
         client.Close();
-        Assert.ThrowsException<ClientClosedException>(() => client.LookupAccounts(new UInt128[] { ID.Create() }));
+        Assert.ThrowsException<ClientClosedException>(
+            () => client.LookupAccounts(new UInt128[] {
+                ID.Create(),
+            }));
     }
 
     [TestMethod]
@@ -6307,7 +6394,7 @@ public class ConformanceTests
         var results = await client.CreateAccountsAsync(new Account[] {
             new()
             {
-                Id = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Id = UInt128.Parse("340282366920938463463374607431768211455"),
                 Ledger = 1,
                 Code = 1,
             },
@@ -6456,7 +6543,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { accountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            accountId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].UserData128);
@@ -6470,7 +6559,9 @@ public class ConformanceTests
     [TestMethod]
     public async Task LookupAccountsReturnsNoAccountsForAMissingIdAsync()
     {
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { ID.Create() });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            ID.Create(),
+        });
         Assert.AreEqual(0, accounts.Length);
     }
 
@@ -6493,7 +6584,10 @@ public class ConformanceTests
                 Code = 2,
             },
         });
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { account2Id, account1Id });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            account2Id,
+            account1Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account2Id, accounts[0].Id);
         Assert.AreEqual((uint)2, accounts[0].Ledger);
@@ -6513,7 +6607,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { accountId, accountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            accountId,
+            accountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((uint)1, accounts[0].Ledger);
@@ -6534,7 +6631,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { existingId, missingId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            existingId,
+            missingId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(existingId, accounts[0].Id);
     }
@@ -6563,7 +6663,9 @@ public class ConformanceTests
                 Flags = AccountFlags.History,
             },
         });
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { accountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            accountId,
+        });
         Assert.AreEqual(1, accounts.Length);
         Assert.AreEqual(accountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPending);
@@ -6820,7 +6922,7 @@ public class ConformanceTests
         var results = await client.CreateTransfersAsync(new Transfer[] {
             new()
             {
-                Id = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Id = UInt128.Parse("340282366920938463463374607431768211455"),
                 DebitAccountId = debitAccountId,
                 CreditAccountId = creditAccountId,
                 Amount = 10,
@@ -6882,7 +6984,7 @@ public class ConformanceTests
             new()
             {
                 Id = ID.Create(),
-                DebitAccountId = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                DebitAccountId = UInt128.Parse("340282366920938463463374607431768211455"),
                 CreditAccountId = creditAccountId,
                 Amount = 10,
                 Ledger = 1,
@@ -6944,7 +7046,7 @@ public class ConformanceTests
             {
                 Id = ID.Create(),
                 DebitAccountId = debitAccountId,
-                CreditAccountId = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                CreditAccountId = UInt128.Parse("340282366920938463463374607431768211455"),
                 Amount = 10,
                 Ledger = 1,
                 Code = 1,
@@ -7390,7 +7492,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.LinkedEventChainOpen, results[0].Status);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -7444,7 +7549,10 @@ public class ConformanceTests
         Assert.AreEqual(2, results.Length);
         Assert.AreEqual(CreateTransferStatus.LinkedEventFailed, results[0].Status);
         Assert.AreEqual(CreateTransferStatus.ExistsWithDifferentFlags, results[1].Status);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -7548,7 +7656,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transferId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual(debitAccountId, transfers[0].DebitAccountId);
@@ -7559,7 +7669,9 @@ public class ConformanceTests
     [TestMethod]
     public async Task LookupTransfersReturnsNoTransfersForAMissingIdAsync()
     {
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { ID.Create() });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            ID.Create(),
+        });
         Assert.AreEqual(0, transfers.Length);
     }
 
@@ -7604,7 +7716,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transfer2Id, transfer1Id });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transfer2Id,
+            transfer1Id,
+        });
         Assert.AreEqual(2, transfers.Length);
         Assert.AreEqual(transfer2Id, transfers[0].Id);
         Assert.AreEqual((UInt128)20, transfers[0].Amount);
@@ -7643,7 +7758,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transferId, transferId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transferId,
+            transferId,
+        });
         Assert.AreEqual(2, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual((UInt128)10, transfers[0].Amount);
@@ -7683,7 +7801,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transferId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(0, transfers.Length);
     }
 
@@ -7719,7 +7839,10 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { existingId, missingId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            existingId,
+            missingId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(existingId, transfers[0].Id);
     }
@@ -7766,7 +7889,9 @@ public class ConformanceTests
                 UserData32 = 54321,
             },
         });
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transferId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual(debitAccountId, transfers[0].DebitAccountId);
@@ -8781,12 +8906,13 @@ public class ConformanceTests
     [TestMethod]
     public async Task GetAccountTransfersFailsWhenTheLimitIsTooLargeAsync()
     {
-        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.GetAccountTransfersAsync(new AccountFilter
-        {
-            AccountId = ID.Create(),
-            Limit = 10000,
-            Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
-        }));
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(
+            () => client.GetAccountTransfersAsync(new AccountFilter
+            {
+                AccountId = ID.Create(),
+                Limit = 10000,
+                Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
+            }));
     }
 
     // Suite: get_account_balances
@@ -10284,12 +10410,13 @@ public class ConformanceTests
     [TestMethod]
     public async Task GetAccountBalancesFailsWhenTheLimitIsTooLargeAsync()
     {
-        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.GetAccountBalancesAsync(new AccountFilter
-        {
-            AccountId = ID.Create(),
-            Limit = 10000,
-            Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
-        }));
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(
+            () => client.GetAccountBalancesAsync(new AccountFilter
+            {
+                AccountId = ID.Create(),
+                Limit = 10000,
+                Flags = AccountFilterFlags.Debits | AccountFilterFlags.Credits,
+            }));
     }
 
     // Suite: query_accounts
@@ -10787,11 +10914,12 @@ public class ConformanceTests
     [TestMethod]
     public async Task QueryAccountsFailsWhenTheLimitIsTooLargeAsync()
     {
-        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.QueryAccountsAsync(new QueryFilter
-        {
-            UserData128 = ID.Create(),
-            Limit = 10000,
-        }));
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(
+            () => client.QueryAccountsAsync(new QueryFilter
+            {
+                UserData128 = ID.Create(),
+                Limit = 10000,
+            }));
     }
 
     // Suite: query_transfers
@@ -11544,10 +11672,11 @@ public class ConformanceTests
     [TestMethod]
     public async Task QueryTransfersFailsWhenTheLimitIsTooLargeAsync()
     {
-        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.QueryTransfersAsync(new QueryFilter
-        {
-            Limit = 10000,
-        }));
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(
+            () => client.QueryTransfersAsync(new QueryFilter
+            {
+                Limit = 10000,
+            }));
     }
 
     // Suite: two_phase_transfer
@@ -11602,7 +11731,10 @@ public class ConformanceTests
         var transferResult1 = transferResults1[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult1.Status);
         Assert.IsTrue(transferResult1.Timestamp > 0);
-        var accounts1 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts1 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts1.Length);
         Assert.AreEqual(accountAId, accounts1[0].Id);
         Assert.AreEqual((UInt128)100, accounts1[0].CreditsPosted);
@@ -11631,7 +11763,10 @@ public class ConformanceTests
         var transferResult2 = transferResults2[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult2.Status);
         Assert.IsTrue(transferResult2.Timestamp > 0);
-        var accounts2 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts2 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts2.Length);
         Assert.AreEqual(accountAId, accounts2[0].Id);
         Assert.AreEqual((UInt128)100, accounts2[0].CreditsPosted);
@@ -11643,7 +11778,9 @@ public class ConformanceTests
         Assert.AreEqual((UInt128)0, accounts2[1].CreditsPending);
         Assert.AreEqual((UInt128)100, accounts2[1].DebitsPosted);
         Assert.AreEqual((UInt128)50, accounts2[1].DebitsPending);
-        var transfers1 = await client.LookupTransfersAsync(new UInt128[] { transfer2Id });
+        var transfers1 = await client.LookupTransfersAsync(new UInt128[] {
+            transfer2Id,
+        });
         var transferLookup1 = transfers1[0];
         Assert.AreEqual(1, transfers1.Length);
         Assert.AreEqual(transfer2Id, transfers1[0].Id);
@@ -11661,7 +11798,7 @@ public class ConformanceTests
             new()
             {
                 Id = ID.Create(),
-                Amount = new UInt128(18446744073709551615UL, 18446744073709551615UL),
+                Amount = UInt128.Parse("340282366920938463463374607431768211455"),
                 PendingId = transfer2Id,
                 Ledger = 1,
                 Code = 1,
@@ -11671,7 +11808,10 @@ public class ConformanceTests
         var commitResult = commitResults[0];
         Assert.AreEqual(CreateTransferStatus.Created, commitResult.Status);
         Assert.IsTrue(commitResult.Timestamp > 0);
-        var accounts3 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts3 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts3.Length);
         Assert.AreEqual(accountAId, accounts3[0].Id);
         Assert.AreEqual((UInt128)150, accounts3[0].CreditsPosted);
@@ -11713,7 +11853,10 @@ public class ConformanceTests
         var rejectResult = rejectResults[0];
         Assert.AreEqual(CreateTransferStatus.Created, rejectResult.Status);
         Assert.IsTrue(rejectResult.Timestamp > 0);
-        var accounts4 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts4 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts4.Length);
         Assert.AreEqual(accountAId, accounts4[0].Id);
         Assert.AreEqual((UInt128)150, accounts4[0].CreditsPosted);
@@ -11742,7 +11885,10 @@ public class ConformanceTests
         var transferResult4 = transferResults4[0];
         Assert.AreEqual(CreateTransferStatus.Created, transferResult4.Status);
         Assert.IsTrue(transferResult4.Timestamp > 0);
-        var accounts5 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts5 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts5.Length);
         Assert.AreEqual(accountAId, accounts5[0].Id);
         Assert.AreEqual((UInt128)150, accounts5[0].CreditsPosted);
@@ -11755,7 +11901,10 @@ public class ConformanceTests
         Assert.AreEqual((UInt128)150, accounts5[1].DebitsPosted);
         Assert.AreEqual((UInt128)50, accounts5[1].DebitsPending);
         Thread.Sleep(1500);
-        var accounts6 = await client.LookupAccountsAsync(new UInt128[] { accountAId, accountBId });
+        var accounts6 = await client.LookupAccountsAsync(new UInt128[] {
+            accountAId,
+            accountBId,
+        });
         Assert.AreEqual(2, accounts6.Length);
         Assert.AreEqual(accountAId, accounts6[0].Id);
         Assert.AreEqual((UInt128)150, accounts6[0].CreditsPosted);
@@ -11818,7 +11967,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { account1Id, account2Id });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.History | AccountFlags.Closed, accounts[0].Flags);
@@ -11875,7 +12027,10 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { account1Id, account2Id });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.History, accounts[0].Flags);
@@ -11922,7 +12077,10 @@ public class ConformanceTests
         Assert.AreEqual(2, results.Length);
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
         Assert.AreEqual(CreateAccountStatus.Created, results[1].Status);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { account1Id, account2Id });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            account1Id,
+            account2Id,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(account1Id, accounts[0].Id);
         Assert.AreEqual(AccountFlags.Imported, accounts[0].Flags);
@@ -11990,7 +12148,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        var transfers = await client.LookupTransfersAsync(new UInt128[] { transferId });
+        var transfers = await client.LookupTransfersAsync(new UInt128[] {
+            transferId,
+        });
         Assert.AreEqual(1, transfers.Length);
         Assert.AreEqual(transferId, transfers[0].Id);
         Assert.AreEqual((UInt128)100, transfers[0].Amount);
@@ -12006,7 +12166,9 @@ public class ConformanceTests
     [TestMethod]
     public async Task Uint128RangeAcceptsTheMaximumU128Async()
     {
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { new UInt128(18446744073709551615UL, 18446744073709551615UL) });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            UInt128.Parse("340282366920938463463374607431768211455"),
+        });
         Assert.AreEqual(0, accounts.Length);
     }
 
@@ -12059,7 +12221,10 @@ public class ConformanceTests
             });
         }
         await Task.WhenAll(tasks);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)1000, accounts[0].DebitsPosted);
@@ -12105,7 +12270,10 @@ public class ConformanceTests
             });
         }
         await Task.WhenAll(tasks);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)0, accounts[0].DebitsPosted);
@@ -12151,7 +12319,10 @@ public class ConformanceTests
             });
         }
         await Task.WhenAll(tasks);
-        var accounts = await client.LookupAccountsAsync(new UInt128[] { debitAccountId, creditAccountId });
+        var accounts = await client.LookupAccountsAsync(new UInt128[] {
+            debitAccountId,
+            creditAccountId,
+        });
         Assert.AreEqual(2, accounts.Length);
         Assert.AreEqual(debitAccountId, accounts[0].Id);
         Assert.AreEqual((UInt128)10, accounts[0].DebitsPosted);
@@ -12167,7 +12338,10 @@ public class ConformanceTests
     public async Task CloseClientFailsOperationsAfterCloseAsync()
     {
         client.Close();
-        await Assert.ThrowsExceptionAsync<ClientClosedException>(() => client.LookupAccountsAsync(new UInt128[] { ID.Create() }));
+        await Assert.ThrowsExceptionAsync<ClientClosedException>(
+            () => client.LookupAccountsAsync(new UInt128[] {
+                ID.Create(),
+            }));
     }
 
     [TestMethod]

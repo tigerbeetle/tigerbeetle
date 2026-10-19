@@ -142,14 +142,19 @@ fn emit(printer: *Printer) !void {
                     continue;
                 }
             }
-            try printer.print_indented("test('{s}_{s}', async (client) => {{", .{
+            try printer.write_indented("test(");
+            printer.indent();
+            try printer.print_indented("'{s}_{s}',", .{
                 suite.name,
                 try printer.to_case_alloc(.snake_case, case.description),
             });
+            try printer.write_indented("async (client) => {");
             printer.indent();
             for (case.steps) |step| try emit_step(printer, step);
             printer.dedent();
-            try printer.write_indented("})");
+            try printer.write_indented("},");
+            printer.dedent();
+            try printer.write_indented(")");
         }
     }
     try printer.write(
