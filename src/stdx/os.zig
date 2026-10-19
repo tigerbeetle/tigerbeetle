@@ -159,14 +159,26 @@ pub const darwin = struct {
 pub const windows = struct {
     const ntdll = std.os.windows.ntdll;
 
-    const FALSE: std.os.windows.BOOL = .FALSE;
-
+    const BOOL = std.os.windows.BOOL;
     const FILETIME = std.os.windows.FILETIME;
+    const HANDLE = std.os.windows.HANDLE;
+    const IO_STATUS_BLOCK = std.os.windows.IO_STATUS_BLOCK;
     const LARGE_INTEGER = std.os.windows.LARGE_INTEGER;
+    const UNICODE_STRING = std.os.windows.UNICODE_STRING;
+
+    const FALSE: BOOL = .FALSE;
+
+    const INVALID_HANDLE_VALUE: HANDLE = std.os.windows.INVALID_HANDLE_VALUE;
+    const IOCTL = std.os.windows.IOCTL;
 
     extern "kernel32" fn GetSystemTimePreciseAsFileTime(
         lpFileTime: *FILETIME,
     ) callconv(.winapi) void;
+
+    fn CloseHandle(hObject: HANDLE) void {
+        const status = ntdll.NtClose(hObject);
+        assert(status == .SUCCESS);
+    }
 
     fn QueryPerformanceFrequency() u64 {
         var result: LARGE_INTEGER = undefined;
@@ -215,4 +227,71 @@ pub const windows = struct {
         const epoch_adjust = std.time.epoch.windows * (std.time.ns_per_s / 100);
         return (@as(i64, @bitCast(ft64)) + epoch_adjust) * 100;
     }
+
+    pub const CNGDevice = struct {
+        handle: HANDLE,
+
+        pub fn open() error{CNGDeviceNotAvailable}!CNGDevice {
+            var result: CNGDevice = .{ .handle = undefined };
+
+            var io_status_block: IO_STATUS_BLOCK = undefined;
+            const object_name = UNICODE_STRING.init(
+                &.{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'C', 'N', 'G' },
+            );
+            for (0..1_000) |_| {
+                const status = ntdll.NtOpenFile(
+                    &result.handle,
+                    .{
+                        .STANDARD = .{ .SYNCHRONIZE = true },
+                        .SPECIFIC = .{ .FILE = .{ .READ_DATA = true } },
+                    },
+                    &.{ .ObjectName = @constCast(&object_name) },
+                    &io_status_block,
+                    .VALID_FLAGS,
+                    .{ .IO = .SYNCHRONOUS_NONALERT },
+                );
+
+                switch (status) {
+                    .SUCCESS => return result,
+                    .CANCELLED => continue,
+                    else => break,
+                }
+            }
+            return error.CNGDeviceNotAvailable;
+        }
+
+        pub fn deinit(cng: *CNGDevice) void {
+            assert(cng.handle != INVALID_HANDLE_VALUE);
+            CloseHandle(cng.handle);
+            cng.handle = INVALID_HANDLE_VALUE;
+        }
+
+        pub fn getrandom(cng: *const CNGDevice, buffer: []u8) void {
+            assert(buffer.len > 0);
+            assert(buffer.len <= std.math.maxInt(u32));
+            assert(cng.handle != INVALID_HANDLE_VALUE);
+
+            // https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/std/Io/Threaded.zig#L17013
+            var io_status_block: IO_STATUS_BLOCK = undefined;
+            for (0..1_000) |_| {
+                const status = ntdll.NtDeviceIoControlFile(
+                    cng.handle,
+                    null,
+                    null,
+                    null,
+                    &io_status_block,
+                    IOCTL.KSEC.GEN_RANDOM,
+                    null,
+                    0,
+                    buffer.ptr,
+                    @intCast(buffer.len),
+                );
+                switch (status) {
+                    .SUCCESS => break,
+                    .CANCELLED => continue,
+                    else => @panic("getrandom: entropy unavailable"),
+                }
+            }
+        }
+    };
 };
