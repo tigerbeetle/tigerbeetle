@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const math = std.math;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -54,6 +55,7 @@ pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;
 pub const SyncTarget = @import("vsr/sync.zig").Target;
+pub const ClientIO = if (builtin.target.os.tag == .linux) stdx.IOEpoll else stdx.IO;
 pub const ClientType = @import("vsr/client.zig").ClientType;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const GridType = @import("vsr/grid.zig").GridType;

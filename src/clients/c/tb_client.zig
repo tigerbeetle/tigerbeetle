@@ -3,7 +3,7 @@ const std = @import("std");
 pub const vsr = @import("../../vsr.zig");
 pub const exports = @import("tb_client_exports.zig");
 
-const IO = vsr.stdx.ClientIO;
+const IO = vsr.ClientIO;
 const MessageBus = @import("../../message_bus.zig").MessageBusType(IO);
 
 pub const InitError = @import("tb_client/context.zig").InitError;

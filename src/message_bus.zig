@@ -110,7 +110,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => {
                     assert(options.clients_limit.? > 0);
                     switch (builtin.target.os.tag) {
-                        .linux => assert(IO != stdx.ClientIO),
+                        .linux => assert(IO != stdx.IOEpoll),
                         else => {},
                     }
                 },

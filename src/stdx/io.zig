@@ -18,6 +18,6 @@ pub const IO = switch (builtin.target.os.tag) {
 // On Linux, clients use the lightweight epoll-only IO backend instead of io_uring, for
 // compatibility with older kernels and restricted containers (e.g. Docker with io_uring disabled).
 // All other platforms always use their native IO.
-pub const ClientIO = if (builtin.target.os.tag == .linux) IO_LinuxEpoll else IO;
+pub const IOEpoll = IO_LinuxEpoll;
 
 pub const IOTest = IO_Testing;

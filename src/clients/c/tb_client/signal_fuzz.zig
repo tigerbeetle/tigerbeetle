@@ -2,8 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Signal = @import("./signal.zig").Signal;
+const vsr = @import("../../../vsr.zig");
 const stdx = @import("stdx");
-const IO = stdx.ClientIO;
+const IO = vsr.ClientIO;
 const fuzz = stdx.fuzz;
 
 const threads_limit = 8;
