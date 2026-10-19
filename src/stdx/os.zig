@@ -92,26 +92,33 @@ pub fn getrandom(buffer: []u8) void {
 /// https://man7.org/linux/man-pages/man2/getrandom.2.html
 fn getrandom_linux(buffer: []u8) void {
     comptime assert(native_os == .linux);
-    var position: u32 = 0;
-    for (0..buffer.len) |_| {
-        const remaining = buffer[position..];
-        const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, 0);
-        switch (std.os.linux.errno(return_code)) {
-            .SUCCESS => {
+
+    assert(buffer.len > 0);
+    assert(buffer.len <= std.math.maxInt(u32));
+
+    var offset: u32 = 0;
+    // No fixed upper bound because of EINTR.
+    while (buffer.len - offset > 0) {
+        const remaining = buffer[offset..];
+        assert(remaining.len > 0);
+
+        const flags: u32 = 0;
+        const return_code = std.os.linux.getrandom(remaining.ptr, remaining.len, flags);
+
+        const size: u32 = switch (std.os.linux.errno(return_code)) {
+            .SUCCESS => b: {
                 assert(return_code <= std.math.maxInt(u32));
-                const bytes: u32 = @intCast(return_code);
-                position += bytes;
-                assert(bytes > 0);
-                if (position < buffer.len) continue;
-                assert(position == buffer.len);
-                break;
+                break :b @intCast(return_code);
             },
-            .INTR => {
-                continue;
-            },
-            else => @panic("crypto_random_bytes: entropy unavailable"),
-        }
-    } else @panic("crypto_random_bytes: entropy unavailable");
+            .INTR => continue,
+            else => @panic("getrandom: entropy unavailable"),
+        };
+
+        assert(size > 0);
+        assert(size <= remaining.len);
+        offset += size;
+        assert(offset <= buffer.len);
+    }
 }
 
 /// https://manp.gs/mac/3/arc4random_buf
