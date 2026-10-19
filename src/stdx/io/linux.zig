@@ -1885,7 +1885,7 @@ pub const IO = struct {
     pub fn crypto_random_bytes(_: *IO, buffer: []u8) void {
         assert(buffer.len > 0);
         assert(buffer.len <= std.math.maxInt(u32));
-        return stdx.os.getrandom(buffer);
+        stdx.os.getrandom(buffer);
     }
 
     pub fn crypto_random_int(io: *IO, comptime T: type) T {

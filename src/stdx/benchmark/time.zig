@@ -30,10 +30,13 @@ pub fn benchmark_monotonic(self: *BenchmarkTime) Instant {
     // Since we do not currently optimize for macOS and windows,
     // (especially the I/O interface), one could also argue for
     // failing early here and only allowing measurements on linux.
-    const monotonic_timestamp = blk: {
-        if (is_windows) break :blk benchmark_monotonic_windows();
-        if (is_darwin) break :blk benchmark_monotonic_darwin();
-        if (is_linux) break :blk benchmark_monotonic_linux();
+    const monotonic_timestamp = b: {
+        if (is_windows) break :b stdx.os.windows.query_performance_counter_ns();
+        if (is_darwin) break :b stdx.os.darwin.mach_absolute_time_ns();
+        if (is_linux) {
+            const ts = stdx.os.clock_gettime(.monotonoic);
+            break :b @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+        }
         @compileError("unsupported OS");
     };
 
@@ -43,20 +46,4 @@ pub fn benchmark_monotonic(self: *BenchmarkTime) Instant {
     }
     self.monotonic_guard = monotonic_timestamp;
     return .{ .ns = monotonic_timestamp };
-}
-
-fn benchmark_monotonic_windows() u64 {
-    comptime assert(is_windows);
-    return stdx.os.windows.query_performance_counter_ns();
-}
-
-fn benchmark_monotonic_darwin() u64 {
-    comptime assert(is_darwin);
-    return stdx.os.darwin.mach_absolute_time_ns();
-}
-
-fn benchmark_monotonic_linux() u64 {
-    comptime assert(is_linux);
-    const ts = stdx.os.clock_gettime(.monotonoic);
-    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
 }

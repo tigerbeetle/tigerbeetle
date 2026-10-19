@@ -62,10 +62,33 @@ pub const TimeOS = struct {
     }
 
     pub fn monotonic(self: *TimeOS) Instant {
-        const m = blk: {
-            if (is_windows) break :blk monotonic_windows();
-            if (is_darwin) break :blk monotonic_darwin();
-            if (is_linux) break :blk monotonic_linux();
+        const m = b: {
+            // Uses QueryPerformanceCounter() on windows due to it being the
+            // highest precision timer available while also accounting for time
+            // spent suspended by default:
+            //
+            // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#rema
+            if (is_windows) break :b stdx.os.windows.query_performance_counter_ns();
+            // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
+            // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
+            if (is_darwin) break :b stdx.os.darwin.mach_continuous_time_ns();
+            if (is_linux) {
+                // The true monotonic clock on Linux is not in fact CLOCK_MONOTONIC:
+                //
+                // CLOCK_MONOTONIC excludes elapsed time while the system is
+                // suspended (e.g. VM migration).
+                //
+                // CLOCK_BOOTTIME is the same as CLOCK_MONOTONIC but includes
+                // elapsed time during a suspend.
+                //
+                // For more detail and why CLOCK_MONOTONIC_RAW is even worse
+                // than CLOCK_MONOTONIC, see
+                //
+                // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
+                const ts = stdx.os.clock_gettime(.boottime) catch
+                    @panic("CLOCK_BOOTTIME required");
+                break :b @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+            }
             @compileError("unsupported OS");
         };
 
@@ -73,38 +96,6 @@ pub const TimeOS = struct {
         if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
         return .{ .ns = m };
-    }
-
-    fn monotonic_windows() u64 {
-        comptime assert(is_windows);
-        // Uses QueryPerformanceCounter() on windows due to it being the highest precision timer
-        // available while also accounting for time spent suspended by default:
-        //
-        // https://docs.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryunbiasedinterrupttime#remarks
-        return stdx.os.windows.query_performance_counter_ns();
-    }
-
-    fn monotonic_darwin() u64 {
-        comptime assert(is_darwin);
-        //
-        // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
-        // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
-        return stdx.os.darwin.mach_continuous_time_ns();
-    }
-
-    fn monotonic_linux() u64 {
-        comptime assert(is_linux);
-        // The true monotonic clock on Linux is not in fact CLOCK_MONOTONIC:
-        //
-        // CLOCK_MONOTONIC excludes elapsed time while the system is suspended (e.g. VM migration).
-        //
-        // CLOCK_BOOTTIME is the same as CLOCK_MONOTONIC but includes elapsed time during a suspend.
-        //
-        // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC, see
-        // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
-        const ts = stdx.os.clock_gettime(.boottime) catch
-            @panic("CLOCK_BOOTTIME required");
-        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
     fn vtable_realtime(context: *anyopaque) InstantUnix {

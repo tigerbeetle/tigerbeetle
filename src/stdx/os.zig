@@ -18,7 +18,7 @@
 //! - Naming matches original syscalls, but abides by our naming conventions.
 //! - For cross-platform functionality, default to syscall name on Linux.
 //! - Signatures and semantics may be slightly adjusted for convenience. For example, we use UNIX
-//!   epoch Windows.
+//!   epoch on Windows.
 //! - Avoid exposing platform specific types like `std.posix.clockid_t` publicly.
 //! - But code is only opportunistically cross platform, anything non-trivial is caller's job to
 //!   unify.
@@ -85,7 +85,7 @@ pub fn getrandom(buffer: []u8) void {
     switch (native_os) {
         .linux => getrandom_linux(buffer),
         .darwin => getrandom_darwin(buffer),
-        .windows => comptime unreachable,
+        .windows => comptime unreachable, // Windows needs a different, stateful API.
     }
 }
 
