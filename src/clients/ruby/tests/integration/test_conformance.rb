@@ -132,13 +132,25 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_create_accounts_returns_exists_for_a_duplicate_account
-    account = TB::Account.new(
-      id: TB.id,
-      ledger: 1,
-      code: 1
+    account_id = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
     )
-    @client.create_accounts([account])
-    results = @client.create_accounts([account])
+    results = @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::EXISTS, results[0].status)
   end
@@ -536,6 +548,7 @@ class TestConformance < TigerBeetleIntegrationTest
   def test_create_transfers_returns_exists_for_a_duplicate_transfer
     debit_account_id = TB.id
     credit_account_id = TB.id
+    transfer_id = TB.id
     @client.create_accounts(
       [
         TB::Account.new(
@@ -550,16 +563,30 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
-    transfer = TB::Transfer.new(
-      id: TB.id,
-      debit_account_id: debit_account_id,
-      credit_account_id: credit_account_id,
-      amount: 100,
-      ledger: 1,
-      code: 1
+    created_results = @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: transfer_id,
+          debit_account_id: debit_account_id,
+          credit_account_id: credit_account_id,
+          amount: 100,
+          ledger: 1,
+          code: 1
+        )
+      ]
     )
-    created_results = @client.create_transfers([transfer])
-    results = @client.create_transfers([transfer])
+    results = @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: transfer_id,
+          debit_account_id: debit_account_id,
+          credit_account_id: credit_account_id,
+          amount: 100,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::EXISTS, results[0].status)
     created_result = created_results[0]

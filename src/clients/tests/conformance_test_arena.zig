@@ -1,3 +1,9 @@
+//! A small arena allocator backed by a `FixedBufferAllocator`.
+//!
+//!
+//! Allows for marking and releasing, so emitters never need more than parsed
+//! suite + current case memory.
+
 const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
@@ -22,5 +28,9 @@ pub const Arena = struct {
     pub fn release(arena: *Arena, marked: usize) void {
         assert(marked <= arena.fba.end_index);
         arena.fba.end_index = marked;
+    }
+
+    pub fn reset(arena: *Arena) void {
+        arena.fba.reset();
     }
 };

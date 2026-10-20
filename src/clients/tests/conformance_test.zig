@@ -4,10 +4,11 @@ pub const Words = @import("conformance_test_printer.zig").Words;
 pub const ast = @import("conformance_test_ast.zig");
 const parser = @import("conformance_test_parser.zig");
 
-// In the generated test files, suites appear in the order defined here. We are trying to structure
-// this like a walkthrough for readers of the conformance test suite. The second tuple item is used
-// in the generated test identifiers e.g. test_get_account_balances_*.
-pub const suites: []const struct { []const u8, []const u8 } = &.{
+// In the generated test files, suites appear in the order defined here. We
+// are trying to structure this like a walkthrough for readers of the
+// conformance test suite. The second tuple item is used in the generated test
+// identifiers e.g. test_get_account_balances_*.
+const suites: []const struct { []const u8, []const u8 } = &.{
     .{ "client_create", "create_client" },
     .{ "ids_generate", "generate_ids" },
     .{ "accounts_create", "create_accounts" },
@@ -27,7 +28,7 @@ pub const suites: []const struct { []const u8, []const u8 } = &.{
     .{ "client_close", "close_client" },
 };
 
-pub const Source = parser.Source;
+const Source = parser.Source;
 
 pub const sources: []const Source = sources: {
     var result: [suites.len]Source = undefined;

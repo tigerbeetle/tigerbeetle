@@ -1,3 +1,9 @@
+//! This file defines a printer for the conformance test emitters.
+//!
+//! It encapsulates information regarding indents and comments, and exposes
+//! methods for indenting and dedenting so users of the printer never need to
+//! manually track the indent level.
+
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -62,6 +68,7 @@ pub const Printer = struct {
         try printer.writer.splatByteAll(printer.indent_char, width);
     }
 
+    // Used for alignment, not indenting.
     pub fn write_padding(printer: Printer, count: usize) !void {
         try printer.writer.splatByteAll(' ', count);
     }
@@ -139,8 +146,8 @@ pub const Printer = struct {
     }
 };
 
-// Any run of characters that isn't alphanumeric is a word break for conversion purposes. With
-// `include_underscore`, `_` is part of a word.
+// Any run of characters that isn't alphanumeric is a word break for
+// conversion purposes. With `include_underscore`, `_` is part of a word.
 pub const Words = struct {
     input: []const u8,
     index: usize = 0,

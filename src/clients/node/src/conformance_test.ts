@@ -254,17 +254,22 @@ test(
 test(
   'create_accounts_returns_exists_for_a_duplicate_account',
   async (client) => {
-    const account: Account = {
-      ...account_default,
-      id: id(),
-      ledger: 1,
-      code: 1,
-    }
+    const account_id = id()
     await client.createAccounts([
-      account,
+      {
+        ...account_default,
+        id: account_id,
+        ledger: 1,
+        code: 1,
+      },
     ])
     const results = await client.createAccounts([
-      account,
+      {
+        ...account_default,
+        id: account_id,
+        ledger: 1,
+        code: 1,
+      },
     ])
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].status, CreateAccountStatus.exists)
@@ -712,6 +717,7 @@ test(
   async (client) => {
     const debit_account_id = id()
     const credit_account_id = id()
+    const transfer_id = id()
     await client.createAccounts([
       {
         ...account_default,
@@ -726,20 +732,27 @@ test(
         code: 1,
       },
     ])
-    const transfer: Transfer = {
-      ...transfer_default,
-      id: id(),
-      debit_account_id: debit_account_id,
-      credit_account_id: credit_account_id,
-      amount: 100n,
-      ledger: 1,
-      code: 1,
-    }
     const created_results = await client.createTransfers([
-      transfer,
+      {
+        ...transfer_default,
+        id: transfer_id,
+        debit_account_id: debit_account_id,
+        credit_account_id: credit_account_id,
+        amount: 100n,
+        ledger: 1,
+        code: 1,
+      },
     ])
     const results = await client.createTransfers([
-      transfer,
+      {
+        ...transfer_default,
+        id: transfer_id,
+        debit_account_id: debit_account_id,
+        credit_account_id: credit_account_id,
+        amount: 100n,
+        ledger: 1,
+        code: 1,
+      },
     ])
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].status, CreateTransferStatus.exists)

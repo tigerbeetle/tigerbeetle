@@ -69,8 +69,7 @@ fn emit(printer: *Printer) !void {
     printer.dedent();
     try printer.write_indented("}");
     for (conformance.sources) |source| {
-        const suite_memory = printer.arena.mark();
-        defer printer.arena.release(suite_memory);
+        defer printer.arena.reset();
 
         const suite = try conformance.parse(printer.arena.allocator(), source);
         try printer.write_empty_line();
@@ -108,14 +107,13 @@ fn emit(printer: *Printer) !void {
 }
 
 fn emit_case(printer: *Printer, case: ast.Case) !void {
-    var scope = Scope{ .printer = printer };
-    for (case.steps) |step| try emit_step(&scope, step);
+    var scope = Scope{};
+    for (case.steps) |step| try emit_step(printer, &scope, step);
 }
 
-// Tracks what is already declared in the generated `test` body, since Go rejects both a redeclared
-// `err` and an unused one.
+// Tracks what is already declared in the generated `test` body, since Go
+// rejects both a redeclared `err` and an unused one.
 const Scope = struct {
-    printer: *Printer,
     error_declared: bool = false,
 
     fn error_assign(scope: *Scope, binds_result: bool) []const u8 {
@@ -124,18 +122,17 @@ const Scope = struct {
     }
 };
 
-fn emit_step(scope: *Scope, step: ast.Step) !void {
+fn emit_step(printer: *Printer, scope: *Scope, step: ast.Step) !void {
     switch (step) {
-        .binding => |binding| try emit_binding(scope, binding),
-        .call => |call| try emit_call(scope, call, .{}),
-        .assertion => |assertion| try emit_assertion(scope, assertion),
-        .directive => |directive| try emit_directive(scope, directive),
-        .create_client => |arguments| try emit_create_client(scope, arguments, .success),
+        .binding => |binding| try emit_binding(printer, scope, binding),
+        .call => |call| try emit_call(printer, scope, call, .{}),
+        .assertion => |assertion| try emit_assertion(printer, scope, assertion),
+        .directive => |directive| try emit_directive(printer, directive),
+        .create_client => |arguments| try emit_create_client(printer, scope, arguments, .success),
     }
 }
 
-fn emit_directive(scope: *Scope, directive: ast.HarnessDirective) !void {
-    const printer = scope.printer;
+fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
     switch (directive) {
         .sleep_ms => |ms| {
             try printer.print_indented("time.Sleep({d} * time.Millisecond)", .{ms});
@@ -149,9 +146,9 @@ fn emit_directive(scope: *Scope, directive: ast.HarnessDirective) !void {
             printer.indent();
             try printer.write_indented("defer wg.Done()");
 
-            var goroutine_scope = Scope{ .printer = printer };
-            try emit_invocation(&goroutine_scope, concurrently.call, .{
-                .error_action = .goroutine,
+            var goroutine_scope = Scope{};
+            try emit_call(printer, &goroutine_scope, concurrently.call, .{
+                .error_action = .t_error,
             });
 
             printer.dedent();
@@ -163,8 +160,7 @@ fn emit_directive(scope: *Scope, directive: ast.HarnessDirective) !void {
     }
 }
 
-fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
-    const printer = scope.printer;
+fn emit_binding(printer: *Printer, scope: *Scope, binding: ast.Binding) !void {
     const name = try printer.to_case_alloc(.GOCamelCase, binding.name);
     switch (binding.value) {
         .generate_id => {
@@ -191,60 +187,30 @@ fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
             const value = try render_field_access(printer, access);
             try printer.print_indented("{s} := {s}", .{ name, value });
         },
-        .record => |record| switch (record.type) {
-            .U128 => {
-                assert(record.fields.len == 1);
-                const value = try render_uint128(printer, record.fields[0].value.integer);
-                try printer.print_indented("{s} := {s}", .{ name, value });
-            },
-            .Account, .Transfer => {
-                const prefix = try printer.string_alloc("{s} := ", .{name});
-                try emit_record(printer, record, .{ .prefix = prefix, .typed = true });
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
-        .call => |call| try emit_call(scope, call, .{ .binding = name }),
-        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
+        .call => |call| try emit_call(printer, scope, call, .{ .binding = name }),
+        .integer,
+        .boolean,
+        .enum_literal,
+        .record,
+        .reference,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
+const ErrorAction = enum { expected, t_error, t_fatal };
+
 fn emit_call(
+    printer: *Printer,
     scope: *Scope,
     call: ast.Call,
     options: struct {
         binding: ?[]const u8 = null,
-        expect_error: bool = false,
+        error_action: ErrorAction = .t_fatal,
         client_error: ?ast.ClientError = null,
     },
 ) !void {
-    try emit_invocation(scope, call, .{
-        .binding = options.binding,
-        .error_action = if (options.expect_error) .expected else .fatal,
-        .client_error = options.client_error,
-    });
-}
-
-const ErrorAction = enum { fatal, goroutine, expected };
-
-fn emit_invocation(
-    scope: *Scope,
-    call: ast.Call,
-    options: struct {
-        binding: ?[]const u8 = null,
-        error_action: ErrorAction,
-        client_error: ?ast.ClientError = null,
-    },
-) !void {
-    const printer = scope.printer;
     switch (call.name) {
         .close_client => {
             assert(options.binding == null);
@@ -271,15 +237,7 @@ fn emit_invocation(
             } else {
                 try printer.print("[]{s}{{\n", .{@tagName(record_type)});
                 printer.indent();
-                for (call.arguments) |argument| switch (argument) {
-                    .record => |record| try emit_record(printer, record, .{ .suffix = "," }),
-                    .reference => |reference| {
-                        try printer.print_indented("{s},", .{
-                            try printer.to_case_alloc(.GOCamelCase, reference),
-                        });
-                    },
-                    else => unreachable,
-                };
+                for (call.arguments) |argument| try emit_record(printer, argument.record);
                 printer.dedent();
                 try printer.write_indented("})");
             }
@@ -309,15 +267,41 @@ fn emit_invocation(
     }
 
     switch (options.error_action) {
-        .fatal => try emit_error_check(printer),
-        .goroutine => {
-            try printer.write_indented("if err != nil {");
-            printer.indent();
-            try printer.write_indented("t.Error(err)");
-            printer.dedent();
-            try printer.write_indented("}");
-        },
         .expected => try emit_expected_error(printer, options.client_error),
+        .t_error => try emit_error_check(printer, .t_error),
+        .t_fatal => try emit_error_check(printer, .t_fatal),
+    }
+}
+
+fn emit_create_client(
+    printer: *Printer,
+    scope: *Scope,
+    arguments: ast.ClientInitArgs,
+    outcome: union(enum) { success, failure: ?ast.ClientError },
+) !void {
+    const cluster_id = try render_uint128(printer, arguments.cluster_id);
+    const replica_addresses = switch (arguments.replica_addresses) {
+        .server => "port",
+        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
+    };
+    switch (outcome) {
+        .success => {
+            try printer.print_indented("testClient, err {s} NewClient({s}, []string{{{s}}})", .{
+                scope.error_assign(true),
+                cluster_id,
+                replica_addresses,
+            });
+            try emit_error_check(printer, .t_fatal);
+            try printer.write_indented("testClient.Close()");
+        },
+        .failure => |client_error| {
+            try printer.print_indented("_, err {s} NewClient({s}, []string{{{s}}})", .{
+                scope.error_assign(false),
+                cluster_id,
+                replica_addresses,
+            });
+            try emit_expected_error(printer, client_error);
+        },
     }
 }
 
@@ -335,38 +319,6 @@ fn emit_expected_error(printer: *Printer, client_error: ?ast.ClientError) !void 
     try printer.write_indented("}");
 }
 
-fn emit_create_client(
-    scope: *Scope,
-    arguments: ast.ClientInitArgs,
-    outcome: union(enum) { success, failure: ?ast.ClientError },
-) !void {
-    const printer = scope.printer;
-    const cluster_id = try render_uint128(printer, arguments.cluster_id);
-    const replica_addresses = switch (arguments.replica_addresses) {
-        .server => "port",
-        .literal => |text| try printer.string_alloc("\"{s}\"", .{text}),
-    };
-    switch (outcome) {
-        .success => {
-            try printer.print_indented("testClient, err {s} NewClient({s}, []string{{{s}}})", .{
-                scope.error_assign(true),
-                cluster_id,
-                replica_addresses,
-            });
-            try emit_error_check(printer);
-            try printer.write_indented("testClient.Close()");
-        },
-        .failure => |client_error| {
-            try printer.print_indented("_, err {s} NewClient({s}, []string{{{s}}})", .{
-                scope.error_assign(false),
-                cluster_id,
-                replica_addresses,
-            });
-            try emit_expected_error(printer, client_error);
-        },
-    }
-}
-
 fn go_error_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
         .too_much_data => "ErrTooMuchData",
@@ -377,36 +329,27 @@ fn go_error_name(client_error: ast.ClientError) []const u8 {
     };
 }
 
-fn emit_error_check(printer: *Printer) !void {
+fn emit_error_check(printer: *Printer, method: enum { t_error, t_fatal }) !void {
     try printer.write_indented("if err != nil {");
     printer.indent();
-    try printer.write_indented("t.Fatal(err)");
+    try printer.print_indented("t.{s}(err)", .{switch (method) {
+        .t_error => "Error",
+        .t_fatal => "Fatal",
+    }});
     printer.dedent();
     try printer.write_indented("}");
 }
 
-fn emit_record(
-    printer: *Printer,
-    record: ast.Record,
-    options: struct {
-        prefix: []const u8 = "",
-        suffix: []const u8 = "",
-        typed: bool = false,
-    },
-) !void {
-    try printer.write_indent();
-    if (options.typed) {
-        try printer.print("{s}{s}{{\n", .{ options.prefix, @tagName(record.type) });
-    } else {
-        try printer.print("{s}{{\n", .{options.prefix});
-    }
+fn emit_record(printer: *Printer, record: ast.Record) !void {
+    try printer.write_indented("{");
     printer.indent();
     try emit_record_fields(printer, record);
     printer.dedent();
-    try printer.print_indented("}}{s}", .{options.suffix});
+    try printer.write_indented("},");
 }
 
-// Pads field names so values line up, which is what gofmt does to a multi-line composite literal.
+// Pads field names so values line up, which is what gofmt does to a
+// multi-line composite literal.
 fn emit_record_fields(printer: *Printer, record: ast.Record) !void {
     var name_width: usize = 0;
     for (record.fields) |field| {
@@ -423,8 +366,7 @@ fn emit_record_fields(printer: *Printer, record: ast.Record) !void {
     }
 }
 
-fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
-    const printer = scope.printer;
+fn emit_assertion(printer: *Printer, scope: *Scope, assertion: ast.Assertion) !void {
     switch (assertion) {
         .equal => |equal| {
             const actual = try printer.to_case_alloc(.GOCamelCase, equal.actual);
@@ -445,7 +387,7 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
             const name = try printer.to_case_alloc(.GOCamelCase, actual);
             try printer.print_indented("assert.Len(t, {s}, 0)", .{name});
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             const name = try printer.to_case_alloc(.GOCamelCase, ids);
             try printer.print_indented("for i := 1; i < len({s}); i++ {{", .{name});
             printer.indent();
@@ -486,11 +428,11 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
             });
         },
         .fail => |failure| switch (failure.action) {
-            .call => |call| try emit_call(scope, call, .{
-                .expect_error = true,
+            .call => |call| try emit_call(printer, scope, call, .{
+                .error_action = .expected,
                 .client_error = failure.client_error,
             }),
-            .create_client => |arguments| try emit_create_client(scope, arguments, .{
+            .create_client => |arguments| try emit_create_client(printer, scope, arguments, .{
                 .failure = failure.client_error,
             }),
         },
@@ -569,7 +511,6 @@ fn render_typed_value(
     }
 }
 
-// Ids reach the client as `Uint128`.
 fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
     switch (expression) {
         .generate_id => return "ID()",
@@ -601,7 +542,8 @@ fn go_operation_name(name: ast.Call.Name) []const u8 {
     };
 }
 
-// Go prefixes status names with the event: `CreateAccountStatus.created` is `AccountCreated`.
+// Go prefixes status names with the event: `CreateAccountStatus.created` is
+// `AccountCreated`.
 fn go_enum_prefix(enum_name: []const u8) []const u8 {
     if (std.mem.eql(u8, enum_name, "CreateAccountStatus")) return "Account";
     if (std.mem.eql(u8, enum_name, "CreateTransferStatus")) return "Transfer";
@@ -623,11 +565,7 @@ fn emit_new_client(printer: *Printer) !void {
     try printer.write_indented(
         "client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), []string{port})",
     );
-    try printer.write_indented("if err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
+    try emit_error_check(printer, .t_fatal);
     try printer.write_empty_line();
     try printer.write_indented("return client");
     printer.dedent();

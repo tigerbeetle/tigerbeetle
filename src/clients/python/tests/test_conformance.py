@@ -137,19 +137,23 @@ def test_create_accounts_returns_a_result_per_account_in_a_batch(client):
     assert results[2].status == tb.CreateAccountStatus.CREATED
 
 def test_create_accounts_returns_exists_for_a_duplicate_account(client):
-    account = tb.Account(
-        id=tb.id(),
-        ledger=1,
-        code=1,
-    )
+    account_id = tb.id()
     client.create_accounts(
         [
-            account,
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     results = client.create_accounts(
         [
-            account,
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     assert len(results) == 1
@@ -529,6 +533,7 @@ def test_create_transfers_returns_a_result_per_transfer_in_a_batch(client):
 def test_create_transfers_returns_exists_for_a_duplicate_transfer(client):
     debit_account_id = tb.id()
     credit_account_id = tb.id()
+    transfer_id = tb.id()
     client.create_accounts(
         [
             tb.Account(
@@ -543,22 +548,28 @@ def test_create_transfers_returns_exists_for_a_duplicate_transfer(client):
             ),
         ]
     )
-    transfer = tb.Transfer(
-        id=tb.id(),
-        debit_account_id=debit_account_id,
-        credit_account_id=credit_account_id,
-        amount=100,
-        ledger=1,
-        code=1,
-    )
     created_results = client.create_transfers(
         [
-            transfer,
+            tb.Transfer(
+                id=transfer_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=100,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     results = client.create_transfers(
         [
-            transfer,
+            tb.Transfer(
+                id=transfer_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=100,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     assert len(results) == 1
@@ -6836,19 +6847,23 @@ async def test_create_accounts_returns_a_result_per_account_in_a_batch_async(cli
 
 @async_test
 async def test_create_accounts_returns_exists_for_a_duplicate_account_async(client):
-    account = tb.Account(
-        id=tb.id(),
-        ledger=1,
-        code=1,
-    )
+    account_id = tb.id()
     await client.create_accounts(
         [
-            account,
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     results = await client.create_accounts(
         [
-            account,
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     assert len(results) == 1
@@ -7250,6 +7265,7 @@ async def test_create_transfers_returns_a_result_per_transfer_in_a_batch_async(c
 async def test_create_transfers_returns_exists_for_a_duplicate_transfer_async(client):
     debit_account_id = tb.id()
     credit_account_id = tb.id()
+    transfer_id = tb.id()
     await client.create_accounts(
         [
             tb.Account(
@@ -7264,22 +7280,28 @@ async def test_create_transfers_returns_exists_for_a_duplicate_transfer_async(cl
             ),
         ]
     )
-    transfer = tb.Transfer(
-        id=tb.id(),
-        debit_account_id=debit_account_id,
-        credit_account_id=credit_account_id,
-        amount=100,
-        ledger=1,
-        code=1,
-    )
     created_results = await client.create_transfers(
         [
-            transfer,
+            tb.Transfer(
+                id=transfer_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=100,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     results = await client.create_transfers(
         [
-            transfer,
+            tb.Transfer(
+                id=transfer_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=100,
+                ledger=1,
+                code=1,
+            ),
         ]
     )
     assert len(results) == 1

@@ -2,8 +2,6 @@
 //!
 //! It serves both as documentation, and as a way to silence LSP warnings regarding calls to unknown
 //! functions.
-//!
-//! Only `U128`, `Account`, and `Transfer` can be bound with `const`, we had no need for others yet.
 
 const tb = @import("vsr").tigerbeetle;
 
@@ -19,17 +17,15 @@ pub const QueryFilter = tb.QueryFilter;
 pub const Transfer = tb.Transfer;
 pub const TransferFlags = tb.TransferFlags;
 
-/// Transpiles to language-specific u128 implementations where applicable.
-pub const U128 = struct { value: u128 };
 pub const uint128_max = 340282366920938463463374607431768211455;
 
 /// Client errors for `assert_fail_with`. Emitters map them for the target language.
 pub const ClientError = enum {
-    too_much_data,
-    client_closed,
     address_invalid,
     address_limit_exceeded,
+    client_closed,
     cluster_id_invalid,
+    too_much_data,
 };
 
 const ct_compile_error = "conformance test suites are parsed, not compiled";
@@ -77,12 +73,14 @@ pub fn generate_ids(count: u32) []const u128 {
     @compileError(ct_compile_error);
 }
 
+/// Increments the variable by the value of `by`.
 pub fn increment(reference: u64, by: u64) u64 {
     _ = reference;
     _ = by;
     @compileError(ct_compile_error);
 }
 
+/// Decrements a varible by the value of `by`.
 pub fn decrement(reference: u64, by: u64) u64 {
     _ = reference;
     _ = by;
@@ -96,47 +94,52 @@ pub fn concurrently(n: u32, call: anytype) void {
     @compileError(ct_compile_error);
 }
 
+/// Translates to a sleep of `ms` milliseconds.
 pub fn sleep_ms(ms: u32) void {
     _ = ms;
     @compileError(ct_compile_error);
 }
 
-/// Compares only the fields listed in `expected`.
+/// Asserts record equality by only comparing the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;
     _ = expected;
     @compileError(ct_compile_error);
 }
 
+/// Asserts that the passed in slice is empty.
 pub fn assert_empty(actual: anytype) void {
     _ = actual;
     @compileError(ct_compile_error);
 }
 
-pub fn assert_ascending(ids: []const u128) void {
+/// Asserts ascended sorting of the provided ID slice.
+pub fn assert_id_ascending(ids: []const u128) void {
     _ = ids;
     @compileError(ct_compile_error);
 }
 
+/// Asserts that `actual` is greater than `value`.
 pub fn assert_greater_than(actual: anytype, value: anytype) void {
     _ = actual;
     _ = value;
     @compileError(ct_compile_error);
 }
 
-/// The wrapped call must fail with any client error.
+/// Asserts that the wrapped call fails with any client error.
 pub fn assert_fail(call: anytype) void {
     _ = call;
     @compileError(ct_compile_error);
 }
 
-/// The wrapped call must fail with a specific client error.
+/// Asserts that the wrapped call fails with a specific client error.
 pub fn assert_fail_with(call: anytype, client_error: ClientError) void {
     _ = call;
     _ = client_error;
     @compileError(ct_compile_error);
 }
 
+/// Encapsulates all client operations.
 pub const Client = struct {
     pub fn create_accounts(client: Client, accounts: anytype) []const CreateAccountResult {
         _ = client;

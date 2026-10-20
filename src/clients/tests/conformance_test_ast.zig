@@ -14,7 +14,7 @@ pub const Case = struct {
     steps: []const Step,
     requirement: ?Requirement = null,
 
-    pub const Requirement = stdx.EnumType(api_decl_names(is_requirement));
+    pub const Requirement = stdx.EnumType(api_decl_names_matching(is_requirement));
 };
 
 pub const Step = union(enum) {
@@ -30,8 +30,8 @@ pub const Binding = struct {
     value: Expression,
 };
 
-/// `generate_ids` sleeps a millisecond every `ids_between_sleeps` ids, so that a batch spans
-/// several clock ticks rather than a single one.
+// `generate_ids` sleeps a millisecond every `ids_between_sleeps` ids, so
+// that a batch spans several clock ticks rather than a single one.
 pub const ids_between_sleeps = 10_000;
 
 pub const Expression = union(enum) {
@@ -96,12 +96,14 @@ pub const Assertion = union(enum) {
     },
     equal_field: FieldComparison,
     empty: []const u8,
-    ascending: []const u8,
+    id_ascending: []const u8,
     greater_than: FieldComparison,
     fail: struct {
         action: Action,
         client_error: ?ClientError,
     },
+
+    pub const Name = stdx.EnumType(api_decl_names_matching(is_assertion));
 
     pub const Action = union(enum) {
         call: Call,
@@ -122,22 +124,18 @@ pub const Record = struct {
     type: Type,
     fields: []const FieldValue,
 
-    pub const Type = stdx.EnumType(api_decl_names(is_record));
+    pub const Type = stdx.EnumType(api_decl_names_matching(is_record));
 
-    // NOTE: should we generate this so it won't get out of sync?
-    const flags_records = .{
-        api.AccountFlags, api.AccountFilterFlags, api.QueryFilterFlags, api.TransferFlags,
-    };
-
+    // Returns the API struct type for a `Record.Type`.
     pub fn Struct(comptime record_type: Type) type {
         return @field(api, @tagName(record_type));
     }
 
+    // NOTE: This assumes that all packed structs are flags.
     pub fn is_flags(record_type: Type) bool {
         switch (record_type) {
             inline else => |comptime_type| {
-                inline for (flags_records) |Flags| if (Struct(comptime_type) == Flags) return true;
-                return false;
+                return @typeInfo(Struct(comptime_type)).@"struct".layout == .@"packed";
             },
         }
     }
@@ -179,13 +177,14 @@ pub const Field = struct {
     };
 };
 
+// Returns the unqualified type name: a.b.SomeEnum -> SomeEnum.
 fn type_name(comptime T: type) []const u8 {
     const name = @typeName(T);
     const index = std.mem.lastIndexOfScalar(u8, name, '.').?;
     return name[index + 1 ..];
 }
 
-pub fn api_decl_names(
+fn api_decl_names_matching(
     comptime filter: fn (comptime name: [:0]const u8) bool,
 ) []const [:0]const u8 {
     const decls = @typeInfo(api).@"struct".decls;
@@ -199,7 +198,7 @@ pub fn api_decl_names(
     return stdx.comptime_slice(names, count);
 }
 
-pub fn is_assertion(comptime name: [:0]const u8) bool {
+fn is_assertion(comptime name: [:0]const u8) bool {
     return std.mem.startsWith(u8, name, "assert_");
 }
 

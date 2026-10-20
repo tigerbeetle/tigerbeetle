@@ -125,8 +125,7 @@ fn emit(printer: *Printer) !void {
         \\
     );
     for (conformance.sources) |source| {
-        const suite_memory = printer.arena.mark();
-        defer printer.arena.release(suite_memory);
+        defer printer.arena.reset();
 
         const suite = try conformance.parse(printer.arena.allocator(), source);
         try printer.write_empty_line();
@@ -248,7 +247,7 @@ fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
                 .{concurrently.n},
             );
             printer.indent();
-            try emit_invocation(printer, concurrently.call, .{ .awaited = false });
+            try emit_call(printer, concurrently.call, .{ .awaited = false });
             printer.dedent();
             try printer.write_indented(")");
             try printer.write_indented("await Promise.all(operations)");
@@ -259,7 +258,8 @@ fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
 fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
     switch (binding.value) {
         .generate_id, .index, .field_access => {
-            try emit_binding_value(printer, binding.name, binding.value);
+            const rendered = try render_expression(printer, binding.value);
+            try printer.print_indented("const {s} = {s}", .{ binding.name, rendered });
         },
         .generate_ids => |count| {
             try printer.print_indented("const {s}: bigint[] = []", .{binding.name});
@@ -276,55 +276,22 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
             printer.dedent();
             try printer.write_indented("}");
         },
-        .record => |record| switch (record.type) {
-            .U128 => {
-                try emit_binding_value(printer, binding.name, binding.value);
-            },
-            .Account, .Transfer => {
-                const prefix = try printer.string_alloc("const {s}: {s} = ", .{
-                    binding.name, @tagName(record.type),
-                });
-                try emit_record(printer, record, .{ .prefix = prefix });
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
         .call => |call| {
             const prefix = try printer.string_alloc("const {s} = ", .{binding.name});
             try emit_call(printer, call, .{ .prefix = prefix });
         },
-        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
+        .integer,
+        .boolean,
+        .enum_literal,
+        .record,
+        .reference,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
-fn emit_binding_value(
-    printer: *Printer,
-    name: []const u8,
-    value: ast.Expression,
-) !void {
-    const rendered = try render_expression(printer, value);
-    try printer.print_indented("const {s} = {s}", .{ name, rendered });
-}
-
 fn emit_call(
-    printer: *Printer,
-    call: ast.Call,
-    options: struct {
-        prefix: []const u8 = "",
-    },
-) !void {
-    try emit_invocation(printer, call, .{ .prefix = options.prefix });
-}
-
-fn emit_invocation(
     printer: *Printer,
     call: ast.Call,
     options: struct {
@@ -349,11 +316,9 @@ fn emit_invocation(
                 options.prefix, awaited, try method_name(printer, call.name),
             });
             printer.indent();
-            for (call.arguments) |argument| switch (argument) {
-                .record => |record| try emit_record(printer, record, .{ .suffix = "," }),
-                .reference => |reference| try printer.print_indented("{s},", .{reference}),
-                else => unreachable,
-            };
+            for (call.arguments) |argument| {
+                try emit_record(printer, argument.record, .{ .suffix = "," });
+            }
             printer.dedent();
             try printer.write_indented("])");
         },
@@ -421,7 +386,7 @@ fn emit_assertion(
         .empty => |actual| {
             try printer.print_indented("assert.strictEqual({s}.length, 0)", .{actual});
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             try printer.print_indented("for (let i = 1; i < {s}.length; i++) {{", .{ids});
             printer.indent();
             try printer.print_indented("assert.ok({s}[i - 1] < {s}[i])", .{ ids, ids });
@@ -455,7 +420,7 @@ fn emit_assertion(
             .call => |call| {
                 try printer.write_indented("await assert.rejects(async (): Promise<void> => {");
                 printer.indent();
-                try emit_invocation(printer, call, .{});
+                try emit_call(printer, call, .{});
                 printer.dedent();
                 if (failure.client_error) |client_error| {
                     try printer.write_indented("}, (error: unknown): boolean => {");
@@ -503,7 +468,6 @@ fn record_default(record_type: ast.Record.Type) []const u8 {
         .CreateTransferResult,
         .QueryFilterFlags,
         .TransferFlags,
-        .U128,
         => unreachable,
     };
 }
@@ -514,25 +478,7 @@ fn render_expression(
 ) std.mem.Allocator.Error![]const u8 {
     switch (expression) {
         .generate_id => return "id()",
-        .call, .generate_ids => unreachable,
-        .record => |record| switch (record.type) {
-            .U128 => {
-                assert(record.fields.len == 1);
-                return render_bigint(printer, record.fields[0].value.integer);
-            },
-            .Account,
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .Transfer,
-            .TransferFlags,
-            => unreachable,
-        },
+        .call, .generate_ids, .record => unreachable,
         .integer => |text| return text,
         .boolean => |value| return if (value) "true" else "false",
         .enum_literal => unreachable,
@@ -549,7 +495,6 @@ fn render_expression(
     }
 }
 
-// Ids reach the client as `bigint`.
 fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
     switch (expression) {
         .generate_id => return "id()",
@@ -582,7 +527,8 @@ fn render_field_access(
     });
 }
 
-// Only works for 64-bit fields for now because it emits a `bigint`.
+// `arithmetic.reference` must hold a `bigint`, because the result is a
+// `bigint` expression.
 fn render_arithmetic(
     printer: *Printer,
     arithmetic: ast.Expression.Arithmetic,

@@ -30,10 +30,10 @@ test "returns a result per account in a batch" {
 }
 
 test "returns exists for a duplicate account" {
-    const account = ct.Account{ .id = ct.generate_id(), .ledger = 1, .code = 1 };
-    client.create_accounts(.{account});
+    const account_id = ct.generate_id();
+    client.create_accounts(.{.{ .id = account_id, .ledger = 1, .code = 1 }});
 
-    const results = client.create_accounts(.{account});
+    const results = client.create_accounts(.{.{ .id = account_id, .ledger = 1, .code = 1 }});
 
     ct.assert_equal(results, .{.{ .status = .exists }});
 }

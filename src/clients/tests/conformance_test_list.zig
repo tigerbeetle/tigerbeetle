@@ -11,8 +11,9 @@ const stdx = @import("stdx");
 const clients_directory = "src/clients/";
 const languages_count = 6;
 const cases_max = 32;
-// NOTE: We still have some long lines in the generators, so we want a limit well above that.
-const generated_line_length_max = 256;
+// NOTE: We still have some long lines in the generators, mostly due to test
+// names.
+const generated_line_length_max = 150;
 
 const Language = struct {
     client: []const u8,
@@ -24,8 +25,9 @@ const Lines = struct {
     async: ?u32 = null,
 };
 
-// Dumps a list of suites and tests in Markdown format, with links to the generated tests.
-// Arguments: the path of each language's generated test file, relative to the repository root.
+// Dumps a list of suites and tests in Markdown format, with links to the
+// generated tests.  Arguments: the path of each language's generated test
+// file, relative to the repository root.
 pub fn main(init: std.process.Init) !void {
     var memory: [Arena.default_memory_size]u8 = undefined;
     var arena = Arena.init(&memory);
@@ -50,8 +52,7 @@ pub fn main(init: std.process.Init) !void {
         \\
     , .{"/src/clients/tests/conformance_test_list.zig"});
     for (conformance.sources) |source| {
-        const suite_memory = printer.arena.mark();
-        defer printer.arena.release(suite_memory);
+        defer printer.arena.reset();
 
         const suite = try conformance.parse(printer.arena.allocator(), source);
         assert(suite.cases.len <= cases_max);
@@ -156,6 +157,8 @@ fn scan(
     }
 }
 
+// Concatenates the inputs into `buffer`, keeping only alphanumeric
+// characters, lowercased.
 fn normalize(buffer: []u8, inputs: []const []const u8) []const u8 {
     var length: usize = 0;
     for (inputs) |input| {
