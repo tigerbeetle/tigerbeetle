@@ -74,21 +74,32 @@ test "returns a result per transfer in a batch" {
 test "returns exists for a duplicate transfer" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
+    const transfer_id = ct.generate_id();
     client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
-    const transfer = ct.Transfer{
-        .id = ct.generate_id(),
-        .debit_account_id = debit_account_id,
-        .credit_account_id = credit_account_id,
-        .amount = 100,
-        .ledger = 1,
-        .code = 1,
-    };
-    const created_results = client.create_transfers(.{transfer});
+    const created_results = client.create_transfers(.{
+        .{
+            .id = transfer_id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 100,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
 
-    const results = client.create_transfers(.{transfer});
+    const results = client.create_transfers(.{
+        .{
+            .id = transfer_id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 100,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
 
     ct.assert_equal(results, .{.{ .status = .exists }});
 

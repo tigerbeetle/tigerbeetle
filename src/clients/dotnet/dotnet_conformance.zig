@@ -96,8 +96,7 @@ fn emit(printer: *Printer) !void {
             ,
         });
         for (conformance.sources) |source| {
-            const suite_memory = printer.arena.mark();
-            defer printer.arena.release(suite_memory);
+            defer printer.arena.reset();
 
             const suite = try conformance.parse(printer.arena.allocator(), source);
             try printer.write_empty_line();
@@ -198,12 +197,12 @@ fn emit_directive(
             try printer.write_indented("{");
             printer.indent();
             switch (variant) {
-                .synchronous => try emit_invocation(printer, concurrently.call, variant, .{
+                .synchronous => try emit_call(printer, concurrently.call, variant, .{
                     .prefix = "tasks[index] = Task.Run(() => ",
                     .suffix = ");",
                     .awaited = false,
                 }),
-                .asynchronous => try emit_invocation(printer, concurrently.call, variant, .{
+                .asynchronous => try emit_call(printer, concurrently.call, variant, .{
                     .prefix = "tasks[index] = ",
                     .suffix = ";",
                     .awaited = false,
@@ -253,36 +252,18 @@ fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant)
                 try render_field_access(printer, access),
             });
         },
-        .record => |record| switch (record.type) {
-            .Account, .Transfer => {
-                try printer.print_indented("var {s} = new {s}", .{ name, @tagName(record.type) });
-                try emit_record_fields(printer, record);
-                try printer.write(";\n");
-            },
-            .U128 => {
-                assert(record.fields.len == 1);
-                const text = record.fields[0].value.integer;
-                try printer.print_indented("UInt128 {s} = {s};", .{
-                    name,
-                    try render_uint128(printer, text),
-                });
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
         .call => |call| {
             const prefix = try printer.string_alloc("var {s} = ", .{name});
             try emit_call(printer, call, variant, .{ .prefix = prefix });
         },
-        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
+        .integer,
+        .boolean,
+        .enum_literal,
+        .record,
+        .reference,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
@@ -294,23 +275,6 @@ fn emit_call(
         prefix: []const u8 = "",
         suffix: []const u8 = ";",
         awaited: bool = true,
-    },
-) !void {
-    try emit_invocation(printer, call, variant, .{
-        .prefix = options.prefix,
-        .suffix = options.suffix,
-        .awaited = options.awaited,
-    });
-}
-
-fn emit_invocation(
-    printer: *Printer,
-    call: ast.Call,
-    variant: ClientVariant,
-    options: struct {
-        prefix: []const u8,
-        suffix: []const u8,
-        awaited: bool,
     },
 ) !void {
     const await_keyword = switch (variant) {
@@ -340,19 +304,11 @@ fn emit_invocation(
             }
             try printer.print("new {s}[] {{\n", .{record_type});
             printer.indent();
-            for (call.arguments) |argument| switch (argument) {
-                .record => |record| {
-                    try printer.write_indented("new()");
-                    try emit_record_fields(printer, record);
-                    try printer.write(",\n");
-                },
-                .reference => |reference| {
-                    try printer.print_indented("{s},", .{
-                        try printer.to_case_alloc(.camelCase, reference),
-                    });
-                },
-                else => unreachable,
-            };
+            for (call.arguments) |argument| {
+                try printer.write_indented("new()");
+                try emit_record_fields(printer, argument.record);
+                try printer.write(",\n");
+            }
             printer.dedent();
             try printer.print_indented("}}){s}", .{options.suffix});
         },
@@ -453,7 +409,7 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
                 try printer.to_case_alloc(.camelCase, actual),
             });
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             const name = try printer.to_case_alloc(.camelCase, ids);
             try printer.print_indented(
                 "for (var index = 1; index < {s}.Length; index++)",
@@ -582,14 +538,13 @@ fn render_arithmetic(
     });
 }
 
-// Ids reach the client as `UInt128`.
 fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
-    switch (expression) {
-        .generate_id => return "ID.Create()",
-        .reference => |name| return printer.to_case_alloc(.camelCase, name),
-        .integer => |text| return render_uint128(printer, text),
+    return switch (expression) {
+        .generate_id => "ID.Create()",
+        .reference => |name| printer.to_case_alloc(.camelCase, name),
+        .integer => |text| render_uint128(printer, text),
         else => unreachable,
-    }
+    };
 }
 
 fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {

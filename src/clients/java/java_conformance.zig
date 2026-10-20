@@ -7,8 +7,8 @@ const ast = conformance.ast;
 const Arena = conformance.Arena;
 const Printer = conformance.Printer;
 
-// Mirrors `big_integer.fields` in `java_bindings.zig`. Fields here become `BigInteger`, others
-// `byte[]`.
+// Mirrors `big_integer.fields` in `java_bindings.zig`. Fields here become
+// `BigInteger`, others `byte[]`.
 const big_integer_fields = [_][]const u8{
     "credits_posted",
     "credits_pending",
@@ -114,8 +114,7 @@ fn emit(printer: *Printer) !void {
             ,
         });
         for (conformance.sources) |source| {
-            const suite_memory = printer.arena.mark();
-            defer printer.arena.release(suite_memory);
+            defer printer.arena.reset();
 
             const suite = try conformance.parse(printer.arena.allocator(), source);
             try printer.write_empty_line();
@@ -151,12 +150,33 @@ fn emit(printer: *Printer) !void {
     try printer.write("}\n");
 }
 
+const Scope = struct {
+    // The set of binding names that hold id arrays.
+    id_arrays: std.StringHashMap(void),
+    // The set of batch names that were already walked.
+    walked: std.StringHashMap(void),
+
+    fn init(allocator: std.mem.Allocator) Scope {
+        return .{
+            .id_arrays = std.StringHashMap(void).init(allocator),
+            .walked = std.StringHashMap(void).init(allocator),
+        };
+    }
+
+    // Returns whether `batch` was walked before. A batch is a cursor, so a
+    // second pass over one has to rewind first.
+    fn walk(scope: *Scope, batch: []const u8) !bool {
+        const entry = try scope.walked.getOrPut(batch);
+        return entry.found_existing;
+    }
+};
+
 fn emit_case(
     printer: *Printer,
     case: ast.Case,
     variant: ClientVariant,
 ) !void {
-    var scope = Scope.init(printer);
+    var scope = Scope.init(printer.arena.allocator());
     const consumed = try printer.arena.allocator().alloc(bool, case.steps.len);
     @memset(consumed, false);
     for (case.steps, 0..) |step, index| {
@@ -164,22 +184,35 @@ fn emit_case(
         if (step == .binding and step.binding.value == .index and
             !scope.id_arrays.contains(step.binding.value.index.reference))
         {
-            try emit_row_group(&scope, case.steps, index, consumed);
+            try emit_row_group(printer, &scope, case.steps, index, consumed);
         } else {
-            try emit_step(&scope, step, variant);
+            try emit_step(printer, &scope, step, variant);
         }
     }
 }
 
-// A Java result batch is a cursor, not a list of rows, so indexed bindings never become locals.
-// Each row is reached with `next()`, and its assertions follow it, like in `IntegrationTest`.
+// A Java result batch is a cursor, not a list of rows, so indexed bindings
+// never become locals. Each row is reached with `next()`, and its assertions
+// follow it, like in `IntegrationTest`.
+//
+//     // Suite test:
+//     const first = results[0];
+//     const second = results[1];
+//     ct.assert_equal(first.status, .exists);
+//     ct.assert_equal(second.status, .created);
+//
+//     // Generated Java:
+//     assertTrue(results.next());
+//     assertEquals(CreateAccountStatus.Exists, results.getStatus());
+//     assertTrue(results.next());
+//     assertEquals(CreateAccountStatus.Created, results.getStatus());
 fn emit_row_group(
+    printer: *Printer,
     scope: *Scope,
     steps: []const ast.Step,
     start: usize,
     consumed: []bool,
 ) !void {
-    const printer = scope.printer;
     const origin = steps[start].binding.value.index;
     const batch = try printer.to_case_alloc(.camelCase, origin.reference);
 
@@ -196,7 +229,9 @@ fn emit_row_group(
         consumed[index] = true;
     }
 
-    try scope.walk(batch);
+    if (try scope.walk(batch)) {
+        try printer.print_indented("{s}.beforeFirst();", .{batch});
+    }
     var position: u32 = 0;
     for (rows.items) |entry| {
         const row = entry.name;
@@ -249,7 +284,15 @@ fn emit_row_group(
     }
 }
 
-// There is no row local, so a field bound off a row is captured while the cursor is on it.
+// Fields are bound from a row when the cursor is on it.
+//
+//     // Suite test:
+//     const result = results[0];
+//     const timestamp = result.timestamp;
+//
+//     // Generated Java:
+//     assertTrue(results.next());
+// final var timestamp = results.getTimestamp();
 fn emit_row_captures(
     printer: *Printer,
     steps: []const ast.Step,
@@ -270,6 +313,19 @@ fn emit_row_captures(
     }
 }
 
+// Compares two row fields while the cursor is on `row`.
+//
+//     // Suite test:
+//     const created_result = created_results[0];
+//     const result = results[0];
+//     ct.assert_equal(result.timestamp, created_result.timestamp);
+//
+//     // Generated Java:
+//     assertTrue(createdResults.next());
+//     final var createdResultTimestamp = createdResults.getTimestamp();
+//     results.beforeFirst();
+//     assertTrue(results.next());
+//     assertEquals(createdResultTimestamp, results.getTimestamp());
 fn emit_row_equal_field(
     printer: *Printer,
     steps: []const ast.Step,
@@ -354,38 +410,13 @@ fn row_position(steps: []const ast.Step, row: []const u8) struct { batch: usize,
     unreachable;
 }
 
-// Java has no standalone record type, only batches, so a bound record is written out at each use.
-const Scope = struct {
-    printer: *Printer,
-    records: std.StringHashMap(ast.Record),
-    id_arrays: std.StringHashMap(void),
-    walked: std.StringHashMap(void),
-
-    fn init(printer: *Printer) Scope {
-        return .{
-            .printer = printer,
-            .records = std.StringHashMap(ast.Record).init(printer.arena.allocator()),
-            .id_arrays = std.StringHashMap(void).init(printer.arena.allocator()),
-            .walked = std.StringHashMap(void).init(printer.arena.allocator()),
-        };
-    }
-
-    fn walk(scope: *Scope, batch: []const u8) !void {
-        const entry = try scope.walked.getOrPut(batch);
-        if (!entry.found_existing) return;
-        const printer = scope.printer;
-        // A batch is a cursor, so a second pass over one has to rewind first.
-        try printer.print_indented("{s}.beforeFirst();", .{batch});
-    }
-};
-
-fn emit_step(scope: *Scope, step: ast.Step, variant: ClientVariant) !void {
+fn emit_step(printer: *Printer, scope: *Scope, step: ast.Step, variant: ClientVariant) !void {
     switch (step) {
-        .binding => |binding| try emit_binding(scope, binding, variant),
-        .call => |call| try emit_call(scope, call, variant, .{}),
-        .assertion => |assertion| try emit_assertion(scope, assertion, variant),
-        .directive => |directive| try emit_directive(scope, directive, variant),
-        .create_client => |arguments| try emit_create_client(scope.printer, arguments, .success),
+        .binding => |binding| try emit_binding(printer, scope, binding, variant),
+        .call => |call| try emit_call(printer, call, variant, .{}),
+        .assertion => |assertion| try emit_assertion(printer, scope, assertion, variant),
+        .directive => |directive| try emit_directive(printer, directive, variant),
+        .create_client => |arguments| try emit_create_client(printer, arguments, .success),
     }
 }
 
@@ -438,11 +469,10 @@ fn emit_create_client(
 }
 
 fn emit_directive(
-    scope: *Scope,
+    printer: *Printer,
     directive: ast.HarnessDirective,
     variant: ClientVariant,
 ) !void {
-    const printer = scope.printer;
     switch (directive) {
         .sleep_ms => |ms| try printer.print_indented("Thread.sleep({d});", .{ms}),
         .concurrently => |concurrently| {
@@ -454,7 +484,7 @@ fn emit_directive(
                     concurrently.n,
                 });
                 printer.indent();
-                try emit_invocation(scope, concurrently.call, variant, .{ .task = true });
+                try emit_call(printer, concurrently.call, variant, .{ .task = true });
                 printer.dedent();
                 try printer.write_indented("}");
                 try printer.write_indented("CompletableFuture.allOf(tasks).join();");
@@ -474,8 +504,7 @@ fn emit_directive(
             try printer.write_indented("try {");
 
             printer.indent();
-            var thread_scope = Scope.init(printer);
-            try emit_invocation(&thread_scope, concurrently.call, variant, .{});
+            try emit_call(printer, concurrently.call, variant, .{});
             printer.dedent();
 
             try printer.write_indented("} catch (Exception exception) {");
@@ -508,8 +537,12 @@ fn emit_directive(
     }
 }
 
-fn emit_binding(scope: *Scope, binding: ast.Binding, variant: ClientVariant) !void {
-    const printer = scope.printer;
+fn emit_binding(
+    printer: *Printer,
+    scope: *Scope,
+    binding: ast.Binding,
+    variant: ClientVariant,
+) !void {
     const name = try printer.to_case_alloc(.camelCase, binding.name);
     switch (binding.value) {
         .generate_id => {
@@ -537,30 +570,11 @@ fn emit_binding(scope: *Scope, binding: ast.Binding, variant: ClientVariant) !vo
                 name, reference, index.index,
             });
         },
-        .record => |record| switch (record.type) {
-            .U128 => {
-                assert(record.fields.len == 1);
-                const value = try render_uint128(printer, record.fields[0].value.integer);
-                try printer.print_indented("final var {s} = {s};", .{ name, value });
-            },
-            .Account, .Transfer => {
-                try scope.records.put(binding.name, try hoist_record(scope, name, record));
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
-        .call => |call| try emit_call(scope, call, variant, .{ .binding = name }),
+        .call => |call| try emit_call(printer, call, variant, .{ .binding = name }),
         .integer,
         .boolean,
         .enum_literal,
+        .record,
         .reference,
         .field_access,
         .increment,
@@ -569,48 +583,8 @@ fn emit_binding(scope: *Scope, binding: ast.Binding, variant: ClientVariant) !vo
     }
 }
 
-// Puts each generated id into a local and returns the record with the id fields using it.
-fn hoist_record(
-    scope: *Scope,
-    name: []const u8,
-    record: ast.Record,
-) !ast.Record {
-    const printer = scope.printer;
-    const fields = try printer.arena.allocator().alloc(ast.FieldValue, record.fields.len);
-    for (record.fields, 0..) |field, index| {
-        if (field.value != .generate_id) {
-            fields[index] = field;
-            continue;
-        }
-        const local = try printer.string_alloc("{s}{s}", .{
-            name,
-            try printer.to_case_alloc(.PascalCase, field.field.name),
-        });
-        try printer.print_indented("final var {s} = UInt128.id();", .{local});
-        fields[index] = .{ .field = field.field, .value = .{ .reference = local } };
-    }
-    return .{ .type = record.type, .fields = fields };
-}
-
 fn emit_call(
-    scope: *Scope,
-    call: ast.Call,
-    variant: ClientVariant,
-    options: struct {
-        binding: ?[]const u8 = null,
-        expect_error: bool = false,
-        client_error: ?ast.ClientError = null,
-    },
-) !void {
-    try emit_invocation(scope, call, variant, .{
-        .binding = options.binding,
-        .expect_error = options.expect_error,
-        .client_error = options.client_error,
-    });
-}
-
-fn emit_invocation(
-    scope: *Scope,
+    printer: *Printer,
     call: ast.Call,
     variant: ClientVariant,
     options: struct {
@@ -620,7 +594,6 @@ fn emit_invocation(
         task: bool = false,
     },
 ) !void {
-    const printer = scope.printer;
     switch (call.name) {
         .close_client => {
             assert(options.binding == null);
@@ -630,15 +603,26 @@ fn emit_invocation(
         else => {},
     }
 
-    // An unbound call uses a fixed local name for its input, so a block lets the name repeat.
-    const scoped = options.binding == null and !options.task;
-    if (scoped) {
-        try printer.write_indented("{");
-        printer.indent();
+    // The result is declared before the block, so it stays visible after it.
+    if (options.binding) |binding| {
+        const result_type = switch (call.name) {
+            .create_accounts => "CreateAccountResultBatch",
+            .create_transfers => "CreateTransferResultBatch",
+            .lookup_accounts, .query_accounts => "AccountBatch",
+            .lookup_transfers, .get_account_transfers, .query_transfers => "TransferBatch",
+            .get_account_balances => "AccountBalanceBatch",
+            .close_client => unreachable,
+        };
+        try printer.print_indented("final {s} {s};", .{ result_type, binding });
     }
 
+    // The argument uses a fixed local name, so we put the call in a block so
+    // the names don't clash.
+    try printer.write_indented("{");
+    printer.indent();
+
     // The input goes into a final local, which the `assertThrows` lambda can use.
-    const argument = try emit_argument(scope, call, options.binding);
+    const argument = try emit_argument(printer, call);
 
     const operation = java_operation_name(call.name);
     if (options.expect_error) {
@@ -670,7 +654,7 @@ fn emit_invocation(
         }
     } else {
         try printer.write_indent();
-        if (options.binding) |binding| try printer.print("final var {s} = ", .{binding});
+        if (options.binding) |binding| try printer.print("{s} = ", .{binding});
         if (options.task) try printer.write("tasks[index] = ");
         switch (variant) {
             .synchronous => try printer.print("client.{s}({s});\n", .{ operation, argument }),
@@ -682,57 +666,32 @@ fn emit_invocation(
         }
     }
 
-    if (scoped) {
-        printer.dedent();
-        try printer.write_indented("}");
-    }
+    printer.dedent();
+    try printer.write_indented("}");
 }
 
-fn local_name(
-    printer: *Printer,
-    binding: ?[]const u8,
-    suffix: []const u8,
-    unbound: []const u8,
-) ![]const u8 {
-    const name = binding orelse return unbound;
-    return printer.string_alloc("{s}{s}", .{ name, suffix });
-}
-
-fn emit_argument(
-    scope: *Scope,
-    call: ast.Call,
-    binding: ?[]const u8,
-) ![]const u8 {
-    const printer = scope.printer;
+fn emit_argument(printer: *Printer, call: ast.Call) ![]const u8 {
+    const java_type = switch (call.name) {
+        .create_accounts => "AccountBatch",
+        .create_transfers => "TransferBatch",
+        .lookup_accounts, .lookup_transfers => "IdBatch",
+        .get_account_transfers, .get_account_balances => "AccountFilter",
+        .query_accounts, .query_transfers => "QueryFilter",
+        .close_client => unreachable,
+    };
+    const name = try printer.to_case_alloc(.camelCase, java_type);
     switch (call.name) {
         .create_accounts, .create_transfers => {
-            const accounts = call.name == .create_accounts;
-            const batch_type = if (accounts) "AccountBatch" else "TransferBatch";
-            const name = try local_name(
-                printer,
-                binding,
-                "Batch",
-                if (accounts) "accountsBatch" else "transfersBatch",
-            );
             try printer.print_indented("final var {s} = new {s}({d});", .{
-                name,
-                batch_type,
-                call.arguments.len,
+                name, java_type, call.arguments.len,
             });
             for (call.arguments) |argument| {
-                const record = switch (argument) {
-                    .record => |record| record,
-                    .reference => |reference| scope.records.get(reference).?,
-                    else => unreachable,
-                };
-                try emit_record_into(printer, record, name);
+                try emit_record_into(printer, argument.record, name);
             }
-            return name;
         },
         .lookup_accounts, .lookup_transfers => {
-            const name = try local_name(printer, binding, "Batch", "idsBatch");
-            try printer.print_indented("final var {s} = new IdBatch({d});", .{
-                name, call.arguments.len,
+            try printer.print_indented("final var {s} = new {s}({d});", .{
+                name, java_type, call.arguments.len,
             });
             for (call.arguments) |argument| {
                 try printer.print_indented("{s}.add({s});", .{
@@ -740,22 +699,17 @@ fn emit_argument(
                     try render_id(printer, argument),
                 });
             }
-            return name;
         },
         .get_account_transfers, .get_account_balances, .query_accounts, .query_transfers => {
             assert(call.arguments.len == 1);
-            const filter = call.arguments[0].record;
-            const name = try local_name(printer, binding, "Filter", "filter");
-            try printer.print_indented("final var {s} = new {s}();", .{
-                name, @tagName(filter.type),
-            });
-            for (filter.fields) |field| {
+            try printer.print_indented("final var {s} = new {s}();", .{ name, java_type });
+            for (call.arguments[0].record.fields) |field| {
                 try emit_filter_field(printer, field, name);
             }
-            return name;
         },
         .close_client => unreachable,
     }
+    return name;
 }
 
 fn emit_record_into(printer: *Printer, record: ast.Record, batch: []const u8) !void {
@@ -828,8 +782,12 @@ fn emit_setter(
     printer.dedent();
 }
 
-fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVariant) !void {
-    const printer = scope.printer;
+fn emit_assertion(
+    printer: *Printer,
+    scope: *Scope,
+    assertion: ast.Assertion,
+    variant: ClientVariant,
+) !void {
     switch (assertion) {
         .equal => |equal| {
             const actual = try printer.to_case_alloc(.camelCase, equal.actual);
@@ -837,7 +795,9 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVarian
                 equal.expected.len,
                 actual,
             });
-            try scope.walk(actual);
+            if (try scope.walk(actual)) {
+                try printer.print_indented("{s}.beforeFirst();", .{actual});
+            }
             for (equal.expected) |record| {
                 try printer.print_indented("assertTrue({s}.next());", .{actual});
                 for (record.fields) |field| {
@@ -850,7 +810,7 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVarian
                 try printer.to_case_alloc(.camelCase, actual),
             });
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             const name = try printer.to_case_alloc(.camelCase, ids);
             try printer.print_indented("for (int index = 1; index < {s}.length; index++) {{", .{
                 name,
@@ -893,12 +853,12 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVarian
             });
         },
         .fail => |failure| switch (failure.action) {
-            .call => |call| try emit_call(scope, call, variant, .{
+            .call => |call| try emit_call(printer, call, variant, .{
                 .expect_error = true,
                 .client_error = failure.client_error,
             }),
             .create_client => |arguments| {
-                try emit_create_client(scope.printer, arguments, .{
+                try emit_create_client(printer, arguments, .{
                     .failure = failure.client_error,
                 });
             },

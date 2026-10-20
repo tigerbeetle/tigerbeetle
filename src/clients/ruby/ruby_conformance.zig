@@ -43,8 +43,7 @@ fn emit(printer: *Printer) !void {
         \\
     );
     for (conformance.sources) |source| {
-        const suite_memory = printer.arena.mark();
-        defer printer.arena.release(suite_memory);
+        defer printer.arena.reset();
 
         const suite = try conformance.parse(printer.arena.allocator(), source);
         try printer.write_empty_line();
@@ -134,7 +133,7 @@ fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
             printer.indent();
             try printer.write_indented("Thread.new do");
             printer.indent();
-            try emit_invocation(printer, concurrently.call, .{});
+            try emit_call(printer, concurrently.call, .{});
             printer.dedent();
             try printer.write_indented("end");
             printer.dedent();
@@ -147,7 +146,8 @@ fn emit_directive(printer: *Printer, directive: ast.HarnessDirective) !void {
 fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
     switch (binding.value) {
         .generate_id, .index, .field_access => {
-            try emit_binding_value(printer, binding.name, binding.value);
+            const rendered = try render_expression(printer, binding.value);
+            try printer.print_indented("{s} = {s}", .{ binding.name, rendered });
         },
         .generate_ids => |count| {
             try printer.print_indented("{s} = Array.new({d}) do |index|", .{
@@ -161,51 +161,22 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
             printer.dedent();
             try printer.write_indented("end");
         },
-        .record => |record| switch (record.type) {
-            .U128 => try emit_binding_value(printer, binding.name, binding.value),
-            .Account, .Transfer => {
-                const prefix = try printer.string_alloc("{s} = ", .{binding.name});
-                try emit_record(printer, record, .{ .prefix = prefix });
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
         .call => |call| {
             const prefix = try printer.string_alloc("{s} = ", .{binding.name});
             try emit_call(printer, call, .{ .prefix = prefix });
         },
-        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
+        .integer,
+        .boolean,
+        .enum_literal,
+        .record,
+        .reference,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
-fn emit_binding_value(
-    printer: *Printer,
-    name: []const u8,
-    value: ast.Expression,
-) !void {
-    const rendered = try render_expression(printer, value);
-    try printer.print_indented("{s} = {s}", .{ name, rendered });
-}
-
 fn emit_call(
-    printer: *Printer,
-    call: ast.Call,
-    options: struct {
-        prefix: []const u8 = "",
-    },
-) !void {
-    try emit_invocation(printer, call, .{ .prefix = options.prefix });
-}
-
-fn emit_invocation(
     printer: *Printer,
     call: ast.Call,
     options: struct {
@@ -217,10 +188,11 @@ fn emit_invocation(
             assert(options.prefix.len == 0);
             try printer.write_indented("@client.close");
         },
-        .create_accounts, .create_transfers, .lookup_accounts, .lookup_transfers => {
-            if (!arguments_contain_record(call)) {
-                const inline_call = try render_call(printer, call);
-                try printer.print_indented("{s}{s}", .{ options.prefix, inline_call });
+        .create_accounts, .create_transfers => {
+            if (call.arguments.len == 0) {
+                try printer.print_indented("{s}@client.{s}([])", .{
+                    options.prefix, @tagName(call.name),
+                });
                 return;
             }
             try printer.print_indented("{s}@client.{s}(", .{ options.prefix, @tagName(call.name) });
@@ -229,20 +201,21 @@ fn emit_invocation(
             printer.indent();
             for (call.arguments, 0..) |argument, index| {
                 const suffix = if (index < call.arguments.len - 1) "," else "";
-                switch (argument) {
-                    .record => |record| {
-                        try emit_record(printer, record, .{ .suffix = suffix });
-                    },
-                    else => {
-                        const text = try render_expression(printer, argument);
-                        try printer.print_indented("{s}{s}", .{ text, suffix });
-                    },
-                }
+                try emit_record(printer, argument.record, .{ .suffix = suffix });
             }
             printer.dedent();
             try printer.write_indented("]");
             printer.dedent();
             try printer.write_indented(")");
+        },
+        .lookup_accounts, .lookup_transfers => {
+            try printer.write_indent();
+            try printer.print("{s}@client.{s}([", .{ options.prefix, @tagName(call.name) });
+            for (call.arguments, 0..) |argument, index| {
+                if (index > 0) try printer.write(", ");
+                try printer.write(try render_expression(printer, argument));
+            }
+            try printer.write("])\n");
         },
         .get_account_transfers, .get_account_balances, .query_accounts, .query_transfers => {
             assert(call.arguments.len == 1);
@@ -259,19 +232,14 @@ fn emit_record(
     printer: *Printer,
     record: ast.Record,
     options: struct {
-        prefix: []const u8 = "",
         suffix: []const u8 = "",
     },
 ) !void {
     if (record.fields.len == 0) {
-        try printer.print_indented("{s}TB::{s}.new{s}", .{
-            options.prefix, @tagName(record.type), options.suffix,
-        });
+        try printer.print_indented("TB::{s}.new{s}", .{ @tagName(record.type), options.suffix });
         return;
     }
-    try printer.print_indented("{s}TB::{s}.new(", .{
-        options.prefix, @tagName(record.type),
-    });
+    try printer.print_indented("TB::{s}.new(", .{@tagName(record.type)});
     printer.indent();
     for (record.fields, 0..) |field, index| {
         const value = try render_typed_value(
@@ -313,7 +281,7 @@ fn emit_assertion(
         .empty => |actual| {
             try printer.print_indented("assert_equal(0, {s}.length)", .{actual});
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             try printer.print_indented(
                 "{s}.each_cons(2) {{ |a, b| assert_operator(a, :<, b) }}",
                 .{ids},
@@ -347,7 +315,7 @@ fn emit_assertion(
                     try printer.write_indented("assert_raises(StandardError) do");
                 }
                 printer.indent();
-                try emit_invocation(printer, call, .{});
+                try emit_call(printer, call, .{});
                 printer.dedent();
                 try printer.write_indented("end");
             },
@@ -368,49 +336,13 @@ fn render_field_access(
     });
 }
 
-fn arguments_contain_record(call: ast.Call) bool {
-    for (call.arguments) |argument| {
-        if (argument == .record) return true;
-    }
-    return false;
-}
-
-fn render_call(printer: *Printer, call: ast.Call) ![]const u8 {
-    assert(!arguments_contain_record(call));
-    switch (call.name) {
-        .create_accounts, .create_transfers, .lookup_accounts, .lookup_transfers => {
-            var text = std.Io.Writer.Allocating.init(printer.arena.allocator());
-            try text.writer.print("@client.{s}([", .{@tagName(call.name)});
-            for (call.arguments, 0..) |argument, index| {
-                if (index > 0) try text.writer.writeAll(", ");
-                try text.writer.writeAll(try render_expression(printer, argument));
-            }
-            try text.writer.writeAll("])");
-            return text.written();
-        },
-        .close_client,
-        .get_account_transfers,
-        .get_account_balances,
-        .query_accounts,
-        .query_transfers,
-        => unreachable,
-    }
-}
-
 fn render_expression(
     printer: *Printer,
     expression: ast.Expression,
 ) std.mem.Allocator.Error![]const u8 {
     switch (expression) {
         .generate_id => return "TB.id",
-        .call, .generate_ids => unreachable,
-        .record => |record| switch (record.type) {
-            .U128 => {
-                assert(record.fields.len == 1);
-                return render_expression(printer, record.fields[0].value);
-            },
-            else => unreachable,
-        },
+        .call, .generate_ids, .record => unreachable,
         .integer => |text| return text,
         .boolean => |value| return if (value) "true" else "false",
         .enum_literal => unreachable,

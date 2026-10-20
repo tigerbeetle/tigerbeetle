@@ -176,17 +176,22 @@ public class ConformanceTests
     [TestMethod]
     public void CreateAccountsReturnsExistsForADuplicateAccount()
     {
-        var account = new Account
-        {
-            Id = ID.Create(),
-            Ledger = 1,
-            Code = 1,
-        };
+        var accountId = ID.Create();
         client.CreateAccounts(new Account[] {
-            account,
+            new()
+            {
+                Id = accountId,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         var results = client.CreateAccounts(new Account[] {
-            account,
+            new()
+            {
+                Id = accountId,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateAccountStatus.Exists, results[0].Status);
@@ -627,6 +632,7 @@ public class ConformanceTests
     {
         var debitAccountId = ID.Create();
         var creditAccountId = ID.Create();
+        var transferId = ID.Create();
         client.CreateAccounts(new Account[] {
             new()
             {
@@ -641,20 +647,27 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfer = new Transfer
-        {
-            Id = ID.Create(),
-            DebitAccountId = debitAccountId,
-            CreditAccountId = creditAccountId,
-            Amount = 100,
-            Ledger = 1,
-            Code = 1,
-        };
         var createdResults = client.CreateTransfers(new Transfer[] {
-            transfer,
+            new()
+            {
+                Id = transferId,
+                DebitAccountId = debitAccountId,
+                CreditAccountId = creditAccountId,
+                Amount = 100,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         var results = client.CreateTransfers(new Transfer[] {
-            transfer,
+            new()
+            {
+                Id = transferId,
+                DebitAccountId = debitAccountId,
+                CreditAccountId = creditAccountId,
+                Amount = 100,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Exists, results[0].Status);
@@ -6333,17 +6346,22 @@ public class ConformanceTests
     [TestMethod]
     public async Task CreateAccountsReturnsExistsForADuplicateAccountAsync()
     {
-        var account = new Account
-        {
-            Id = ID.Create(),
-            Ledger = 1,
-            Code = 1,
-        };
+        var accountId = ID.Create();
         await client.CreateAccountsAsync(new Account[] {
-            account,
+            new()
+            {
+                Id = accountId,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         var results = await client.CreateAccountsAsync(new Account[] {
-            account,
+            new()
+            {
+                Id = accountId,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateAccountStatus.Exists, results[0].Status);
@@ -6784,6 +6802,7 @@ public class ConformanceTests
     {
         var debitAccountId = ID.Create();
         var creditAccountId = ID.Create();
+        var transferId = ID.Create();
         await client.CreateAccountsAsync(new Account[] {
             new()
             {
@@ -6798,20 +6817,27 @@ public class ConformanceTests
                 Code = 1,
             },
         });
-        var transfer = new Transfer
-        {
-            Id = ID.Create(),
-            DebitAccountId = debitAccountId,
-            CreditAccountId = creditAccountId,
-            Amount = 100,
-            Ledger = 1,
-            Code = 1,
-        };
         var createdResults = await client.CreateTransfersAsync(new Transfer[] {
-            transfer,
+            new()
+            {
+                Id = transferId,
+                DebitAccountId = debitAccountId,
+                CreditAccountId = creditAccountId,
+                Amount = 100,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         var results = await client.CreateTransfersAsync(new Transfer[] {
-            transfer,
+            new()
+            {
+                Id = transferId,
+                DebitAccountId = debitAccountId,
+                CreditAccountId = creditAccountId,
+                Amount = 100,
+                Ledger = 1,
+                Code = 1,
+            },
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Exists, results[0].Status);

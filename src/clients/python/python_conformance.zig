@@ -93,8 +93,7 @@ fn emit(printer: *Printer) !void {
             ,
         });
         for (conformance.sources) |source| {
-            const suite_memory = printer.arena.mark();
-            defer printer.arena.release(suite_memory);
+            defer printer.arena.reset();
 
             const suite = try conformance.parse(printer.arena.allocator(), source);
             try printer.write_empty_line();
@@ -221,7 +220,7 @@ fn emit_directive(
                 .asynchronous => "async def operation():",
             });
             printer.indent();
-            try emit_invocation(printer, concurrently.call, variant, .{});
+            try emit_call(printer, concurrently.call, variant, .{});
             printer.dedent();
             try printer.write_empty_line();
             switch (variant) {
@@ -268,46 +267,22 @@ fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant)
             try printer.print_indented("{s}.append(tb.id())", .{binding.name});
             printer.dedent();
         },
-        .record => |record| switch (record.type) {
-            .U128 => {
-                const rendered = try render_expression(printer, binding.value);
-                try printer.print_indented("{s} = {s}", .{ binding.name, rendered });
-            },
-            .Account, .Transfer => {
-                const prefix = try printer.string_alloc("{s} = ", .{binding.name});
-                try emit_record(printer, record, .{ .prefix = prefix });
-            },
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .TransferFlags,
-            => unreachable,
-        },
         .call => |call| {
             const prefix = try printer.string_alloc("{s} = ", .{binding.name});
             try emit_call(printer, call, variant, .{ .prefix = prefix });
         },
-        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
+        .integer,
+        .boolean,
+        .enum_literal,
+        .record,
+        .reference,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
 fn emit_call(
-    printer: *Printer,
-    call: ast.Call,
-    variant: ClientVariant,
-    options: struct {
-        prefix: []const u8 = "",
-    },
-) !void {
-    try emit_invocation(printer, call, variant, .{ .prefix = options.prefix });
-}
-
-fn emit_invocation(
     printer: *Printer,
     call: ast.Call,
     variant: ClientVariant,
@@ -337,11 +312,9 @@ fn emit_invocation(
             printer.indent();
             try printer.write_indented("[");
             printer.indent();
-            for (call.arguments) |argument| switch (argument) {
-                .record => |record| try emit_record(printer, record, .{ .suffix = "," }),
-                .reference => |reference| try printer.print_indented("{s},", .{reference}),
-                else => unreachable,
-            };
+            for (call.arguments) |argument| {
+                try emit_record(printer, argument.record, .{ .suffix = "," });
+            }
             printer.dedent();
             try printer.write_indented("]");
             printer.dedent();
@@ -375,11 +348,10 @@ fn emit_record(
     printer: *Printer,
     record: ast.Record,
     options: struct {
-        prefix: []const u8 = "",
         suffix: []const u8 = "",
     },
 ) !void {
-    try printer.print_indented("{s}tb.{s}(", .{ options.prefix, @tagName(record.type) });
+    try printer.print_indented("tb.{s}(", .{@tagName(record.type)});
     printer.indent();
     switch (record.type) {
         .AccountFilter, .QueryFilter => {
@@ -450,7 +422,7 @@ fn emit_assertion(
         .empty => |actual| {
             try printer.print_indented("assert {s} == []", .{actual});
         },
-        .ascending => |ids| {
+        .id_ascending => |ids| {
             try printer.print_indented(
                 "assert all({s}[i - 1] < {s}[i] for i in range(1, len({s})))",
                 .{ ids, ids, ids },
@@ -489,7 +461,7 @@ fn emit_assertion(
                     try printer.write_indented("with pytest.raises(Exception):");
                 }
                 printer.indent();
-                try emit_invocation(printer, call, variant, .{});
+                try emit_call(printer, call, variant, .{});
                 printer.dedent();
             },
             .create_client => |arguments| {
@@ -540,25 +512,7 @@ fn render_expression(
 ) std.mem.Allocator.Error![]const u8 {
     switch (expression) {
         .generate_id => return "tb.id()",
-        .call, .generate_ids => unreachable,
-        .record => |record| switch (record.type) {
-            .U128 => {
-                assert(record.fields.len == 1);
-                return record.fields[0].value.integer;
-            },
-            .Account,
-            .AccountBalance,
-            .AccountFilter,
-            .AccountFilterFlags,
-            .AccountFlags,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .QueryFilterFlags,
-            .Transfer,
-            .TransferFlags,
-            => unreachable,
-        },
+        .call, .generate_ids, .record => unreachable,
         .integer => |text| return text,
         .boolean => |value| return if (value) "True" else "False",
         .enum_literal => unreachable,
@@ -641,7 +595,6 @@ fn render_typed_value(
             assert(ast.Record.is_flags(record.type));
             return render_flags(printer, record);
         },
-        // Python's int is arbitrary precision, so every integer width renders as decimal text.
         .integer,
         .generate_id,
         .boolean,

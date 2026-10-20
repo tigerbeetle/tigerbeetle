@@ -165,19 +165,23 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_accounts_returns_exists_for_a_duplicate_account",
 		func(t *testing.T, client Client) {
-			account := Account{
-				ID:     ID(),
-				Ledger: 1,
-				Code:   1,
-			}
+			accountID := ID()
 			_, err := client.CreateAccounts([]Account{
-				account,
+				{
+					ID:     accountID,
+					Ledger: 1,
+					Code:   1,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			results, err := client.CreateAccounts([]Account{
-				account,
+				{
+					ID:     accountID,
+					Ledger: 1,
+					Code:   1,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -689,6 +693,7 @@ func TestConformance(t *testing.T) {
 		func(t *testing.T, client Client) {
 			debitAccountID := ID()
 			creditAccountID := ID()
+			transferID := ID()
 			_, err := client.CreateAccounts([]Account{
 				{
 					ID:     debitAccountID,
@@ -704,22 +709,28 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			transfer := Transfer{
-				ID:              ID(),
-				DebitAccountID:  debitAccountID,
-				CreditAccountID: creditAccountID,
-				Amount:          ToUint128(100),
-				Ledger:          1,
-				Code:            1,
-			}
 			createdResults, err := client.CreateTransfers([]Transfer{
-				transfer,
+				{
+					ID:              transferID,
+					DebitAccountID:  debitAccountID,
+					CreditAccountID: creditAccountID,
+					Amount:          ToUint128(100),
+					Ledger:          1,
+					Code:            1,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			results, err := client.CreateTransfers([]Transfer{
-				transfer,
+				{
+					ID:              transferID,
+					DebitAccountID:  debitAccountID,
+					CreditAccountID: creditAccountID,
+					Amount:          ToUint128(100),
+					Ledger:          1,
+					Code:            1,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)

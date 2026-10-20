@@ -137,7 +137,7 @@ const Parser = struct {
 
         var buffer: [2]std.zig.Ast.Node.Index = undefined;
         var statements = tree.blockStatements(&buffer, block).?;
-        // NOTE: For now we only support a single requirement and it needs to come first.
+        // NOTE: We only support a single requirement and it needs to come first.
         const requirement: ?ast.Case.Requirement = if (statements.len > 0)
             try parser.parse_requirement(statements[0])
         else
@@ -204,7 +204,8 @@ const Parser = struct {
         if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) {
             return parser.fail(var_decl.ast.mut_token, "bindings must be `const`", .{});
         }
-        // No type annotations allowed. Emitters pick the correct types, u128 has special handling.
+        // No type annotations allowed. Emitters pick the correct types, u128
+        // has special handling.
         if (var_decl.ast.type_node.unwrap()) |type_node| {
             return parser.fail_node(type_node, "invalid type annotation");
         }
@@ -213,25 +214,10 @@ const Parser = struct {
         const value = try parser.parse_expression(var_decl.ast.init_node.unwrap().?);
         switch (value) {
             .generate_id, .generate_ids, .index, .field_access => {},
-            .record => |record| switch (record.type) {
-                .U128, .Account, .Transfer => {},
-                .AccountBalance,
-                .AccountFilter,
-                .AccountFilterFlags,
-                .AccountFlags,
-                .CreateAccountResult,
-                .CreateTransferResult,
-                .QueryFilter,
-                .QueryFilterFlags,
-                .TransferFlags,
-                => return parser.fail(name_token, "a {s} cannot be bound", .{
-                    @tagName(record.type),
-                }),
-            },
             .call => |call| if (operation_result(call.name) == null) {
                 return parser.fail(name_token, "'{s}' has no result", .{@tagName(call.name)});
             },
-            .integer, .boolean, .enum_literal, .reference, .increment, .decrement => {
+            .integer, .boolean, .enum_literal, .record, .reference, .increment, .decrement => {
                 return parser.fail(
                     tree.firstToken(var_decl.ast.init_node.unwrap().?),
                     "invalid binding: {s}",
@@ -313,15 +299,6 @@ const Parser = struct {
             return parser.fail(tree.firstToken(node), "'{s}' cannot be a value", .{name});
         }
 
-        var init_buffer: [2]std.zig.Ast.Node.Index = undefined;
-        if (tree.fullStructInit(&init_buffer, node)) |struct_init| {
-            if (struct_init.ast.type_expr == .none) {
-                return parser.fail_node(node, "record literal needs a type here");
-            }
-            const record_type = try parser.parse_record_type(struct_init.ast.type_expr.unwrap().?);
-            return .{ .record = try parser.parse_record(record_type, struct_init) };
-        }
-
         return parser.fail_node(node, "invalid expression");
     }
 
@@ -334,7 +311,7 @@ const Parser = struct {
         return tree.tokenSlice(name_token);
     }
 
-    // Returns the name of a `ct.name(...)` call or of a `client.operation(...)` call.
+    // Returns the name of a `ct.name(...)` or a `client.operation(...)` call.
     fn parse_call_name(parser: *Parser, call: std.zig.Ast.full.Call) ![]const u8 {
         if (parser.parse_api_name(call.ast.fn_expr)) |name| return name;
         const tree = &parser.tree;
@@ -350,13 +327,6 @@ const Parser = struct {
             return parser.fail(name_token, "unknown operation '{s}'", .{name});
         }
         return name;
-    }
-
-    fn parse_record_type(parser: *Parser, node: std.zig.Ast.Node.Index) !ast.Record.Type {
-        const name = parser.parse_api_name(node) orelse
-            return parser.fail_node(node, "invalid type");
-        return std.meta.stringToEnum(ast.Record.Type, name) orelse
-            parser.fail(parser.tree.nodeData(node).node_and_token[1], "unknown type '{s}'", .{name});
     }
 
     fn parse_call(
@@ -425,27 +395,14 @@ const Parser = struct {
         const arguments = try parser.arena.alloc(ast.Expression, elements.len);
         for (elements, 0..) |element, index| {
             var init_buffer: [2]std.zig.Ast.Node.Index = undefined;
-            if (tree.fullStructInit(&init_buffer, element)) |struct_init| {
-                if (struct_init.ast.type_expr != .none) {
-                    return parser.fail_node(element, "event type is implied, use .{{...}}");
-                }
-                arguments[index] = .{
-                    .record = try parser.parse_record(record_type, struct_init),
-                };
-                continue;
+            const struct_init = tree.fullStructInit(&init_buffer, element) orelse
+                return parser.fail_node(element, "expected a record");
+            if (struct_init.ast.type_expr != .none) {
+                return parser.fail_node(element, "event type is implied, use .{{...}}");
             }
-            const expression = try parser.parse_expression(element);
-            if (expression != .reference) {
-                return parser.fail_node(element, "expected a record or binding");
-            }
-            const bound = parser.bindings.get(expression.reference).?.data;
-            if (bound != .record or bound.record.type != record_type) {
-                return parser.fail(tree.firstToken(element), "'{s}' is not a {s}", .{
-                    expression.reference,
-                    @tagName(record_type),
-                });
-            }
-            arguments[index] = expression;
+            arguments[index] = .{
+                .record = try parser.parse_record(record_type, struct_init),
+            };
         }
         return arguments;
     }
@@ -505,8 +462,6 @@ const Parser = struct {
             .call = try parser.parse_call(call_name, inner),
         } };
     }
-
-    const AssertionCall = stdx.EnumType(ast.api_decl_names(ast.is_assertion));
 
     fn parse_failing_action(
         parser: *Parser,
@@ -596,7 +551,7 @@ const Parser = struct {
         call: std.zig.Ast.full.Call,
     ) !ast.Assertion {
         const tree = &parser.tree;
-        const assertion = std.meta.stringToEnum(AssertionCall, name) orelse
+        const assertion = std.meta.stringToEnum(ast.Assertion.Name, name) orelse
             return parser.fail(
                 tree.firstToken(call.ast.fn_expr),
                 "unknown assertion '{s}'",
@@ -643,9 +598,9 @@ const Parser = struct {
                 const node = try parser.assert_one_argument(call, "(actual)");
                 return .{ .empty = try parser.parse_reference(node) };
             },
-            .assert_ascending => {
+            .assert_id_ascending => {
                 const node = try parser.assert_one_argument(call, "(ids)");
-                return .{ .ascending = try parser.parse_reference(node) };
+                return .{ .id_ascending = try parser.parse_reference(node) };
             },
             .assert_greater_than => {
                 const args = try parser.assert_two_arguments(call, "(actual, value)");
@@ -671,7 +626,8 @@ const Parser = struct {
                 if (value != .enum_literal) {
                     return parser.fail_node(args[1], "expected a client error");
                 }
-                const client_error = std.meta.stringToEnum(ast.ClientError, value.enum_literal) orelse
+                const client_error =
+                    std.meta.stringToEnum(ast.ClientError, value.enum_literal) orelse
                     return parser.fail_node(args[1], "unknown client error");
                 const action = try parser.parse_failing_action(args[0]);
                 const action_matches = switch (client_error) {
