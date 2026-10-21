@@ -74,13 +74,15 @@ pub fn GridType(comptime Storage: type) type {
             from_local_or_global_storage: *const fn (*Grid.Read, BlockPtrConst) void,
         };
 
-        pub const CachePolicy = enum {
+        /// Enum variants are ordered from lowest to highest precedence,
+        /// allowing the highest-precedence variant to be selected using `max()`.
+        pub const CachePolicy = enum(u8) {
             /// Skip the cache lookup and do not cache the block read from storage.
-            cache_bypass,
+            cache_bypass = 0,
             /// Check the cache, but do not cache the block read from storage.
-            cache_lookup_no_admit,
+            cache_lookup_no_admit = 1,
             /// Check the cache and cache the block read from storage.
-            cache_lookup_and_admit,
+            cache_lookup_and_admit = 2,
         };
 
         pub const Read = struct {
@@ -1281,8 +1283,16 @@ pub fn GridType(comptime Storage: type) type {
                 var it = queue.iterate();
                 while (it.next()) |queued_read| {
                     if (queued_read.address == read.address) {
+
                         // TODO check all read options match
                         if (queued_read.checksum == read.checksum) {
+                            // Adopt the strongest cache policy. A read with `cache_bypass`
+                            // does not affect another read with a stronger cache policy.
+                            queued_read.cache = @enumFromInt(@max(
+                                @intFromEnum(queued_read.cache),
+                                @intFromEnum(read.cache),
+                            ));
+
                             queued_read.resolves.push(&read.pending);
                             return;
                         } else {
