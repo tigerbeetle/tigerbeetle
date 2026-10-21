@@ -1408,7 +1408,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 &read.grid_read,
                 table_ref.table_info.address,
                 table_ref.table_info.checksum,
-                .lookup_and_admit,
+                .cache_lookup_and_admit,
             );
         }
 
@@ -1495,7 +1495,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 &read.grid_read,
                 value_block_address,
                 value_block_checksum.value,
-                .lookup_only,
+                .cache_lookup_no_admit,
             );
         }
 

@@ -560,7 +560,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                         &loading_index.read,
                         loading_index.address,
                         loading_index.checksum,
-                        .lookup_and_admit,
+                        .cache_lookup_and_admit,
                     );
                 },
                 .iterating => |*iterating| {

@@ -76,11 +76,11 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const CachePolicy = enum {
             /// Skip the cache lookup and do not cache the block read from storage.
-            bypass,
+            cache_bypass,
             /// Check the cache, but do not cache the block read from storage.
-            lookup_only,
+            cache_lookup_no_admit,
             /// Check the cache and cache the block read from storage.
-            lookup_and_admit,
+            cache_lookup_and_admit,
         };
 
         pub const Read = struct {
@@ -1237,7 +1237,7 @@ pub fn GridType(comptime Storage: type) type {
                 .grid = grid,
             };
 
-            if (cache != .bypass) {
+            if (cache != .cache_bypass) {
                 grid.on_next_tick(read_block_tick_callback, &read.next_tick);
             } else {
                 read_block_tick_callback(&read.next_tick);
@@ -1293,7 +1293,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Cache lookups run on the next tick to avoid synchronous callbacks.
-            if (read.cache != .bypass) {
+            if (read.cache != .cache_bypass) {
                 if (grid.read_block_from_cache(
                     read.address,
                     read.checksum,
@@ -1384,7 +1384,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_queue.remove(read);
 
             if (result == .valid) {
-                if (read.cache == .lookup_and_admit) {
+                if (read.cache == .cache_lookup_and_admit) {
                     grid.cache_upsert(read.address, block);
                 }
             } else {

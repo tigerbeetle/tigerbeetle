@@ -311,7 +311,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 &read.read,
                 block_id.block_address,
                 block_id.block_checksum,
-                .bypass,
+                .cache_bypass,
             );
             return true;
         }

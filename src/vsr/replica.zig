@@ -3400,7 +3400,7 @@ pub fn ReplicaType(
                     &read.read,
                     request.block_address,
                     request.block_checksum,
-                    .lookup_only,
+                    .cache_lookup_no_admit,
                 );
             }
         }
