@@ -1,4 +1,5 @@
 //! Reconstruct a cluster from one or more AOF files.
+//! Unlike the WAL, AOF files contain only committed messages.
 //!
 //! Note that a AOF-recovered cluster is *not* physically identical to the original cluster.
 //! It should be logically identical though -- the same data (minus the client table), just in
