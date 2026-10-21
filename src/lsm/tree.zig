@@ -424,7 +424,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
-                    .{ .cache_read = true, .cache_write = true },
+                    .cache_lookup_and_admit,
                 );
             }
 
@@ -461,7 +461,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     completion,
                     context.value_block.?.address,
                     context.value_block.?.checksum,
-                    .{ .cache_read = true, .cache_write = true },
+                    .cache_lookup_and_admit,
                 );
             }
 
