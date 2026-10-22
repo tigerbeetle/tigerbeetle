@@ -722,7 +722,7 @@ const ClockUnitTestContainer = struct {
 test "ideal clocks get clamped to cluster time" {
     // Silence all clock logs.
     const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
+    std.testing.log_level = .err;
     defer std.testing.log_level = level;
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -935,7 +935,7 @@ const ClockSimulator = struct {
 test "clock: fuzz test" {
     // Silence all clock logs.
     const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
+    std.testing.log_level = .err;
     defer std.testing.log_level = level;
 
     const ticks_max: u64 = 1_000_000;
