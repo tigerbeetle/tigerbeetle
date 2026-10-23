@@ -90,7 +90,10 @@ pub fn parameter(
 ) u64 {
     assert(value_smoke < value_benchmark);
     const value = parameter_fallible(name, value_smoke, value_benchmark) catch |err| switch (err) {
-        error.InvalidCharacter, error.Overflow => @panic("invalid benchmark parameter value"),
+        error.InvalidCharacter,
+        error.LeadingZero,
+        error.Overflow,
+        => @panic("invalid benchmark parameter value"),
     };
     b.report("{s}={}", .{ name, value });
     return value;
@@ -100,13 +103,19 @@ fn parameter_fallible(
     comptime name: []const u8,
     value_smoke: u64,
     value_benchmark: u64,
-) std.fmt.ParseIntError!u64 {
+) !u64 {
     assert(value_smoke < value_benchmark);
     return switch (mode) {
         .smoke => value_smoke,
-        .benchmark => std.process.parseEnvVarInt(name, u64, 10) catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => return value_benchmark,
-            else => |e| return e,
+        .benchmark => {
+            const value = std.testing.environ.getAlloc(std.heap.page_allocator, name) catch |err|
+                switch (err) {
+                    error.EnvironmentVariableMissing => return value_benchmark,
+                    else => @panic("unable to read benchmark parameter"),
+                };
+            defer std.heap.page_allocator.free(value);
+
+            return try stdx.parse_int(u64, value, .{});
         },
     };
 }
