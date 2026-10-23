@@ -6,7 +6,7 @@ const NodePoolType = @import("node_pool.zig").NodePoolType;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const SortedSegmentedArrayType = @import("segmented_array.zig").SortedSegmentedArrayType;
 
-const log = std.log;
+const Bench = stdx.Bench;
 
 // Bump this up if you want to use this as a real benchmark rather than as a test.
 const samples = 5_000;
@@ -65,6 +65,9 @@ const configs = [_]Options{
 };
 
 test "benchmark: segmented array" {
+    var bench: Bench = .init();
+    defer bench.deinit();
+
     var prng = stdx.PRNG.from_seed(42);
 
     inline for (configs) |options| {
@@ -116,8 +119,7 @@ test "benchmark: segmented array" {
         const queries = try alloc_shuffled_index(allocator, options.value_count, &prng);
         defer allocator.free(queries);
 
-        var time_os: stdx.TimeOS = .{};
-        var timer = stdx.Timer.init(time_os.interface());
+        bench.start();
         const repetitions = @max(1, @divFloor(samples, queries.len));
         var j: usize = 0;
         while (j < repetitions) : (j += 1) {
@@ -125,10 +127,11 @@ test "benchmark: segmented array" {
                 std.mem.doNotOptimizeAway(array.absolute_index_for_cursor(array.search(query)));
             }
         }
-        const time = timer.read().ns / repetitions / queries.len;
+        var time = bench.stop();
+        time.ns /= repetitions * queries.len;
 
-        log.info(
-            "KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns",
+        bench.report(
+            "KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={f}",
             .{
                 options.Key,
                 options.value_count,

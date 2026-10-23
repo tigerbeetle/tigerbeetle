@@ -17,7 +17,7 @@ test "benchmark: radix sort" {
     var bench: Bench = .init();
     defer bench.deinit();
 
-    const values_count: usize = @intCast(bench.parameter("values_count", 64, 1 << 20));
+    const values_count: usize = @intCast(bench.parameter("values_count", 64, 1 << 18));
 
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
@@ -70,7 +70,7 @@ fn run(
     const duration_overall = bench.estimate(&duration_samples);
     const duration_element: stdx.Duration = .{ .ns = duration_overall.ns / values_count };
     const duration_key_byte: stdx.Duration = .{ .ns = duration_element.ns / @sizeOf(Key) };
-    bench.report("K={:_>2}B V={:_>3}B: {d:.0}, {} per element, {} per key byte", .{
+    bench.report("K={:_>2}B V={:_>3}B: {f}, {f} per element, {f} per key byte", .{
         @sizeOf(Key),
         @sizeOf(Value),
         duration_overall,

@@ -39,5 +39,5 @@ test "benchmark: checksum" {
 
     // See "benchmark: API tutorial" to understand why we print out the "hash" of this run.
     bench.report("checksum {x:0>32}", .{checksum_counter});
-    bench.report("{} for whole blob", .{result});
+    bench.report("{f} for whole blob", .{result});
 }

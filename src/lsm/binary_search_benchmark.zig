@@ -36,7 +36,7 @@ const scenarios = [_]Scenario{
     },
 };
 
-const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={}";
+const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={f}";
 const repetitions: usize = 32;
 
 test "benchmark: binary search" {

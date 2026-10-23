@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const ewah = @import("ewah.zig").ewah(usize);
 const stdx = @import("stdx");
 
-const log = std.log;
+const Bench = stdx.Bench;
 
 const BitSetConfig = struct {
     words: usize,
@@ -33,6 +33,9 @@ const configs = [_]BitSetConfig{
 var prng = stdx.PRNG.from_seed(42);
 
 test "benchmark: ewah" {
+    var bench: Bench = .init();
+    defer bench.deinit();
+
     for (configs) |config| {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
@@ -53,10 +56,8 @@ test "benchmark: ewah" {
             bitsets_decoded[i] = try allocator.alloc(usize, config.words);
         }
 
-        var time_os: stdx.TimeOS = .{};
-
         // Benchmark encoding.
-        var encode_timer = stdx.Timer.init(time_os.interface());
+        bench.start();
         i = 0;
         while (i < samples) : (i += 1) {
             var j: usize = 0;
@@ -66,10 +67,11 @@ test "benchmark: ewah" {
             }
             bitset_lengths[i] = size;
         }
-        const encode_time = encode_timer.read().ns / samples / repeats;
+        var encode_time = bench.stop();
+        encode_time.ns /= samples * repeats;
 
-        var decode_timer = stdx.Timer.init(time_os.interface());
         // Benchmark decoding.
+        bench.start();
         i = 0;
         while (i < samples) : (i += 1) {
             const bitset_encoded = bitsets_encoded[i][0..bitset_lengths[i]];
@@ -78,7 +80,8 @@ test "benchmark: ewah" {
                 _ = ewah.decode_all(bitset_encoded, bitsets_decoded[i]);
             }
         }
-        const decode_time = decode_timer.read().ns / samples / repeats;
+        var decode_time = bench.stop();
+        decode_time.ns /= samples * repeats;
 
         i = 0;
         while (i < samples) : (i += 1) {
@@ -94,8 +97,8 @@ test "benchmark: ewah" {
             total_compressed += @as(f64, @floatFromInt(bitset_lengths[i]));
         }
 
-        log.info(
-            \\Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={:_>6}ns DecTime={:_>6}ns Ratio={d:_>6.2}
+        bench.report(
+            \\Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={f} DecTime={f} Ratio={d:_>6.2}
         , .{
             config.words,
             config.run_length_e,
