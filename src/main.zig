@@ -108,11 +108,15 @@ const Replica = struct {
     view_max: u64 = 1,
 
     fn on_request(replica: *Replica, payload: u128) void {
+        const op = replica.committed_last.op + 1;
+        const parent = replica.committed_last.checksum;
+        const checksum = payload;
+
         replica.committed_last = .{
-            .op = replica.committed_last.op + 1,
+            .op = op,
             .view = replica.view_max,
-            .checksum = payload, //TODO: proper checksum
-            .parent = replica.committed_last.checksum,
+            .checksum = checksum, //TODO: proper checksum
+            .parent = parent,
             .payload = payload,
         };
     }
