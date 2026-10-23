@@ -110,15 +110,14 @@ const Replica = struct {
     fn on_request(replica: *Replica, payload: u128) void {
         const op = replica.committed_last.op + 1;
         const parent = replica.committed_last.checksum;
-        const checksum = payload;
-
         replica.committed_last = .{
             .op = op,
             .view = replica.view_max,
-            .checksum = checksum, //TODO: proper checksum
+            .checksum = 0,
             .parent = parent,
             .payload = payload,
         };
+        replica.committed_last.set_checksum();
     }
     fn on_message(replica: *Replica, message: Message) void {
         _ = replica; // autofix
@@ -126,19 +125,23 @@ const Replica = struct {
     }
 };
 
-const Entry = struct {
+const Entry = extern struct {
     op: u64,
     view: u64,
     checksum: u128,
     parent: u128,
     payload: u128, // checksum
 
-    pub const root: Entry = .{
-        .op = 1,
-        .view = 0,
-        .checksum = 0,
-        .parent = 0,
-        .payload = 0,
+    pub const root: Entry = b: {
+        var entry: Entry = .{
+            .op = 1,
+            .view = 0,
+            .checksum = 0,
+            .parent = 0,
+            .payload = 0,
+        };
+        entry.set_checksum();
+        break :b entry;
     };
     pub const reserved: Entry = .{
         .op = 0,
@@ -156,6 +159,12 @@ const Entry = struct {
             ));
             return true;
         } else return false;
+    }
+
+    fn set_checksum(entry: *Entry) void {
+        assert(entry.checksum == 0);
+        const checksum = std.hash.CityHash64.hash(std.mem.asBytes(entry));
+        entry.checksum = checksum;
     }
 };
 

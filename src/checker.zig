@@ -22,6 +22,10 @@ pub fn main(init: std.process.Init) !void {
     const sut = args.next().?;
 
     try FRNG.Driver.main(gpa, io, sut, .{
-        .search = .{},
+        // .search = .{},
+        .replay = .{
+            .size = 28,
+            .seed = 16568845351671572594,
+        },
     });
 }
