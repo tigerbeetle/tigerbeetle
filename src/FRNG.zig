@@ -85,13 +85,13 @@ pub fn weighted(frng: *FRNG, weights: anytype) Error!std.meta.FieldEnum(@TypeOf(
     assert(weight > 0);
     weight = try frng.int_inclusive(u32, weight - 1);
     inline for (comptime std.meta.fieldNames(@TypeOf(weights))) |field| {
-        weight -|= @field(weights, field);
         if (weight == 0) {
             return @field(
                 std.meta.FieldEnum(@TypeOf(weights)),
                 field,
             );
         }
+        weight -|= @field(weights, field);
     }
     unreachable;
 }
