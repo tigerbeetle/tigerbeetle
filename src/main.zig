@@ -120,6 +120,7 @@ const World = struct {
             .request = 1,
             .kill = 1,
             .message = 1,
+            .view_change = 1,
         });
         switch (action) {
             .request => {
@@ -127,6 +128,7 @@ const World = struct {
             },
             .message => {},
             .kill => try world.kill(),
+            .view_change => try world.view_change(),
         }
     }
 
@@ -149,6 +151,15 @@ const World = struct {
         world.replica_dead[replica] = !world.replica_dead[replica];
         const dead_or_alive = if (world.replica_dead[replica]) "dead" else "alive";
         log.debug("kill: {} is {s}", .{ replica, dead_or_alive });
+    }
+
+    fn view_change(world: *World) !void {
+        const replica = try world.frng.index(world.replicas);
+        world.replicas[replica].view_change();
+        log.debug("view_change: replica={} view_max={}", .{
+            replica,
+            world.replicas[replica].view_max,
+        });
     }
 };
 
@@ -180,6 +191,10 @@ const Replica = struct {
     fn on_message(replica: *Replica, message: Message) void {
         _ = replica; // autofix
         _ = message; // autofix
+    }
+
+    fn view_change(replica: *Replica) void {
+        replica.view_max += 1;
     }
 
     fn primary(replica: *const Replica) bool {
