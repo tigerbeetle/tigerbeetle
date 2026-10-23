@@ -24,8 +24,8 @@ pub fn main(init: std.process.Init) !void {
     try FRNG.Driver.main(gpa, io, sut, .{
         // .search = .{},
         .replay = .{
-            .size = 28,
-            .seed = 16568845351671572594,
+            .size = 56,
+            .seed = 3113546639494457010,
         },
     });
 }

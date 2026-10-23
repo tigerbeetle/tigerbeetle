@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 
 const MiB = 1 << 20;
 
+const log = std.log;
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
@@ -26,25 +28,25 @@ pub fn main(init: std.process.Init) !void {
 const World = struct {
     frng: *FRNG,
     replicas: [replica_count]Replica,
-    log: []Entry,
+    journal: []Entry,
 
     fn init(gpa: std.mem.Allocator, frng: *FRNG, options: struct {
         log_count_max: u64,
     }) !World {
-        const log = try gpa.alloc(Entry, options.log_count_max);
-        errdefer gpa.free(log);
+        const journal = try gpa.alloc(Entry, options.log_count_max);
+        errdefer gpa.free(journal);
 
-        @memset(log, .reserved);
+        @memset(journal, .reserved);
 
         return .{
             .frng = frng,
             .replicas = @splat(.{}),
-            .log = log,
+            .journal = journal,
         };
     }
 
     fn deinit(world: *World, gpa: std.mem.Allocator) void {
-        gpa.free(world.log);
+        gpa.free(world.journal);
         world.* = undefined;
     }
 
@@ -59,15 +61,15 @@ const World = struct {
 
     fn check(world: *World) void {
         for (world.replicas) |replica| {
-            if (replica.committed_last.op >= world.log.len) continue;
+            if (replica.committed_last.op >= world.journal.len) continue;
 
-            if (world.log[replica.committed_last.op].is_reserved()) {
-                world.log[replica.committed_last.op] = replica.committed_last;
+            if (world.journal[replica.committed_last.op].is_reserved()) {
+                world.journal[replica.committed_last.op] = replica.committed_last;
                 world.check_hash_link(replica.committed_last.op);
                 world.check_hash_link(replica.committed_last.op + 1);
             } else {
                 assert(std.meta.eql(
-                    world.log[replica.committed_last.op],
+                    world.journal[replica.committed_last.op],
                     replica.committed_last,
                 ));
             }
@@ -76,10 +78,10 @@ const World = struct {
 
     fn check_hash_link(world: *World, index: u64) void {
         if (index == 0) return;
-        if (index >= world.log.len) return;
-        if (world.log[index - 1].is_reserved()) return;
-        if (world.log[index].is_reserved()) return;
-        assert(world.log[index - 1].checksum == world.log[index].parent);
+        if (index >= world.journal.len) return;
+        if (world.journal[index - 1].is_reserved()) return;
+        if (world.journal[index].is_reserved()) return;
+        assert(world.journal[index - 1].checksum == world.journal[index].parent);
     }
 
     pub fn step(world: *World) !void {
@@ -92,10 +94,10 @@ const World = struct {
     }
 
     fn request(world: *World) !void {
-        const replica_index = try world.frng.index(world.replicas);
+        const replica = try world.frng.index(world.replicas);
         const payload = try world.frng.int(u128);
-
-        world.replicas[replica_index].on_request(payload);
+        log.debug("request: replica={} payload={}", .{ replica, payload });
+        world.replicas[replica].on_request(payload);
     }
 };
 
