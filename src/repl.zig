@@ -11,7 +11,9 @@ const MessagePool = vsr.message_pool.MessagePool;
 const RingBufferType = stdx.RingBufferType;
 const tb = vsr.tigerbeetle;
 
-const Terminal = @import("repl/terminal.zig").Terminal;
+const TerminalModule = @import("repl/terminal.zig");
+const Terminal = TerminalModule.Terminal;
+const TerminalScreen = TerminalModule.Screen;
 const Completion = @import("repl/completion.zig").Completion;
 const Parser = @import("repl/parser.zig").Parser;
 
@@ -70,6 +72,24 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
+        fn history_push(repl: *Repl, input: []const u8) void {
+            if (input.len == 0) return;
+            const add_to_history = brk: {
+                const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
+                const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
+                break :brk !std.mem.eql(u8, last_entry_str, input);
+            };
+            if (!add_to_history) return;
+
+            assert(input.len < repl_history_entry_bytes_with_nul);
+            if (repl.history.full()) repl.history.advance_head();
+            const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
+                repl.history.next_tail_ptr().?;
+            @memset(history_tail, '\x00');
+            stdx.copy_left(.inexact, u8, history_tail, input);
+            repl.history.advance_tail();
+        }
+
         fn do_statement(
             repl: *Repl,
             statement: Parser.Statement,
@@ -106,6 +126,9 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn read_until_newline_or_eof(
             repl: *Repl,
+            prompt_text: []const u8,
+            terminal_screen: *TerminalScreen,
+            first_line: bool,
         ) !?[]const u8 {
             repl.buffer.clear();
             repl.buffer_outside_history.clear();
@@ -113,7 +136,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             try repl.terminal.prompt_mode_set();
             defer repl.terminal.prompt_mode_unset() catch {};
 
-            var terminal_screen = try repl.terminal.get_screen();
+            if (first_line) terminal_screen.* = try repl.terminal.get_screen();
 
             var buffer_index: usize = 0;
             var history_index = repl.history.count;
@@ -176,6 +199,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                             terminal_screen.cursor_column,
                         });
                         try repl.terminal.print("\n", .{});
+                        terminal_screen.update_cursor_position(
+                            @as(isize, @intCast(terminal_screen.columns - terminal_screen.cursor_column + 1)),
+                        );
                         return repl.buffer.const_slice();
                     },
                     .printable => |character| {
@@ -280,7 +306,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // \x1b[J - Clear the screen from current cursor position to end.
                         try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}{s}{s}\x20\x08", .{
                             buffer_row,
-                            prompt,
+                            prompt_text,
                             repl.completion.prefix.const_slice(),
                             current_completion,
                             repl.completion.suffix.const_slice(),
@@ -392,7 +418,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
                             row_current_buffer_start,
-                            prompt,
+                            prompt_text,
                             buffer_next,
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
@@ -435,7 +461,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
                             row_current_buffer_start,
-                            prompt,
+                            prompt_text,
                             buffer_next,
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
@@ -499,8 +525,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
                         // the terminal for the new position.
                         try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
-                        try repl.terminal.print(prompt, .{});
-                        terminal_screen = try repl.terminal.get_screen();
+                        try repl.terminal.print("{s}", .{prompt_text});
+                        terminal_screen.* = try repl.terminal.get_screen();
 
                         // Print whatever is in the buffer and move the cursor back to buffer_index.
                         terminal_screen.update_cursor_position(
@@ -545,39 +571,49 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             arguments: *Parser.ArgumentsList,
         ) !void {
-            try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof() catch |err| {
-                repl.event_loop_done = true;
-                return err;
-            } orelse {
-                // EOF.
-                repl.event_loop_done = true;
-                try repl.fail("\nExiting.\n", .{});
-                return;
-            };
-
-            if (input.len > 0) {
-                const add_to_history = brk: {
-                    const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
-                    const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
-                    break :brk !std.mem.eql(u8, last_entry_str, input);
-                };
-
-                if (add_to_history) {
-                    // NB: Avoiding big stack allocations below.
-
-                    assert(input.len < repl_history_entry_bytes_with_nul);
-
-                    if (repl.history.full()) {
-                        repl.history.advance_head();
-                    }
-                    const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
-                        repl.history.next_tail_ptr().?;
-                    @memset(history_tail, '\x00');
-                    stdx.copy_left(.inexact, u8, history_tail, input);
-                    repl.history.advance_tail();
+            var statement_buffer = ReplBufferBoundedArray{};
+            var terminal_screen: TerminalScreen = undefined;
+            var first_line = true;
+            var continuation = false;
+            while (true) {
+                const line_prompt = if (continuation) "... " else prompt;
+                if (continuation) {
+                    try repl.terminal.print("... ", .{});
+                } else {
+                    try repl.terminal.print(prompt, .{});
                 }
+                const line = repl.read_until_newline_or_eof(
+                    line_prompt,
+                    &terminal_screen,
+                    first_line,
+                ) catch |err| {
+                    repl.event_loop_done = true;
+                    return err;
+                } orelse {
+                    repl.event_loop_done = true;
+                    try repl.fail("\nExiting.\n", .{});
+                    return;
+                };
+                first_line = false;
+                if (line.len == 0) return;
+                repl.history_push(line);
+                const separator_len: usize = @intFromBool(statement_buffer.count() > 0);
+                if (line.len + statement_buffer.count() + separator_len >
+                    repl_history_entry_bytes_without_nul)
+                {
+                    try repl.fail("Statement exceeds maximum input length.\n", .{});
+                    return;
+                }
+                if (separator_len > 0) statement_buffer.push(' ');
+                statement_buffer.push_slice(line);
+                const trimmed = std.mem.trimEnd(u8, statement_buffer.const_slice(), " \t");
+                continuation = trimmed.len > 0 and switch (trimmed[trimmed.len - 1]) {
+                    ',', '=', '|' => true,
+                    else => false,
+                };
+                if (!continuation) break;
             }
+            const input = statement_buffer.const_slice();
 
             const statement = Parser.parse_statement(
                 input,
