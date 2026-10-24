@@ -306,7 +306,7 @@ pub const Terminal = struct {
     }
 };
 
-const Screen = struct {
+pub const Screen = struct {
     rows: usize,
     columns: usize,
     cursor_row: usize,
