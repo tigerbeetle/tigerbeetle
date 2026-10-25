@@ -61,6 +61,7 @@ pub const ULONG = windows.ULONG;
 pub const UNICODE_STRING = windows.UNICODE_STRING;
 pub const CloseHandle = windows.CloseHandle;
 pub const GetLastError = windows.GetLastError;
+pub const crypt32 = windows.crypt32;
 pub const ntdll = windows.ntdll;
 pub const unexpectedError = windows.unexpectedError;
 pub const unexpectedStatus = windows.unexpectedStatus;

@@ -513,11 +513,13 @@ pub fn build_with_options(
     });
 
     // zig build docs
-    build_steps.docs.dependOn(blk: {
-        const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
-        nested_build.setCwd(b.path("./src/docs_website/"));
-        break :blk &nested_build.step;
-    });
+    if (builtin.os.tag == .linux or builtin.os.tag == .macos) {
+        build_steps.docs.dependOn(blk: {
+            const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
+            nested_build.setCwd(b.path("./src/docs_website/"));
+            break :blk &nested_build.step;
+        });
+    }
 
     // zig build ci
     build_ci(b, build_steps.ci, .{
