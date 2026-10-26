@@ -373,7 +373,7 @@ fn render_arithmetic(
 
 fn ruby_error_name(client_error: ast.ClientError) []const u8 {
     return switch (client_error) {
-        .too_much_data => "PacketError",
+        .too_much_data => "TooMuchDataError",
         .client_closed => "ClientClosedError",
         .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
