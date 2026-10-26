@@ -428,31 +428,46 @@ pub const SocketError = error{
 } || UnexpectedError;
 
 pub fn socket(domain: u32, socket_type: u32, protocol: u32) SocketError!socket_t {
-    const have_sock_flags = !native_os.isDarwin();
-    const filtered_sock_type = if (!have_sock_flags)
-        socket_type & ~@as(u32, SOCK.NONBLOCK | SOCK.CLOEXEC)
-    else
-        socket_type;
-    const rc = system.socket(domain, filtered_sock_type, protocol);
-    switch (errno(rc)) {
-        .SUCCESS => {
-            const fd: fd_t = @intCast(rc);
-            errdefer close(fd);
-            if (!have_sock_flags) {
-                try set_sock_flags(fd, socket_type);
-            }
-            return fd;
-        },
-        .ACCES => return error.PermissionDenied,
-        .AFNOSUPPORT => return error.AddressFamilyNotSupported,
-        .INVAL => return error.ProtocolFamilyNotAvailable,
-        .MFILE => return error.ProcessFdQuotaExceeded,
-        .NFILE => return error.SystemFdQuotaExceeded,
-        .NOBUFS => return error.SystemResources,
-        .NOMEM => return error.SystemResources,
-        .PROTONOSUPPORT => return error.ProtocolNotSupported,
-        .PROTOTYPE => return error.SocketTypeNotSupported,
-        else => |err| return stdx.unexpected_errno("socket", err),
+    if (native_os == .windows) {
+        // Mirror behaviour in Windows IO; equivalent to SOCK_CLOEXEC.
+        const socket_flags: stdx.windows.DWORD = stdx.windows.ws2_32.WSA_FLAG_NO_HANDLE_INHERIT;
+        return try stdx.windows.WSASocketW(
+            @bitCast(domain),
+            @intCast(socket_type),
+            @intCast(protocol),
+            null,
+            0,
+            socket_flags,
+        );
+    } else {
+        const rc = system.socket(
+            domain,
+            if (native_os.isDarwin())
+                socket_type & ~@as(u32, SOCK.NONBLOCK | SOCK.CLOEXEC)
+            else
+                socket_type,
+            protocol,
+        );
+        switch (errno(rc)) {
+            .SUCCESS => {
+                const fd: fd_t = @intCast(rc);
+                errdefer close(fd);
+                if (native_os.isDarwin()) {
+                    try set_sock_flags(fd, socket_type);
+                }
+                return fd;
+            },
+            .ACCES => return error.PermissionDenied,
+            .AFNOSUPPORT => return error.AddressFamilyNotSupported,
+            .INVAL => return error.ProtocolFamilyNotAvailable,
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            .NFILE => return error.SystemFdQuotaExceeded,
+            .NOBUFS => return error.SystemResources,
+            .NOMEM => return error.SystemResources,
+            .PROTONOSUPPORT => return error.ProtocolNotSupported,
+            .PROTOTYPE => return error.SocketTypeNotSupported,
+            else => |err| return stdx.unexpected_errno("socket", err),
+        }
     }
 }
 

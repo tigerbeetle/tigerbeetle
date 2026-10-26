@@ -159,17 +159,153 @@ pub const darwin = struct {
 pub const windows = struct {
     const ntdll = std.os.windows.ntdll;
 
-    const BOOL = std.os.windows.BOOL;
+    const SECURITY_ATTRIBUTES = std.os.windows.SECURITY_ATTRIBUTES;
     const FILETIME = std.os.windows.FILETIME;
     const HANDLE = std.os.windows.HANDLE;
+    const INVALID_HANDLE_VALUE: HANDLE = std.os.windows.INVALID_HANDLE_VALUE;
     const IO_STATUS_BLOCK = std.os.windows.IO_STATUS_BLOCK;
-    const LARGE_INTEGER = std.os.windows.LARGE_INTEGER;
-    const UNICODE_STRING = std.os.windows.UNICODE_STRING;
 
     const FALSE: BOOL = .FALSE;
+    const LARGE_INTEGER = std.os.windows.LARGE_INTEGER;
+    const UNICODE_STRING = std.os.windows.UNICODE_STRING;
+    const SIZE_T = std.os.windows.SIZE_T;
+    const DWORD = std.os.windows.DWORD;
+    const ULONG_PTR = std.os.windows.ULONG_PTR;
+    const ULONGLONG = std.os.windows.ULONGLONG;
+    const LPVOID = std.os.windows.LPVOID;
+    const BOOL = std.os.windows.BOOL;
+    const LPCWSTR = std.os.windows.LPCWSTR;
 
-    const INVALID_HANDLE_VALUE: HANDLE = std.os.windows.INVALID_HANDLE_VALUE;
+    const GetLastError = std.os.windows.GetLastError;
+    const unexpectedError = std.os.windows.unexpectedError;
+    const GetCurrentProcess = std.os.windows.GetCurrentProcess;
+
     const IOCTL = std.os.windows.IOCTL;
+
+    pub const JobObject = struct {
+        handle: HANDLE,
+
+        const ExtendedLimitInformation = extern struct {
+            BasicLimitInformation: BasicLimitInformation,
+            IoInfo: IOCounters,
+            ProcessMemoryLimit: SIZE_T,
+            JobMemoryLimit: SIZE_T,
+            PeakProcessMemoryUsed: SIZE_T,
+            PeakJobMemoryUsed: SIZE_T,
+        };
+
+        const BasicLimitInformation = extern struct {
+            PerProcessUserTimeLimit: LARGE_INTEGER,
+            PerJobUserTimeLimit: LARGE_INTEGER,
+            LimitFlags: DWORD,
+            MinimumWorkingSetSize: SIZE_T,
+            MaximumWorkingSetSize: SIZE_T,
+            ActiveProcessLimit: DWORD,
+            Affinity: ULONG_PTR,
+            PriorityClass: DWORD,
+            SchedulingClass: DWORD,
+        };
+
+        const IOCounters = extern struct {
+            ReadOperationCount: ULONGLONG,
+            WriteOperationCount: ULONGLONG,
+            OtherOperationCount: ULONGLONG,
+            ReadTransferCount: ULONGLONG,
+            WriteTransferCount: ULONGLONG,
+            OtherTransferCount: ULONGLONG,
+        };
+
+        const InformationClass = enum(u8) {
+            BasicLimit = 2,
+            ExtendedLimit = 9,
+        };
+
+        const LimitFlags = enum(u32) {
+            KillOnJobClose = 8192,
+        };
+
+        extern "kernel32" fn CreateJobObjectW(
+            lpJobAttributes: ?*SECURITY_ATTRIBUTES,
+            lpName: ?LPCWSTR,
+        ) callconv(.winapi) ?HANDLE;
+
+        extern "kernel32" fn AssignProcessToJobObject(
+            hJob: HANDLE,
+            hProcess: HANDLE,
+        ) callconv(.winapi) BOOL;
+
+        extern "kernel32" fn SetInformationJobObject(
+            hJob: HANDLE,
+            JobObjectInformationClass: JobObject.InformationClass,
+            lpJobObjectInformation: LPVOID,
+            cbJobObjectInformationLength: DWORD,
+        ) callconv(.winapi) BOOL;
+
+        pub fn open(options: struct {
+            kill_on_job_close: bool,
+            assign_process_to_job_object: bool,
+        }) error{ PermissionDenied, Unexpected }!JobObject {
+            var job_object: JobObject = .{ .handle = INVALID_HANDLE_VALUE };
+
+            job_object.handle = CreateJobObjectW(null, null) orelse {
+                switch (GetLastError()) {
+                    .INVALID_HANDLE, .ALREADY_EXISTS => unreachable,
+                    else => |err| return unexpectedError(err),
+                }
+            };
+            errdefer job_object.deinit();
+
+            if (options.kill_on_job_close) {
+                var extended_limit_information = ExtendedLimitInformation{
+                    .BasicLimitInformation = .{
+                        .LimitFlags = @intFromEnum(LimitFlags.KillOnJobClose),
+                        .PerJobUserTimeLimit = undefined,
+                        .ActiveProcessLimit = undefined,
+                        .Affinity = undefined,
+                        .MaximumWorkingSetSize = undefined,
+                        .MinimumWorkingSetSize = undefined,
+                        .PerProcessUserTimeLimit = undefined,
+                        .PriorityClass = undefined,
+                        .SchedulingClass = undefined,
+                    },
+                    .JobMemoryLimit = undefined,
+                    .IoInfo = undefined,
+                    .ProcessMemoryLimit = undefined,
+                    .PeakJobMemoryUsed = undefined,
+                    .PeakProcessMemoryUsed = undefined,
+                };
+
+                if (SetInformationJobObject(
+                    job_object.handle,
+                    InformationClass.ExtendedLimit,
+                    &extended_limit_information,
+                    @sizeOf(ExtendedLimitInformation),
+                ) == FALSE) {
+                    switch (GetLastError()) {
+                        .ACCESS_DENIED => return error.PermissionDenied,
+                        else => |err| return unexpectedError(err),
+                    }
+                }
+            }
+
+            if (options.assign_process_to_job_object) {
+                if (AssignProcessToJobObject(job_object.handle, GetCurrentProcess()) == FALSE) {
+                    switch (GetLastError()) {
+                        .ACCESS_DENIED => return error.PermissionDenied,
+                        else => |err| return unexpectedError(err),
+                    }
+                }
+            }
+
+            return job_object;
+        }
+
+        pub fn deinit(job_object: *JobObject) void {
+            assert(job_object.handle != INVALID_HANDLE_VALUE);
+            CloseHandle(job_object.handle);
+            job_object.handle = INVALID_HANDLE_VALUE;
+        }
+    };
 
     extern "kernel32" fn GetSystemTimePreciseAsFileTime(
         lpFileTime: *FILETIME,

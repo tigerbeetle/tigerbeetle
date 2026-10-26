@@ -59,6 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if windows {
         // tb_client needs access to the random number generator in here.
         println!("cargo:rustc-link-lib=advapi32");
+        println!("cargo:rustc-link-lib=ntdll");
     }
 
     Ok(())
