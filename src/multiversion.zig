@@ -1587,6 +1587,18 @@ pub fn self_exe_path(
         return path;
     }
 
+    if (builtin.target.os.tag == .linux) {
+        if (stdx.cut_suffix(native_self_exe_path, " (deleted)")) |path_without_deleted| {
+            // The replica's binary may have been replaced immediately after it was started --
+            // i.e., before this function is invoked. In that case, /proc/self/exe will report
+            // "/path/to/tigerbeetle (deleted)". (Vortex can trigger this occasionally).
+            //
+            // Technically "/path/to/tigerbeetle (deleted)" could be the path to the binary.
+            // Don't do this.
+            return try allocator.dupeZ(u8, path_without_deleted);
+        }
+    }
+
     if (builtin.target.os.tag == .macos and
         std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null)
     {
