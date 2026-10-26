@@ -67,18 +67,25 @@ const mode: enum { smoke, benchmark } =
 seed: u64,
 time: Time = .{},
 timer: ?Instant = null,
+env: std.process.Environ.Map,
 
 const Bench = @This();
 
 pub fn init() Bench {
+    const gpa = std.testing.allocator;
+    const env = std.testing.environ.createMap(gpa) catch @panic("OOM");
+    errdefer env.deinit();
+
     return .{
         // Benchmarks require a fixed seed for reproducibility; smoke mode uses a random seed.
         .seed = if (mode == .benchmark) seed_benchmark else std.testing.random_seed,
+        .env = env,
     };
 }
 
 pub fn deinit(bench: *Bench) void {
     assert(bench.timer == null);
+    bench.env.deinit();
     bench.* = undefined;
 }
 
@@ -89,7 +96,7 @@ pub fn parameter(
     value_benchmark: u64,
 ) u64 {
     assert(value_smoke < value_benchmark);
-    const value = parameter_fallible(name, value_smoke, value_benchmark) catch |err| switch (err) {
+    const value = parameter_fallible(name, &b.env, value_smoke, value_benchmark) catch |err| switch (err) {
         error.InvalidCharacter,
         error.LeadingZero,
         error.Overflow,
@@ -101,6 +108,7 @@ pub fn parameter(
 
 fn parameter_fallible(
     comptime name: []const u8,
+    map: *const std.process.Environ.Map,
     value_smoke: u64,
     value_benchmark: u64,
 ) !u64 {
@@ -108,13 +116,7 @@ fn parameter_fallible(
     return switch (mode) {
         .smoke => value_smoke,
         .benchmark => {
-            const value = std.testing.environ.getAlloc(std.heap.page_allocator, name) catch |err|
-                switch (err) {
-                    error.EnvironmentVariableMissing => return value_benchmark,
-                    else => @panic("unable to read benchmark parameter"),
-                };
-            defer std.heap.page_allocator.free(value);
-
+            const value = map.get(name) orelse return value_benchmark;
             return try stdx.parse_int(u64, value, .{});
         },
     };
