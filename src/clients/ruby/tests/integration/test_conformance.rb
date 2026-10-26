@@ -2669,7 +2669,7 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_get_account_transfers_fails_when_the_limit_is_too_large
-    assert_raises(TB::PacketError) do
+    assert_raises(TB::TooMuchDataError) do
       @client.get_account_transfers(
         TB::AccountFilter.new(
           account_id: TB.id,
@@ -4210,7 +4210,7 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_get_account_balances_fails_when_the_limit_is_too_large
-    assert_raises(TB::PacketError) do
+    assert_raises(TB::TooMuchDataError) do
       @client.get_account_balances(
         TB::AccountFilter.new(
           account_id: TB.id,
@@ -4698,7 +4698,7 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_query_accounts_fails_when_the_limit_is_too_large
-    assert_raises(TB::PacketError) do
+    assert_raises(TB::TooMuchDataError) do
       @client.query_accounts(
         TB::QueryFilter.new(
           user_data_128: TB.id,
@@ -5437,7 +5437,7 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_query_transfers_fails_when_the_limit_is_too_large
-    assert_raises(TB::PacketError) do
+    assert_raises(TB::TooMuchDataError) do
       @client.query_transfers(
         TB::QueryFilter.new(
           limit: 10000
