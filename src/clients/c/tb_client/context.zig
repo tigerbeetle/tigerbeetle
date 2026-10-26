@@ -725,7 +725,7 @@ pub fn ContextType(
                 };
                 self.batch_enqueue(batch);
 
-                // Batchs can be processed without increasing `pending.count`:
+                // Batches can be processed without increasing `pending.count`:
                 // - If the batch is invalid.
                 // - If there's no in-flight request, the batch is sent immediately without
                 //   using the pending queue.
