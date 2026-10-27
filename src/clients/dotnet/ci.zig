@@ -85,7 +85,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
             try shell.exec(
                 \\podman run
-                \\--security-opt seccomp=unconfined
+                \\--rm --security-opt seccomp=unconfined
                 \\--volume ./TigerBeetle/bin/Release:/host
                 \\{image}
                 \\sh
