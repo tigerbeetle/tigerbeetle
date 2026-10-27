@@ -990,11 +990,11 @@ pub const MultiversionOS = struct {
         _ = result catch |e| {
             self.timeout_statx_previous = .err;
 
-            return self.handle_error(e);
+            return self.handle_error("binary_statx_callback", e);
         };
 
         if (self.timeout_statx.mode & os.linux.S.IXUSR == 0) {
-            return self.handle_error(error.BinaryNotMarkedExecutable);
+            return self.handle_error("binary_statx_callback", error.BinaryNotMarkedExecutable);
         }
 
         // Zero the atime, so we can compare the rest of the struct directly.
@@ -1059,7 +1059,7 @@ pub const MultiversionOS = struct {
 
         const fd = result catch |e| {
             self.source_offset = null;
-            return self.handle_error(e);
+            return self.handle_error("binary_open_callback", e);
         };
 
         self.stage = .source_read;
@@ -1106,7 +1106,7 @@ pub const MultiversionOS = struct {
             }
         }
 
-        const bytes_read = result catch |e| return self.handle_error(e);
+        const bytes_read = result catch |e| return self.handle_error("binary_read_callback", e);
         self.source_offset.? += bytes_read;
         assert(self.source_offset.? <= self.source_buffer.len);
         // This could be a truncated file, but it'll get rejected when we verify the checksum.
@@ -1116,7 +1116,9 @@ pub const MultiversionOS = struct {
             const source_buffer = self.source_buffer[0..self.source_offset.?];
 
             self.stage = .target_update;
-            self.target_update(source_buffer) catch |e| return self.handle_error(e);
+            self.target_update(source_buffer) catch |e| {
+                return self.handle_error("target_update", e);
+            };
             assert(self.stage == .ready);
         } else {
             self.binary_read();
@@ -1243,10 +1245,10 @@ pub const MultiversionOS = struct {
         self.stage = .ready;
     }
 
-    fn handle_error(self: *MultiversionOS, result: anyerror) void {
+    fn handle_error(self: *MultiversionOS, label: []const u8, result: anyerror) void {
         assert(self.stage != .init);
 
-        log.err("binary does not contain valid multiversion data: {}", .{result});
+        log.err("{s}: binary does not contain valid multiversion data: {}", .{ label, result });
 
         self.stage = .{ .err = result };
     }
@@ -1583,6 +1585,18 @@ pub fn self_exe_path(
         assert(std.fs.path.isAbsolute(path));
 
         return path;
+    }
+
+    if (builtin.target.os.tag == .linux) {
+        if (stdx.cut_suffix(native_self_exe_path, " (deleted)")) |path_without_deleted| {
+            // The replica's binary may have been replaced immediately after it was started --
+            // i.e., before this function is invoked. In that case, /proc/self/exe will report
+            // "/path/to/tigerbeetle (deleted)". (Vortex can trigger this occasionally).
+            //
+            // Technically "/path/to/tigerbeetle (deleted)" could be the path to the binary.
+            // Don't do this.
+            return try allocator.dupeZ(u8, path_without_deleted);
+        }
     }
 
     if (builtin.target.os.tag == .macos and

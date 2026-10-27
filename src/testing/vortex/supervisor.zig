@@ -568,7 +568,10 @@ pub const Supervisor = struct {
     }
 
     pub fn replica_start(supervisor: *Supervisor, replica_index: u8) !void {
-        log.info("{}: starting replica", .{replica_index});
+        log.info("{}: starting replica (release={f})", .{
+            replica_index,
+            supervisor.releases[supervisor.replicas[replica_index].executable_index],
+        });
 
         const replica = supervisor.replicas[replica_index];
         assert(replica.state == .terminated);
