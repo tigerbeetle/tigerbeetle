@@ -13,7 +13,7 @@ const IS_TWO_PHASE_TRANSFER = false
 
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: [process.env.TB_ADDRESS || '3000']
+  replica_addresses: process.env.TB_ADDRESS || '3000'
 })
 
 const TRANSFER_SIZE = 128

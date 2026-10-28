@@ -115,7 +115,7 @@ interface Binding {
 
 export interface ClientInitArgs {
   cluster_id: bigint, // u128
-  replica_addresses: Array<string | number>,
+  replica_addresses: string,
 }
 
 export interface Client {
@@ -135,7 +135,7 @@ export function createClient (args: ClientInitArgs): Client {
   // throw a shutdown Error. This prevents tb_client calls from happening after tb_client_deinit().
   let context: Context | null = binding.init({
     cluster_id: args.cluster_id,
-    replica_addresses: Buffer.from(args.replica_addresses.join(',')),
+    replica_addresses: Buffer.from(args.replica_addresses),
     request_error_class: RequestError,
   })
 
