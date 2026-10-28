@@ -1,7 +1,6 @@
 package com.tigerbeetle;
 
 import java.util.Objects;
-import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 
 public final class Client implements AutoCloseable {
@@ -26,27 +25,20 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code clusterID} is not a UInt128.
      * @throws IllegalArgumentException if {@code replicaAddresses} is empty or presented in
      *         incorrect format.
-     * @throws NullPointerException if {@code replicaAddresses} is null or any element in the array
-     *         is null.
+     * @throws NullPointerException if {@code replicaAddresses} is null.
      */
-    public Client(final byte[] clusterID, final String[] replicaAddresses) {
+    public Client(final byte[] clusterID, final String replicaAddresses) {
         Objects.requireNonNull(clusterID, "ClusterID cannot be null");
         if (clusterID.length != UInt128.SIZE)
             throw new IllegalArgumentException("ClusterID must be 16 bytes long");
 
         Objects.requireNonNull(replicaAddresses, "Replica addresses cannot be null");
 
-        if (replicaAddresses.length == 0)
+        if (replicaAddresses.isEmpty())
             throw new IllegalArgumentException("Empty replica addresses");
 
-        var joiner = new StringJoiner(",");
-        for (var address : replicaAddresses) {
-            Objects.requireNonNull(address, "Replica address cannot be null");
-            joiner.add(address);
-        }
-
         this.clusterID = clusterID;
-        this.nativeClient = NativeClient.init(clusterID, joiner.toString());
+        this.nativeClient = NativeClient.init(clusterID, replicaAddresses);
     }
 
     /**
