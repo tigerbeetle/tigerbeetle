@@ -97,7 +97,12 @@ pub fn parameter(
     value_benchmark: u64,
 ) u64 {
     assert(value_smoke < value_benchmark);
-    const value = parameter_fallible(name, &b.env, value_smoke, value_benchmark) catch |err| switch (err) {
+    const value = parameter_fallible(
+        name,
+        &b.env,
+        value_smoke,
+        value_benchmark,
+    ) catch |err| switch (err) {
         error.InvalidCharacter,
         error.LeadingZero,
         error.Overflow,
