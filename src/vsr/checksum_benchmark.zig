@@ -13,15 +13,16 @@ const Bench = stdx.Bench;
 const repetitions = 35;
 
 test "benchmark: checksum" {
-    var bench: Bench = .init();
-    defer bench.deinit();
-
-    const blob_size = bench.parameter("blob_size", KiB, MiB);
-
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
 
     const arena = arena_instance.allocator();
+
+    var bench: Bench = .init(arena);
+    defer bench.deinit(arena);
+
+    const blob_size = bench.parameter("blob_size", KiB, MiB);
+
     var prng = stdx.PRNG.from_seed(bench.seed);
     const blob = try arena.alignedAlloc(u8, .fromByteUnits(cache_line_size), blob_size);
     prng.fill(blob);
@@ -39,5 +40,5 @@ test "benchmark: checksum" {
 
     // See "benchmark: API tutorial" to understand why we print out the "hash" of this run.
     bench.report("checksum {x:0>32}", .{checksum_counter});
-    bench.report("{} for whole blob", .{result});
+    bench.report("{f} for whole blob", .{result});
 }
