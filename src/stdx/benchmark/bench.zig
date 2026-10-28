@@ -21,8 +21,9 @@
 //! The `benchmark` in the test name is the secret code to unlock benchmarking code.
 
 test "benchmark: API tutorial" { // `benchmark:` in the name is important!
-    var bench: Bench = .init();
-    defer bench.deinit();
+    const gpa = std.testing.allocator;
+    var bench: Bench = .init(gpa);
+    defer bench.deinit(gpa);
 
     // Parameters are named, and have two default values.
     // The small value is used in tests, to prevent bitrot.
@@ -71,8 +72,7 @@ env: std.process.Environ.Map,
 
 const Bench = @This();
 
-pub fn init() Bench {
-    const gpa = std.testing.allocator;
+pub fn init(gpa: std.mem.Allocator) Bench {
     const env = std.testing.environ.createMap(gpa) catch @panic("OOM");
     errdefer env.deinit();
 
@@ -83,7 +83,8 @@ pub fn init() Bench {
     };
 }
 
-pub fn deinit(bench: *Bench) void {
+pub fn deinit(bench: *Bench, gpa: std.mem.Allocator) void {
+    assert(bench.env.allocator.ptr == gpa.ptr);
     assert(bench.timer == null);
     bench.env.deinit();
     bench.* = undefined;

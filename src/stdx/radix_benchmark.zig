@@ -14,15 +14,15 @@ const layouts = .{
 };
 
 test "benchmark: radix sort" {
-    var bench: Bench = .init();
-    defer bench.deinit();
-
-    const values_count: usize = @intCast(bench.parameter("values_count", 64, 1 << 18));
-
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
 
     const arena = arena_instance.allocator();
+
+    var bench: Bench = .init(arena);
+    defer bench.deinit(arena);
+
+    const values_count: usize = @intCast(bench.parameter("values_count", 64, 1 << 18));
 
     var prng = stdx.PRNG.from_seed(bench.seed);
     var checksum: u64 = 0;

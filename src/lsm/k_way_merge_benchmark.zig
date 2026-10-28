@@ -22,19 +22,19 @@ const Values = .{
 };
 
 test "benchmark: k-way-merge" {
-    var bench: Bench = .init();
-    defer bench.deinit();
+    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_instance.deinit();
+
+    const arena = arena_instance.allocator();
+
+    var bench: Bench = .init(arena);
+    defer bench.deinit(arena);
 
     const streams_count: usize = @intCast(bench.parameter("streams_count", 4, 32));
     const stream_length: usize = @intCast(bench.parameter("stream_length", 128, 8192));
     assert(streams_count <= streams_count_max);
 
     var prng = stdx.PRNG.from_seed(bench.seed);
-
-    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_instance.deinit();
-
-    const arena = arena_instance.allocator();
 
     const streams = .{
         try prepare_streams(Values[0], &prng, arena, streams_count, stream_length),

@@ -40,8 +40,13 @@ const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={f}";
 const repetitions: usize = 32;
 
 test "benchmark: binary search" {
-    var bench: Bench = .init();
-    defer bench.deinit();
+    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_instance.deinit();
+
+    var arena = arena_instance.allocator();
+
+    var bench: Bench = .init(arena);
+    defer bench.deinit(arena);
 
     bench.report("WT: Wall time/search", .{});
 
@@ -49,10 +54,8 @@ test "benchmark: binary search" {
     const searches = bench.parameter("searches", 500, 20_000);
 
     var prng = stdx.PRNG.from_seed(bench.seed);
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
 
-    const blob = try arena.allocator().alignedAlloc(u8, .fromByteUnits(64), blob_size);
+    const blob = try arena.alignedAlloc(u8, .fromByteUnits(64), blob_size);
     var checksum: u64 = 0;
 
     inline for (kv_types) |kv| {
@@ -69,7 +72,7 @@ test "benchmark: binary search" {
                 },
                 searches,
                 blob[0..page_buffer_size],
-                arena.allocator(),
+                arena,
                 &prng,
             );
         }

@@ -65,8 +65,13 @@ const configs = [_]Options{
 };
 
 test "benchmark: segmented array" {
-    var bench: Bench = .init();
-    defer bench.deinit();
+    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_instance.deinit();
+
+    const arena = arena_instance.allocator();
+
+    var bench: Bench = .init(arena);
+    defer bench.deinit(arena);
 
     var prng = stdx.PRNG.from_seed(42);
 
@@ -96,17 +101,12 @@ test "benchmark: segmented array" {
             .{ .verify = false },
         );
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
         var node_pool: NodePool = undefined;
-        try node_pool.init(allocator, SegmentedArray.node_count_max);
-        defer node_pool.deinit(allocator);
+        try node_pool.init(arena, SegmentedArray.node_count_max);
+        defer node_pool.deinit(arena);
 
-        var array = try SegmentedArray.init(allocator);
-        defer array.deinit(allocator, &node_pool);
+        var array = try SegmentedArray.init(arena);
+        defer array.deinit(arena, &node_pool);
 
         var i: usize = 0;
         while (i < options.value_count) : (i += 1) {
@@ -116,8 +116,8 @@ test "benchmark: segmented array" {
             });
         }
 
-        const queries = try alloc_shuffled_index(allocator, options.value_count, &prng);
-        defer allocator.free(queries);
+        const queries = try alloc_shuffled_index(arena, options.value_count, &prng);
+        defer arena.free(queries);
 
         bench.start();
         const repetitions = @max(1, @divFloor(samples, queries.len));
