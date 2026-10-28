@@ -44,7 +44,7 @@ public class IntegrationTests
     public static void Initialize(TestContext _)
     {
         server = new TBServer();
-        client = new Client(0, new string[] { server.Address });
+        client = new Client(0, server.Address);
     }
 
     [ClassCleanup]
@@ -58,23 +58,8 @@ public class IntegrationTests
     [ExpectedException(typeof(ArgumentNullException))]
     public void ConstructorWithNullReplicaAddresses()
     {
-        string[]? addresses = null;
+        string? addresses = null;
         _ = new Client(0, addresses!);
-    }
-
-    [TestMethod]
-    public void ConstructorWithNullReplicaAddressElement()
-    {
-        try
-        {
-            var addresses = new string?[] { "3000", null };
-            _ = new Client(0, addresses!);
-            Assert.Fail();
-        }
-        catch (InitializationException exception)
-        {
-            Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
-        }
     }
 
     [TestMethod]
@@ -82,7 +67,7 @@ public class IntegrationTests
     {
         try
         {
-            _ = new Client(0, Array.Empty<string>());
+            _ = new Client(0, "");
             Assert.Fail();
         }
         catch (InitializationException exception)
@@ -96,7 +81,7 @@ public class IntegrationTests
     {
         try
         {
-            _ = new Client(0, new string[] { "" });
+            _ = new Client(0, ",");
             Assert.Fail();
         }
         catch (InitializationException exception)
@@ -110,7 +95,7 @@ public class IntegrationTests
     {
         try
         {
-            var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
+            var addresses = string.Join(",", Enumerable.Range(3000, 3100));
             _ = new Client(0, addresses);
             Assert.Fail();
         }
@@ -124,7 +109,7 @@ public class IntegrationTests
     public void ConstructorAndFinalizer()
     {
         // No using here, we want to test the finalizer
-        var client = new Client(1, new string[] { "3000" });
+        var client = new Client(1, "3000");
         Assert.IsTrue(client.ClusterID == 1);
     }
 
@@ -2057,7 +2042,7 @@ public class IntegrationTests
 
     private void ConcurrencyTest(bool isAsync)
     {
-        using var client = new Client(0, new[] { server.Address });
+        using var client = new Client(0, server.Address);
 
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
@@ -2137,7 +2122,7 @@ public class IntegrationTests
     {
         const int TASKS_QTY = 10_000;
 
-        using var client = new Client(0, new[] { server.Address });
+        using var client = new Client(0, server.Address);
 
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
@@ -2213,7 +2198,7 @@ public class IntegrationTests
     {
         const int TASKS_QTY = 32;
 
-        using var client = new Client(0, new[] { server.Address });
+        using var client = new Client(0, server.Address);
 
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
@@ -2266,7 +2251,7 @@ public class IntegrationTests
     [ExpectedException(typeof(ClientClosedException))]
     public void DisposedClient()
     {
-        using var client = new Client(0, new[] { server.Address });
+        using var client = new Client(0, server.Address);
 
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);

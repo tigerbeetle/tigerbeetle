@@ -22,10 +22,10 @@ internal sealed class NativeClient : IDisposable
         this.tb_client = tb_client;
     }
 
-    public static NativeClient Init(UInt128 clusterID, string[] addresses)
+    public static NativeClient Init(UInt128 clusterID, string addresses)
     {
         if (addresses == null) throw new ArgumentNullException(nameof(addresses));
-        var addressesBytes = Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
+        var addressesBytes = Encoding.UTF8.GetBytes(addresses + "\0");
         unsafe
         {
             // Creating a pinned, single-item array to hold the client handle.
