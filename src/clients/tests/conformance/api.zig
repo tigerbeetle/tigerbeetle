@@ -67,7 +67,7 @@ pub fn generate_id() u128 {
 }
 
 /// `count` runtime-generated ids, generated across several clock ticks. See
-/// `conformance_test_ast.ids_between_sleeps`.
+/// `ast.ids_between_sleeps`.
 pub fn generate_ids(count: u32) []const u128 {
     _ = count;
     @compileError(ct_compile_error);

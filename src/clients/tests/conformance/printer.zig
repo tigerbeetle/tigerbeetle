@@ -7,8 +7,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const ast = @import("conformance_test_ast.zig");
-const Arena = @import("conformance_test_arena.zig").Arena;
+const ast = @import("ast.zig");
+const Arena = @import("arena.zig").Arena;
 
 pub const Printer = struct {
     // For GO* see: https://github.com/golang/go/wiki/CodeReviewComments#initialisms

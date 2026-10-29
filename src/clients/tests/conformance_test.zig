@@ -1,8 +1,8 @@
-pub const Arena = @import("conformance_test_arena.zig").Arena;
-pub const Printer = @import("conformance_test_printer.zig").Printer;
-pub const Words = @import("conformance_test_printer.zig").Words;
-pub const ast = @import("conformance_test_ast.zig");
-const parser = @import("conformance_test_parser.zig");
+pub const Arena = @import("conformance/arena.zig").Arena;
+pub const Printer = @import("conformance/printer.zig").Printer;
+pub const Words = @import("conformance/printer.zig").Words;
+pub const ast = @import("conformance/ast.zig");
+const parser = @import("conformance/parser.zig");
 
 // In the generated test files, suites appear in the order defined here. We
 // are trying to structure this like a walkthrough for readers of the

@@ -17,8 +17,8 @@
 
 - Conformance test suites are defined in `suites/*.zig`.
 - They are never compiled, but parsed with `std.zig.Ast`.
-- The file `conformance_test_api.zig` contains `@compileError` stubs for the test API. This avoids LSP warnings about undefined functions while editing tests.
-- The parser (`conformance_test_parser.zig`) performs its own semantic checks against `vsr.tigerbeetle` types and the desired semantics of the test suite. It's conservative in its approach and leans towards failing.
+- The file `conformance/api.zig` contains `@compileError` stubs for the test API. This avoids LSP warnings about undefined functions while editing tests.
+- The parser (`conformance/parser.zig`) performs its own semantic checks against `vsr.tigerbeetle` types and the desired semantics of the test suite. It's conservative in its approach and leans towards failing.
 - Each target language has an emitter in `src/clients/<lang>/<lang>_conformance.zig`. These generate the final conformance test suites, which are checked for freshness during CI runs.
 - `conformance_test_list.zig` generates `conformance_tests.md` through `zig build conformance:generate`, and the client CI script (`src/scripts/ci.zig`) runs that step. This file links to every generated test.
 - Certain tradeoffs were made to keep the parser simple. The goal was a generated conformance test suite, not a generic source-to-source transpiler.
@@ -126,7 +126,7 @@ There are currently two defined requirements:
 
 ```zig
 // suites/transfers_import.zig
-const ct = @import("../conformance_test_api.zig");
+const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "imports a transfer with an explicit timestamp" {
@@ -191,7 +191,7 @@ test "imports a transfer with an explicit timestamp" {
 
 ```zig
 // suites/transfers_create.zig
-const ct = @import("../conformance_test_api.zig");
+const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "rejects a fractional amount" {
