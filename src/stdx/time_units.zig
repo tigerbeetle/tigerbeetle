@@ -21,6 +21,14 @@ pub const Instant = struct {
         const elapsed_ns = later.ns - earlier.ns;
         return .{ .ns = elapsed_ns };
     }
+
+    pub fn max(a: Instant, b: Instant) Instant {
+        return .{ .ns = @max(a.ns, b.ns) };
+    }
+
+    pub fn min(a: Instant, b: Instant) Instant {
+        return .{ .ns = @min(a.ns, b.ns) };
+    }
 };
 
 /// Non-negative time difference between two `Instant`s.
@@ -311,6 +319,14 @@ pub const InstantUnix = struct {
 
     pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
         return .{ .ns = instant.ns + duration.ns };
+    }
+
+    pub fn max(a: InstantUnix, b: InstantUnix) InstantUnix {
+        return .{ .ns = @max(a.ns, b.ns) };
+    }
+
+    pub fn min(a: InstantUnix, b: InstantUnix) InstantUnix {
+        return .{ .ns = @min(a.ns, b.ns) };
     }
 
     pub fn format(instant: InstantUnix, writer: *std.Io.Writer) !void {
