@@ -1,4 +1,4 @@
-const ct = @import("../conformance_test_api.zig");
+const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "returns debit and credit transfers for an account" {

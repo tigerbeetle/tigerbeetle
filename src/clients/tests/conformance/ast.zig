@@ -1,6 +1,6 @@
 const std = @import("std");
 const stdx = @import("stdx");
-const api = @import("conformance_test_api.zig");
+const api = @import("api.zig");
 
 pub const ClientError = api.ClientError;
 

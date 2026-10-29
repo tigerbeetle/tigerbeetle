@@ -1,8 +1,8 @@
 const std = @import("std");
 const stdx = @import("stdx");
 
-const api = @import("conformance_test_api.zig");
-const ast = @import("conformance_test_ast.zig");
+const api = @import("api.zig");
+const ast = @import("ast.zig");
 
 const log = std.log;
 

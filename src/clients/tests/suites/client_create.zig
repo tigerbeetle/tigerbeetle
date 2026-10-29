@@ -1,4 +1,4 @@
-const ct = @import("../conformance_test_api.zig");
+const ct = @import("../conformance/api.zig");
 
 test "creates a client from valid arguments" {
     ct.create_client(.{ .cluster_id = 0, .replica_addresses = ct.replica_addresses() });
