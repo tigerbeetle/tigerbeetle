@@ -11,7 +11,7 @@ const ast = @import("ast.zig");
 const Arena = @import("arena.zig").Arena;
 
 pub const Printer = struct {
-    // For GO* see: https://github.com/golang/go/wiki/CodeReviewComments#initialisms
+    // For GO* see: https://go.dev/wiki/CodeReviewComments#initialisms
     const Casing = enum {
         snake_case,
         camelCase,
@@ -97,7 +97,7 @@ pub const Printer = struct {
     }
 
     pub fn write_omission(printer: Printer, case: ast.Case) !void {
-        try printer.print_indented("{s} Omitted: \"{s}\"", .{
+        try printer.print_indented("{s} N/A: \"{s}\"", .{
             printer.comment_marker, case.description,
         });
         try printer.write_indent();
