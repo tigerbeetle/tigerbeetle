@@ -117,10 +117,18 @@ TigerBeetle::Client.open(cluster_id: 0, replica_addresses: "3000") do |client|
 end
 ```
 
-The following are valid addresses:
-* `3000` (interpreted as `127.0.0.1:3000`)
-* `127.0.0.1:3000` (interpreted as `127.0.0.1:3000`)
-* `127.0.0.1` (interpreted as `127.0.0.1:3001`, `3001` is the default port)
+ The addresses string must contain each replica's address, separated
+ by commas (with no surrounding spaces).
+
+ **The order of addresses must correspond to the order of replicas.**
+
+ The following are valid addresses:
+ * `3000` (interpreted as `127.0.0.1:3000`)
+ * `127.0.0.1:3000` (interpreted as `127.0.0.1:3000`)
+ * `127.0.0.1` (interpreted as `127.0.0.1:3001`, where `3001` is the default port)
+ * `3000,3001,3002` (interpreted as three replicas on `127.0.0.1` using different ports)
+ * `10.0.0.1:3001,10.0.0.2:3001,10.0.0.3:3002` (interpreted as three replicas on
+   different IP addresses and ports)
 
 ## Creating Accounts
 
