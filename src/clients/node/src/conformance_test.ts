@@ -1578,7 +1578,7 @@ test(
   },
 )
 
-// Omitted: "rejects a fractional amount"
+// N/A: "rejects a fractional amount"
 // Reason: requires fractional amounts
 
 // Suite: lookup_transfers

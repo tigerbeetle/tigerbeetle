@@ -97,7 +97,7 @@ public class ConformanceTests
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
 
-    // Omitted: "rejects a cluster_id above the maximum"
+    // N/A: "rejects a cluster_id above the maximum"
     // Reason: requires unbounded integers
 
     // Suite: generate_ids
@@ -1476,7 +1476,7 @@ public class ConformanceTests
         Assert.AreEqual(CreateTransferStatus.IdAlreadyFailed, results[0].Status);
     }
 
-    // Omitted: "rejects a fractional amount"
+    // N/A: "rejects a fractional amount"
     // Reason: requires fractional amounts
 
     // Suite: lookup_transfers
@@ -6028,16 +6028,16 @@ public class ConformanceTests
         Assert.AreEqual(0, accounts.Length);
     }
 
-    // Omitted: "rejects a u128 above the maximum"
+    // N/A: "rejects a u128 above the maximum"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a negative u128"
+    // N/A: "rejects a negative u128"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a u128 above the maximum on a struct field"
+    // N/A: "rejects a u128 above the maximum on a struct field"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a negative u128 on a struct field"
+    // N/A: "rejects a negative u128 on a struct field"
     // Reason: requires unbounded integers
 
     // Suite: create_transfers_concurrent
@@ -6267,7 +6267,7 @@ public class ConformanceTests
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
 
-    // Omitted: "rejects a cluster_id above the maximum"
+    // N/A: "rejects a cluster_id above the maximum"
     // Reason: requires unbounded integers
 
     // Suite: generate_ids
@@ -7646,7 +7646,7 @@ public class ConformanceTests
         Assert.AreEqual(CreateTransferStatus.IdAlreadyFailed, results[0].Status);
     }
 
-    // Omitted: "rejects a fractional amount"
+    // N/A: "rejects a fractional amount"
     // Reason: requires fractional amounts
 
     // Suite: lookup_transfers
@@ -12198,16 +12198,16 @@ public class ConformanceTests
         Assert.AreEqual(0, accounts.Length);
     }
 
-    // Omitted: "rejects a u128 above the maximum"
+    // N/A: "rejects a u128 above the maximum"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a negative u128"
+    // N/A: "rejects a negative u128"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a u128 above the maximum on a struct field"
+    // N/A: "rejects a u128 above the maximum on a struct field"
     // Reason: requires unbounded integers
 
-    // Omitted: "rejects a negative u128 on a struct field"
+    // N/A: "rejects a negative u128 on a struct field"
     // Reason: requires unbounded integers
 
     // Suite: create_transfers_concurrent
