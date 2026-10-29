@@ -131,8 +131,8 @@ fn emit(printer: *Printer) !void {
         try printer.write_empty_line();
         try printer.print_indented("// Suite: {s}", .{suite.name});
         for (suite.cases) |case| {
-            const case_memory = printer.arena.mark();
-            defer printer.arena.release(case_memory);
+            printer.arena.mark();
+            defer printer.arena.restore();
 
             try printer.write_empty_line();
             if (case.requirement) |requirement| {
