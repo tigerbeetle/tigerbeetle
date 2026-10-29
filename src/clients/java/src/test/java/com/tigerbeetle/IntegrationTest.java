@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigInteger;
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -58,7 +59,7 @@ public class IntegrationTest {
     @BeforeClass
     public static void initialize() throws Exception {
         server = new Server("tests");
-        client = new Client(clusterId, new String[] {server.address});
+        client = new Client(clusterId, server.address);
     }
 
     @AfterClass
@@ -74,17 +75,9 @@ public class IntegrationTest {
         }
     }
 
-    @Test(expected = NullPointerException.class)
-    public void testConstructorNullElementReplicaAddresses() throws Throwable {
-        final var replicaAddresses = new String[] {"3001", null};
-        try (final var client = new Client(clusterId, replicaAddresses)) {
-            fail();
-        }
-    }
-
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorEmptyReplicaAddresses() throws Throwable {
-        final var replicaAddresses = new String[0];
+        final var replicaAddresses = "";
         try (final var client = new Client(clusterId, replicaAddresses)) {
             fail();
         }
@@ -92,11 +85,7 @@ public class IntegrationTest {
 
     @Test
     public void testConstructorReplicaAddressesLimitExceeded() throws Throwable {
-        final var replicaAddresses = new String[100];
-        for (int i = 0; i < replicaAddresses.length; i++) {
-            replicaAddresses[i] = "3000";
-        }
-
+        final var replicaAddresses = String.join(",", Collections.nCopies(100, "3000"));
         try (final var client = new Client(clusterId, replicaAddresses)) {
             fail();
         } catch (InitializationException initializationException) {
@@ -107,7 +96,7 @@ public class IntegrationTest {
 
     @Test
     public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
-        final var replicaAddresses = new String[] {"", "", ""};
+        final var replicaAddresses = ",,";
         try (final var client = new Client(clusterId, replicaAddresses)) {
             fail();
         } catch (InitializationException initializationException) {
@@ -118,7 +107,7 @@ public class IntegrationTest {
 
     @Test
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
-        final var replicaAddresses = new String[] {"127.0.0.1:99999"};
+        final var replicaAddresses = "127.0.0.1:99999";
         try (final var client = new Client(clusterId, replicaAddresses)) {
             fail();
         } catch (InitializationException initializationException) {
@@ -130,7 +119,7 @@ public class IntegrationTest {
     @Test
     public void testConstructorCluster() throws Throwable {
         final var clusterId = UInt128.id();
-        final var replicaAddresses = new String[] {"3001"};
+        final var replicaAddresses = "3001";
         try (final var client = new Client(clusterId, replicaAddresses)) {
             assertArrayEquals(clusterId, client.getClusterID());
         }
@@ -139,7 +128,7 @@ public class IntegrationTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorInvalidCluster() throws Throwable {
         final var clusterIdInvalid = new byte[] {0, 0, 0};
-        final var replicaAddresses = new String[] {"3001"};
+        final var replicaAddresses = "3001";
         try (final var client = new Client(clusterIdInvalid, replicaAddresses)) {
             fail();
         }
@@ -989,15 +978,13 @@ public class IntegrationTest {
         // Use a separate server to avoid evicting the test's shared client.
         try (final var server = new Server("testClientEvicted")) {
 
-            try (final var client_evict =
-                    new Client(clusterId, new String[] {server.getAddress()})) {
+            try (final var client_evict = new Client(clusterId, server.getAddress())) {
                 var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
                 assertTrue(accounts_first.getLength() == 0);
 
                 for (int i = 0; i < CLIENTS_MAX; i++) {
                     executor.submit(() -> {
-                        try (final var client =
-                                new Client(clusterId, new String[] {server.getAddress()})) {
+                        try (final var client = new Client(clusterId, server.getAddress())) {
                             var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
                             assertTrue(accounts.getLength() == 0);
                         } catch (InterruptedException e) {
@@ -1096,7 +1083,7 @@ public class IntegrationTest {
         final int BATCH_SIZE = 1;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
-        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final var client = new Client(clusterId, server.getAddress())) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -1154,7 +1141,7 @@ public class IntegrationTest {
         final int BATCH_SIZE = 64;
         final var barrier = new CountDownLatch(TASKS_COUNT);
 
-        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final var client = new Client(clusterId, server.getAddress())) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -1218,7 +1205,7 @@ public class IntegrationTest {
         final var enterBarrier = new CountDownLatch(TASKS_COUNT);
         final var exitBarrier = new CountDownLatch(1);
 
-        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final var client = new Client(clusterId, server.getAddress())) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -1283,7 +1270,7 @@ public class IntegrationTest {
         try {
             // As we call client.close() explicitly,
             // we don't need to use a try-with-resources block here.
-            final var client = new Client(clusterId, new String[] {server.getAddress()});
+            final var client = new Client(clusterId, server.getAddress());
 
             // Creating accounts.
             final var account1Id = UInt128.id();
@@ -1325,7 +1312,7 @@ public class IntegrationTest {
     public void testCloseConcurrent() throws Throwable {
         final int threadCount = 16;
         final var clients = IntStream.range(0, threadCount)
-                .mapToObj((index) -> new Client(clusterId, new String[] {server.getAddress()}))
+                .mapToObj((index) -> new Client(clusterId, server.getAddress()))
                 .collect(Collectors.toList());
         final var threads = IntStream.range(0, threadCount).mapToObj((index) -> {
             final var thread = new Thread(() -> {
@@ -1356,7 +1343,7 @@ public class IntegrationTest {
     public void testAsyncTasks() throws Throwable {
         final int TASKS_COUNT = 1_000_000;
 
-        try (final var client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final var client = new Client(clusterId, server.getAddress())) {
 
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
@@ -2508,7 +2495,7 @@ public class IntegrationTest {
     public void testEmptyReply() throws Throwable {
         final int TASKS_COUNT = 100;
 
-        try (final var client2 = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final var client2 = new Client(clusterId, server.getAddress())) {
             for (int i = 0; i < TASKS_COUNT; i++) {
                 var request1 = client.lookupAccountsAsync(new IdBatch(UInt128.id()));
                 var request2 = client2.lookupAccountsAsync(new IdBatch(UInt128.id()));

@@ -1,5 +1,115 @@
 # API changes
 
+## Unreleased
+
+### Replica addresses are a single string.
+
+For API consistency, the .NET, Go, Java, and Node.js clients no longer take replica addresses as an
+array. They now expect a single string of comma-separated addresses, for example
+`"3000,3001,3002"`.
+
+### Client breaking changes
+
+Below is a list of API changes specific to each client library:
+
+<details><summary><b>.NET</b></summary>
+
+### .NET Client breaking changes
+
+- The `addresses` parameter of the `Client` constructor changed from `string[]` to `string`.
+
+  |Type        |Before                                 | After                                   |
+  |------------|---------------------------------------|-----------------------------------------|
+  |Constructor |`Client(UInt128, string[])`            |`Client(UInt128, string)`                |
+
+### Example:
+
+Before:
+```c#
+using var client = new Client(clusterID, new[] { "3000", "3001", "3002" });
+```
+
+After:
+```c#
+using var client = new Client(clusterID, "3000,3001,3002");
+```
+
+</details><br><!--.NET-->
+
+<details><summary><b>Go</b></summary>
+
+### Go Client breaking changes
+
+- The `addresses` parameter of `NewClient` changed from `[]string` to `string`.
+
+  |Type        |Before                                 | After                                   |
+  |------------|---------------------------------------|-----------------------------------------|
+  |Function    |`NewClient(Uint128, []string)`         |`NewClient(Uint128, string)`             |
+
+### Example:
+
+Before:
+```go
+client, err := NewClient(ToUint128(0), []string{"3000", "3001", "3002"})
+```
+
+After:
+```go
+client, err := NewClient(ToUint128(0), "3000,3001,3002")
+```
+
+</details><br><!--Go-->
+
+<details><summary><b>Java</b></summary>
+
+### Java Client breaking changes
+
+- The `replicaAddresses` parameter of the `Client` constructor changed from `String[]` to
+  `String`.
+
+  |Type        |Before                                 | After                                   |
+  |------------|---------------------------------------|-----------------------------------------|
+  |Constructor |`Client(byte[], String[])`             |`Client(byte[], String)`                 |
+
+### Example:
+
+Before:
+```java
+Client client = new Client(clusterID, new String[] {"3000", "3001", "3002"});
+```
+
+After:
+```java
+Client client = new Client(clusterID, "3000,3001,3002");
+```
+
+</details><br><!--Java-->
+
+<details><summary><b>Node.js</b></summary>
+
+### Node.js Client breaking changes
+
+- The `replica_addresses` field of `ClientInitArgs` changed from `Array<string | number>` to
+  `string`. Ports can no longer be passed as numbers.
+
+  |Type        |Before                                      | After                                |
+  |------------|--------------------------------------------|--------------------------------------|
+  |Field       |`replica_addresses: Array<string \| number>`|`replica_addresses: string`           |
+
+### Example:
+
+Before:
+```typescript
+const client = createClient({ cluster_id: 0n, replica_addresses: ['3000', '3001', '3002'] });
+```
+
+After:
+```typescript
+const client = createClient({ cluster_id: 0n, replica_addresses: '3000,3001,3002' });
+```
+
+</details><!--Node.js-->
+
 ## [0.17.0](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.17.0)
 
 Applications using the TigerBeetle Client `0.16.x` **will require changes** when upgrading to

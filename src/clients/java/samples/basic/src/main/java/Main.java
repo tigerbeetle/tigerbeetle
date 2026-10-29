@@ -12,7 +12,7 @@ public final class Main {
         String replicaAddress = System.getenv("TB_ADDRESS");
 
         byte[] clusterID = UInt128.asBytes(0);
-        String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
+        String replicaAddresses = replicaAddress == null ? "3000" : replicaAddress;
         try (var client = new Client(clusterID, replicaAddresses)) {
             // Create two accounts
             AccountBatch accounts = new AccountBatch(2);

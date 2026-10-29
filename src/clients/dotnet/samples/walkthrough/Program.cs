@@ -9,7 +9,7 @@ Console.WriteLine("SUCCESS");
 // section:client
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 var clusterID = UInt128.Zero;
-var addresses = new[] { tbAddress != null ? tbAddress : "3000" };
+var addresses = tbAddress != null ? tbAddress : "3000";
 using (var client = new Client(clusterID, addresses))
 {
     // Use client

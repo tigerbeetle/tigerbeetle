@@ -87,7 +87,7 @@ func WithClient(t testing.TB, withClient func(Client)) {
 		t.Fatal(err)
 	}
 
-	addresses := []string{strings.TrimSpace(port)}
+	addresses := strings.TrimSpace(port)
 	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), addresses)
 	if err != nil {
 		t.Fatal(err)

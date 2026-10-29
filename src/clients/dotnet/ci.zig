@@ -103,7 +103,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
                 \\using TigerBeetle;
                 \\public class Program {
                 \\  public static void Main() {
-                \\    new Client(UInt128.Zero, new [] {"3001"}).Dispose();
+                \\    new Client(UInt128.Zero, "3001").Dispose();
                 \\    Console.WriteLine("SUCCESS");
                 \\  }
                 \\}

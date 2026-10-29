@@ -11,7 +11,7 @@ public sealed class Client : IDisposable
     private readonly UInt128 clusterID;
     private readonly NativeClient nativeClient;
 
-    public Client(UInt128 clusterID, string[] addresses)
+    public Client(UInt128 clusterID, string addresses)
     {
         this.nativeClient = NativeClient.Init(clusterID, addresses);
         this.clusterID = clusterID;

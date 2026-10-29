@@ -30,7 +30,6 @@ import "C"
 import (
 	e "errors"
 	"runtime"
-	"strings"
 	"unsafe"
 
 	_ "github.com/tigerbeetle/tigerbeetle-go/native"
@@ -70,11 +69,10 @@ type c_client struct {
 
 func NewClient(
 	clusterID Uint128,
-	addresses []string,
+	addresses string,
 ) (Client, error) {
-	// Allocate a cstring of the addresses joined with ",".
-	addresses_raw := strings.Join(addresses[:], ",")
-	c_addresses := C.CString(addresses_raw)
+	// Allocate a cstring of the addresses.
+	c_addresses := C.CString(addresses)
 	defer C.free(unsafe.Pointer(c_addresses))
 
 	tb_client := new(C.tb_client_t)
@@ -85,7 +83,7 @@ func NewClient(
 		tb_client,
 		(*C.uint8_t)(unsafe.Pointer(&cluster_id)),
 		c_addresses,
-		C.uint32_t(len(addresses_raw)),
+		C.uint32_t(len(addresses)),
 		C.uintptr_t(0), // on_completion_ctx
 		(*[0]byte)(C.onGoBatchCompletion),
 	)

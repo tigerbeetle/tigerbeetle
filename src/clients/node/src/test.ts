@@ -29,7 +29,7 @@ function random_index(array: Array<any>): number {
   return Math.floor(Math.random() * array.length);
 }
 
-const REPLICA_ADDRESSES = [process.env.TB_ADDRESS || '3000'];
+const REPLICA_ADDRESSES = process.env.TB_ADDRESS || '3000';
 const client = createClient({
   cluster_id: 0n,
   replica_addresses: REPLICA_ADDRESSES
