@@ -50,7 +50,7 @@ const World = struct {
         };
 
         for (&world.replicas, 0..) |*replica, replica_index| {
-            replica.* = .{ .replica = @intCast(replica_index) };
+            replica.* = Replica.init(@intCast(replica_index));
         }
         return world;
     }
@@ -91,17 +91,18 @@ const World = struct {
     }
 
     fn check(world: *World) void {
-        for (world.replicas) |replica| {
-            if (replica.committed_last.op >= world.journal.len) continue;
+        for (&world.replicas) |*replica| {
+            const committed_last = replica.local().committed_last;
+            if (committed_last.op >= world.journal.len) continue;
 
-            if (world.journal[replica.committed_last.op].is_reserved()) {
-                world.journal[replica.committed_last.op] = replica.committed_last;
-                world.check_hash_link(replica.committed_last.op);
-                world.check_hash_link(replica.committed_last.op + 1);
+            if (world.journal[committed_last.op].is_reserved()) {
+                world.journal[committed_last.op] = committed_last;
+                world.check_hash_link(committed_last.op);
+                world.check_hash_link(committed_last.op + 1);
             } else {
                 assert(std.meta.eql(
-                    world.journal[replica.committed_last.op],
-                    replica.committed_last,
+                    world.journal[committed_last.op],
+                    committed_last,
                 ));
             }
         }
@@ -121,6 +122,7 @@ const World = struct {
             .kill = 1,
             .message = 1,
             .view_change = 1,
+            .persist = 1,
         });
         switch (action) {
             .request => {
@@ -129,6 +131,16 @@ const World = struct {
             .message => {},
             .kill => try world.kill(),
             .view_change => try world.view_change(),
+            .persist => try world.persist(),
+        }
+    }
+
+    fn persist(world: *World) !void {
+        const replica = try world.frng.index(world.replicas);
+        const pipeline_index = try world.frng.index(world.replicas[replica].local().pipeline);
+
+        if (world.replicas[replica].local().pipeline[pipeline_index].is_reserved()) {
+            world.replicas[replica].persist(pipeline_index);
         }
     }
 
@@ -158,7 +170,7 @@ const World = struct {
         world.replicas[replica].view_change();
         log.debug("view_change: replica={} view_max={}", .{
             replica,
-            world.replicas[replica].view_max,
+            world.replicas[replica].local().view_max,
         });
     }
 };
@@ -166,26 +178,40 @@ const World = struct {
 const pipeline_max: u64 = 2;
 
 const Replica = struct {
-    pipeline: [pipeline_max]Entry = @splat(.reserved),
-    committed_last: Entry = .root,
+    state: GlobalSate,
     replica: u8,
-    view_min: u64 = 0,
-    view_max: u64 = 1,
+
+    fn init(replica_index: u8) Replica {
+        return .{
+            .replica = replica_index,
+            .state = @splat(.{}),
+        };
+    }
+
+    fn local(replica: *Replica) *LocalState {
+        return &replica.state[replica.replica];
+    }
 
     fn on_request(replica: *Replica, payload: u128) void {
         if (!replica.primary()) {
             return;
         }
-        const op = replica.committed_last.op + 1;
-        const parent = replica.committed_last.checksum;
-        replica.committed_last = .{
+        // TODO: we need to select a quorum
+        const op = replica.local().committed_last.op + 1;
+        const parent = replica.local().committed_last.checksum;
+        replica.local().committed_last = .{
             .op = op,
-            .view = replica.view_max,
+            .view = replica.local().view_max,
             .checksum = 0,
             .parent = parent,
             .payload = payload,
         };
-        replica.committed_last.set_checksum();
+        replica.local().committed_last.set_checksum();
+    }
+
+    fn persist(replica: *Replica, pipeline_index: usize) void {
+        assert(!replica.local().pipeline[pipeline_index].is_reserved());
+        replica.local().pipeline_ok[pipeline_index] = true;
     }
 
     fn on_message(replica: *Replica, message: Message) void {
@@ -194,13 +220,24 @@ const Replica = struct {
     }
 
     fn view_change(replica: *Replica) void {
-        replica.view_max += 1;
+        replica.local().view_max += 1;
     }
 
-    fn primary(replica: *const Replica) bool {
-        return replica.replica == (replica.view_max % replica_count);
+    fn primary(replica: *Replica) bool {
+        return replica.replica == (replica.local().view_max % replica_count);
     }
 };
+
+// State of the single replica
+const LocalState = struct {
+    committed_last: Entry = .root,
+    pipeline: [pipeline_max]Entry = @splat(.reserved),
+    pipeline_ok: [pipeline_max]bool = @splat(false),
+    view_min: u64 = 0,
+    view_max: u64 = 1,
+};
+
+const GlobalSate = [replica_count]LocalState;
 
 const Entry = extern struct {
     op: u64,
@@ -248,6 +285,5 @@ const Entry = extern struct {
 const replica_count: u8 = 6;
 
 const Message = struct {
-    pipeline: [replica_count][pipeline_max]Entry,
-    replica: u8,
+    state: GlobalSate,
 };
