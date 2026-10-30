@@ -17,7 +17,6 @@ const Shell = stdx.Shell;
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
-const changelog = @import("./scripts/changelog.zig");
 const amqp = @import("./scripts/amqp.zig");
 const tb_client = @import("./scripts/tb_client.zig");
 
@@ -37,7 +36,6 @@ const CLIArgs = union(enum) {
     ci: ci.CLIArgs,
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
-    changelog: void,
     amqp: amqp.CLIArgs,
     tbclient: tb_client.CLIArgs,
 
@@ -46,7 +44,6 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- [-h | --help]
         \\
-        \\  zig build scripts -- changelog
         \\
         \\  zig build scripts -- ci [--language=<dotnet|go|rust|java|node|python>] [--validate-release]
         \\                          [--build-docs]
@@ -96,7 +93,6 @@ pub fn main(init: std.process.Init) !void {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
-        .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
         .tbclient => |args_tb_client| try tb_client.main(shell, gpa, args_tb_client),
     }

@@ -86,6 +86,7 @@ pub const multiversion = @import("multiversion.zig");
 pub const ReleaseList = multiversion.ReleaseList;
 pub const Release = multiversion.Release;
 pub const ReleaseTriple = multiversion.ReleaseTriple;
+pub const ChangelogIterator = @import("scripts/changelog.zig").ChangelogIterator;
 
 pub const ProcessType = enum { replica, client };
 pub const Peer = union(enum) {
