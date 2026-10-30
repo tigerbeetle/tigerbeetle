@@ -21,6 +21,14 @@ pub const Instant = struct {
         const elapsed_ns = later.ns - earlier.ns;
         return .{ .ns = elapsed_ns };
     }
+
+    pub fn max(a: Instant, b: Instant) Instant {
+        return .{ .ns = @max(a.ns, b.ns) };
+    }
+
+    pub fn min(a: Instant, b: Instant) Instant {
+        return .{ .ns = @min(a.ns, b.ns) };
+    }
 };
 
 /// Non-negative time difference between two `Instant`s.
@@ -284,6 +292,18 @@ pub const InstantUnix = struct {
         return @divFloor(instant.ns, std.time.ns_per_s);
     }
 
+    pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
+        return .{ .ns = instant.ns + duration.ns };
+    }
+
+    pub fn max(a: InstantUnix, b: InstantUnix) InstantUnix {
+        return .{ .ns = @max(a.ns, b.ns) };
+    }
+
+    pub fn min(a: InstantUnix, b: InstantUnix) InstantUnix {
+        return .{ .ns = @min(a.ns, b.ns) };
+    }
+
     pub fn date_time(instant: InstantUnix) DateTimeUTC {
         const timestamp_ms = @divTrunc(instant.ns, std.time.ns_per_ms);
         const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
@@ -307,10 +327,6 @@ pub const InstantUnix = struct {
             .second = time.getSecondsIntoMinute(),
             .millisecond = @intCast(@mod(timestamp_ms, 1000)),
         };
-    }
-
-    pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
-        return .{ .ns = instant.ns + duration.ns };
     }
 
     pub fn format(instant: InstantUnix, writer: *std.Io.Writer) !void {
