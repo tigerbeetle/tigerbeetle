@@ -93,6 +93,8 @@ const World = struct {
     fn check(world: *World) void {
         for (&world.replicas) |*replica| {
             const committed_last = replica.local().committed_last;
+            assert(!committed_last.is_reserved());
+
             if (committed_last.op >= world.journal.len) continue;
 
             if (world.journal[committed_last.op].is_reserved()) {
@@ -137,11 +139,8 @@ const World = struct {
 
     fn persist(world: *World) !void {
         const replica = try world.frng.index(world.replicas);
-        const pipeline_index = try world.frng.index(world.replicas[replica].local().pipeline);
-
-        if (world.replicas[replica].local().pipeline[pipeline_index].is_reserved()) {
-            world.replicas[replica].persist(pipeline_index);
-        }
+        try world.replicas[replica].local().pipeline.persist(world.frng);
+        world.replicas[replica].commit();
     }
 
     fn request(world: *World) !void {
@@ -177,6 +176,53 @@ const World = struct {
 
 const pipeline_max: u64 = 2;
 
+const Pipeline = struct {
+    entry: [pipeline_max]Entry = @splat(.reserved),
+    ok: [pipeline_max]bool = @splat(false),
+    last_committed_op: u64 = 1,
+
+    fn get(pipeline: *Pipeline, op: u64) ?*Entry {
+        const index = pipeline.op_to_index(op) orelse return null;
+        if (pipeline.entry[index].is_reserved()) {
+            assert(!pipeline.ok[index]);
+            return null;
+        }
+        return &pipeline.entry[index];
+    }
+
+    fn op_to_index(pipeline: *Pipeline, op: u64) ?u64 {
+        if (op <= pipeline.last_committed_op) return null;
+        assert(op > pipeline.last_committed_op);
+        const index = op - pipeline.last_committed_op - 1;
+        if (index >= pipeline_max) return null;
+        return index;
+    }
+
+    fn persist(pipeline: *Pipeline, prng: *FRNG) !void {
+        const index = try prng.index(pipeline.entry);
+        if (!pipeline.entry[index].is_reserved()) {
+            pipeline.ok[index] = true;
+        }
+    }
+
+    fn is_ok(pipeline: *Pipeline, op: u64) bool {
+        const index = pipeline.op_to_index(op) orelse return false;
+        return pipeline.ok[index];
+    }
+
+    fn pop(pipeline: *Pipeline) Entry {
+        const entry = pipeline.entry[0];
+
+        pipeline.entry[0] = .reserved;
+        pipeline.ok[0] = false;
+        std.mem.rotate(Entry, &pipeline.entry, 1);
+        std.mem.rotate(bool, &pipeline.ok, 1);
+
+        assert(!entry.is_reserved());
+        return entry;
+    }
+};
+
 const Replica = struct {
     state: GlobalSate,
     replica: u8,
@@ -209,9 +255,19 @@ const Replica = struct {
         replica.local().committed_last.set_checksum();
     }
 
-    fn persist(replica: *Replica, pipeline_index: usize) void {
-        assert(!replica.local().pipeline[pipeline_index].is_reserved());
-        replica.local().pipeline_ok[pipeline_index] = true;
+    fn commit(replica: *Replica) void {
+        // commit only in order
+        var ok_count: u8 = 0;
+        const op = replica.local().committed_last.op + 1;
+        for (&replica.state) |*peer| {
+            ok_count += @intFromBool(peer.pipeline.is_ok(op));
+        }
+        if (ok_count >= quorum_replication) {
+            const entry = replica.local().pipeline.pop();
+            log.debug("{}: commit: {f}", .{ replica, entry });
+            assert(!entry.is_reserved());
+            replica.local().committed_last = entry;
+        }
     }
 
     fn on_message(replica: *Replica, message: Message) void {
@@ -231,8 +287,7 @@ const Replica = struct {
 // State of the single replica
 const LocalState = struct {
     committed_last: Entry = .root,
-    pipeline: [pipeline_max]Entry = @splat(.reserved),
-    pipeline_ok: [pipeline_max]bool = @splat(false),
+    pipeline: Pipeline = .{},
     view_min: u64 = 0,
     view_max: u64 = 1,
 };
@@ -275,6 +330,10 @@ const Entry = extern struct {
         } else return false;
     }
 
+    pub fn format(entry: *const Entry, writer: *std.Io.Writer) !void {
+        try writer.print("{}/{}={}", .{ entry.op, entry.view, entry.checksum });
+    }
+
     fn set_checksum(entry: *Entry) void {
         assert(entry.checksum == 0);
         const checksum = std.hash.CityHash64.hash(std.mem.asBytes(entry));
@@ -283,6 +342,7 @@ const Entry = extern struct {
 };
 
 const replica_count: u8 = 6;
+const quorum_replication = 3;
 
 const Message = struct {
     state: GlobalSate,
