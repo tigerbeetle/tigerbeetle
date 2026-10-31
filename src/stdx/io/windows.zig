@@ -520,15 +520,27 @@ pub const IO = struct {
                         }
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY).
-                        const inaddr_any: [4]u8 = @splat(0);
-                        const bind_addr: common.PosixAddress = .{ .in = .{
-                            .port = 0,
-                            .addr = @bitCast(inaddr_any),
-                        } };
+                        const bind_addr: common.PosixAddress =
+                            switch (ctx.completion.operation.connect.address.any.family) {
+                                posix.AF.INET6 => .{ .in6 = .{
+                                    .port = 0,
+                                    .addr = @splat(0),
+                                    .flowinfo = 0,
+                                    .scope_id = 0,
+                                } },
+                                else => .{ .in = .{
+                                    .port = 0,
+                                    .addr = 0,
+                                } },
+                            };
+
                         posix.bind(
                             op.socket,
                             &bind_addr.any,
-                            @sizeOf(@FieldType(common.PosixAddress, "in")),
+                            switch (ctx.completion.operation.connect.address.any.family) {
+                                posix.AF.INET6 => @sizeOf(@FieldType(common.PosixAddress, "in6")),
+                                else => @sizeOf(@FieldType(common.PosixAddress, "in")),
+                            },
                         ) catch |err| switch (err) {
                             error.AccessDenied => unreachable,
                             error.SymLinkLoop => unreachable,
