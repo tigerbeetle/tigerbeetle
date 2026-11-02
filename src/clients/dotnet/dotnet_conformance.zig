@@ -108,8 +108,8 @@ fn emit(printer: *Printer) !void {
                         .synchronous => "void",
                         .asynchronous => "async Task",
                     },
-                    try printer.to_case_alloc(.PascalCase, suite.name),
-                    try printer.to_case_alloc(.PascalCase, case.description),
+                    try printer.to_case_alloc(.pascal_case, suite.name),
+                    try printer.to_case_alloc(.pascal_case, case.description),
                     switch (variant) {
                         .synchronous => "",
                         .asynchronous => "Async",
@@ -214,7 +214,7 @@ fn emit_directive(
 }
 
 fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant) !void {
-    const name = try printer.to_case_alloc(.camelCase, binding.name);
+    const name = try printer.to_case_alloc(.camel_case, binding.name);
     switch (binding.value) {
         .generate_id => try printer.print_indented("var {s} = ID.Create();", .{name}),
         .generate_ids => |count| {
@@ -238,7 +238,7 @@ fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant)
             try printer.write_indented("}");
         },
         .index => |index| {
-            const reference = try printer.to_case_alloc(.camelCase, index.reference);
+            const reference = try printer.to_case_alloc(.camel_case, index.reference);
             try printer.print_indented("var {s} = {s}[{d}];", .{ name, reference, index.index });
         },
         .field_access => |access| {
@@ -354,7 +354,7 @@ fn emit_record_fields(printer: *Printer, record: ast.Record) !void {
     printer.indent();
     for (record.fields) |field| {
         try printer.print_indented("{s} = {s},", .{
-            try printer.to_case_alloc(.PascalCase, field.field.name),
+            try printer.to_case_alloc(.pascal_case, field.field.name),
             try render_typed_value(printer, field.field, field.value, .{}),
         });
     }
@@ -366,7 +366,7 @@ fn emit_record_fields(printer: *Printer, record: ast.Record) !void {
 fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVariant) !void {
     switch (assertion) {
         .equal => |equal| {
-            const actual = try printer.to_case_alloc(.camelCase, equal.actual);
+            const actual = try printer.to_case_alloc(.camel_case, equal.actual);
             try printer.print_indented("Assert.AreEqual({d}, {s}.Length);", .{
                 equal.expected.len,
                 actual,
@@ -379,7 +379,7 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
                         }),
                         actual,
                         index,
-                        try printer.to_case_alloc(.PascalCase, field.field.name),
+                        try printer.to_case_alloc(.pascal_case, field.field.name),
                     });
                 }
             }
@@ -401,11 +401,11 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
         },
         .empty => |actual| {
             try printer.print_indented("Assert.AreEqual(0, {s}.Length);", .{
-                try printer.to_case_alloc(.camelCase, actual),
+                try printer.to_case_alloc(.camel_case, actual),
             });
         },
         .id_ascending => |ids| {
-            const name = try printer.to_case_alloc(.camelCase, ids);
+            const name = try printer.to_case_alloc(.camel_case, ids);
             try printer.print_indented(
                 "for (var index = 1; index < {s}.Length; index++)",
                 .{name},
@@ -465,8 +465,8 @@ fn dotnet_exception_name(client_error: ast.ClientError) []const u8 {
 
 fn render_field_access(printer: *Printer, reference: ast.FieldReference) ![]const u8 {
     return printer.string_alloc("{s}.{s}", .{
-        try printer.to_case_alloc(.camelCase, reference.reference),
-        try printer.to_case_alloc(.PascalCase, reference.field.name),
+        try printer.to_case_alloc(.camel_case, reference.reference),
+        try printer.to_case_alloc(.pascal_case, reference.field.name),
     });
 }
 
@@ -480,7 +480,7 @@ fn render_typed_value(
         .enum_literal => |literal| {
             return printer.string_alloc("{s}.{s}", .{
                 field.type.enum_name,
-                try printer.to_case_alloc(.PascalCase, literal),
+                try printer.to_case_alloc(.pascal_case, literal),
             });
         },
         .record => |flags| {
@@ -494,7 +494,7 @@ fn render_typed_value(
                 if (index > 0) try text.writer.writeAll(" | ");
                 try text.writer.print("{s}.{s}", .{
                     @tagName(flags.type),
-                    try printer.to_case_alloc(.PascalCase, flag.field.name),
+                    try printer.to_case_alloc(.pascal_case, flag.field.name),
                 });
             }
             return text.written();
@@ -506,10 +506,10 @@ fn render_typed_value(
             return printer.string_alloc("({s}){s}", .{ integer_type_name(bits), text });
         },
         .generate_id => return "ID.Create()",
-        .reference => |name| return printer.to_case_alloc(.camelCase, name),
+        .reference => |name| return printer.to_case_alloc(.camel_case, name),
         .index => |index| {
             return printer.string_alloc("{s}[{d}]", .{
-                try printer.to_case_alloc(.camelCase, index.reference),
+                try printer.to_case_alloc(.camel_case, index.reference),
                 index.index,
             });
         },
@@ -527,7 +527,7 @@ fn render_arithmetic(
     operator: []const u8,
 ) ![]const u8 {
     return printer.string_alloc("{s} {s} {d}", .{
-        try printer.to_case_alloc(.camelCase, arithmetic.reference),
+        try printer.to_case_alloc(.camel_case, arithmetic.reference),
         operator,
         arithmetic.by,
     });
@@ -536,7 +536,7 @@ fn render_arithmetic(
 fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
     return switch (expression) {
         .generate_id => "ID.Create()",
-        .reference => |name| printer.to_case_alloc(.camelCase, name),
+        .reference => |name| printer.to_case_alloc(.camel_case, name),
         .integer => |text| render_uint128(printer, text),
         else => unreachable,
     };

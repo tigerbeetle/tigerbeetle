@@ -411,7 +411,7 @@ fn render_flags(
             try text.writer.splatByteAll(' ', width);
         }
         try text.writer.print("TB::{s}::{s}", .{
-            @tagName(record.type), try printer.to_case_alloc(.UPPER_CASE, field.field.name),
+            @tagName(record.type), try printer.to_case_alloc(.upper_case, field.field.name),
         });
     }
     return text.written();
@@ -427,7 +427,7 @@ fn render_typed_value(
         .enum_literal => |literal| {
             return printer.string_alloc("TB::{s}::{s}", .{
                 field.type.enum_name,
-                try printer.to_case_alloc(.UPPER_CASE, literal),
+                try printer.to_case_alloc(.upper_case, literal),
             });
         },
         .record => |record| if (ast.Record.is_flags(record.type)) {

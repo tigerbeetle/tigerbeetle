@@ -1209,20 +1209,20 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
 /// Converts a snake_case identifier to another identifier case at comptime.
 pub fn to_case(
     comptime snake_case: []const u8,
-    comptime case: enum { camelCase, @"kebab-case", PascalCase, UPPER_CASE },
+    comptime case: enum { camel_case, kebab_case, pascal_case, upper_case },
 ) []const u8 {
     return comptime blk: {
         var output: [snake_case.len]u8 = undefined;
         switch (case) {
-            .@"kebab-case" => {
+            .kebab_case => {
                 for (snake_case, 0..) |byte, index| output[index] = if (byte == '_') '-' else byte;
                 break :blk comptime_slice(&output, snake_case.len);
             },
-            .UPPER_CASE => {
+            .upper_case => {
                 const len = std.ascii.upperString(output[0..], snake_case).len;
                 break :blk comptime_slice(&output, len);
             },
-            .camelCase, .PascalCase => {
+            .camel_case, .pascal_case => {
                 var len: usize = 0;
                 var iterator = std.mem.tokenizeScalar(u8, snake_case, '_');
                 while (iterator.next()) |word| {
@@ -1232,9 +1232,9 @@ pub fn to_case(
                 }
 
                 output[0] = switch (case) {
-                    .camelCase => std.ascii.toLower(output[0]),
-                    .PascalCase => std.ascii.toUpper(output[0]),
-                    .@"kebab-case", .UPPER_CASE => unreachable,
+                    .camel_case => std.ascii.toLower(output[0]),
+                    .pascal_case => std.ascii.toUpper(output[0]),
+                    .kebab_case, .upper_case => unreachable,
                 };
 
                 break :blk comptime_slice(&output, len);
@@ -1244,12 +1244,12 @@ pub fn to_case(
 }
 
 test "to_case" {
-    try std.testing.expectEqualStrings("createAccounts", to_case("create_accounts", .camelCase));
-    try std.testing.expectEqualStrings("CreateTransfers", to_case("create_transfers", .PascalCase));
-    try std.testing.expectEqualStrings("user-data-128", to_case("user_data_128", .@"kebab-case"));
+    try std.testing.expectEqualStrings("createAccounts", to_case("create_accounts", .camel_case));
+    try std.testing.expectEqualStrings("CreateTransfers", to_case("create_transfers", .pascal_case));
+    try std.testing.expectEqualStrings("user-data-128", to_case("user_data_128", .kebab_case));
     try std.testing.expectEqualStrings(
         "GET_ACCOUNT_BALANCES",
-        to_case("get_account_balances", .UPPER_CASE),
+        to_case("get_account_balances", .upper_case),
     );
 }
 
