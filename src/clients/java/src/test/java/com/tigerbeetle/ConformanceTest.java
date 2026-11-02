@@ -28,7 +28,7 @@ public class ConformanceTest {
     @BeforeClass
     public static void initialize() throws Exception {
         server = new Server("conformance");
-        client = new Client(clusterId, new String[] {server.getAddress()});
+        client = new Client(clusterId, server.getAddress());
     }
 
     @AfterClass
@@ -50,7 +50,7 @@ public class ConformanceTest {
     @Test
     public void testCreateClientCreatesAClientFromValidArguments()
             throws Exception {
-        new Client(u128("0"), new String[] {server.getAddress()}).close();
+        new Client(u128("0"), server.getAddress()).close();
     }
 
     @Test
@@ -60,7 +60,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"not-an-address"}));
+                        "not-an-address"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -71,7 +71,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"127.0.0.1:99999"}));
+                        "127.0.0.1:99999"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -82,19 +82,18 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
+                        "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"));
         assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
     }
 
     @Test
     public void testCreateClientRejectsAnEmptyAddress()
             throws Exception {
-        final var exception = assertThrows(
-                InitializationException.class,
+        assertThrows(
+                Exception.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {""}));
-        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+                        ""));
     }
 
     @Test
@@ -104,7 +103,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {",,"}));
+                        ",,"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -6634,7 +6633,7 @@ public class ConformanceTest {
     @Test
     public void testCloseClientFailsOperationsAfterClose()
             throws Exception {
-        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final Client client = new Client(clusterId, server.getAddress())) {
             client.close();
             {
                 final var idBatch = new IdBatch(1);
@@ -6647,7 +6646,7 @@ public class ConformanceTest {
     @Test
     public void testCloseClientIgnoresASecondClose()
             throws Exception {
-        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final Client client = new Client(clusterId, server.getAddress())) {
             client.close();
             client.close();
         }
@@ -6662,7 +6661,7 @@ public class ConformanceTest {
     @Test
     public void testCreateClientCreatesAClientFromValidArgumentsAsync()
             throws Exception {
-        new Client(u128("0"), new String[] {server.getAddress()}).close();
+        new Client(u128("0"), server.getAddress()).close();
     }
 
     @Test
@@ -6672,7 +6671,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"not-an-address"}));
+                        "not-an-address"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -6683,7 +6682,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"127.0.0.1:99999"}));
+                        "127.0.0.1:99999"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -6694,19 +6693,18 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"}));
+                        "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"));
         assertEquals(InitializationStatus.AddressLimitExceeded.value, exception.getStatus());
     }
 
     @Test
     public void testCreateClientRejectsAnEmptyAddressAsync()
             throws Exception {
-        final var exception = assertThrows(
-                InitializationException.class,
+        assertThrows(
+                Exception.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {""}));
-        assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
+                        ""));
     }
 
     @Test
@@ -6716,7 +6714,7 @@ public class ConformanceTest {
                 InitializationException.class,
                 () -> new Client(
                         u128("0"),
-                        new String[] {",,"}));
+                        ",,"));
         assertEquals(InitializationStatus.AddressInvalid.value, exception.getStatus());
     }
 
@@ -13222,7 +13220,7 @@ public class ConformanceTest {
     @Test
     public void testCloseClientFailsOperationsAfterCloseAsync()
             throws Exception {
-        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final Client client = new Client(clusterId, server.getAddress())) {
             client.close();
             {
                 final var idBatch = new IdBatch(1);
@@ -13241,7 +13239,7 @@ public class ConformanceTest {
     @Test
     public void testCloseClientIgnoresASecondCloseAsync()
             throws Exception {
-        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+        try (final Client client = new Client(clusterId, server.getAddress())) {
             client.close();
             client.close();
         }

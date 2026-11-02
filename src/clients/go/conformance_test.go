@@ -37,7 +37,7 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_client_creates_a_client_from_valid_arguments",
 		func(t *testing.T, client Client) {
-			testClient, err := NewClient(ToUint128(0), []string{port})
+			testClient, err := NewClient(ToUint128(0), port)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -48,7 +48,7 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_client_rejects_an_invalid_address",
 		func(t *testing.T, client Client) {
-			_, err := NewClient(ToUint128(0), []string{"not-an-address"})
+			_, err := NewClient(ToUint128(0), "not-an-address")
 			assert.True(t, errors.Is(err, ErrInvalidAddress))
 		},
 	)
@@ -56,7 +56,7 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_client_rejects_an_address_with_a_port_above_the_maximum",
 		func(t *testing.T, client Client) {
-			_, err := NewClient(ToUint128(0), []string{"127.0.0.1:99999"})
+			_, err := NewClient(ToUint128(0), "127.0.0.1:99999")
 			assert.True(t, errors.Is(err, ErrInvalidAddress))
 		},
 	)
@@ -64,7 +64,7 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_client_rejects_more_addresses_than_replicas",
 		func(t *testing.T, client Client) {
-			_, err := NewClient(ToUint128(0), []string{"3001,3002,3003,3004,3005,3006,3007,3008,3009,3010"})
+			_, err := NewClient(ToUint128(0), "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010")
 			assert.True(t, errors.Is(err, ErrAddressLimitExceeded))
 		},
 	)
@@ -72,15 +72,17 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_client_rejects_an_empty_address",
 		func(t *testing.T, client Client) {
-			_, err := NewClient(ToUint128(0), []string{""})
-			assert.True(t, errors.Is(err, ErrInvalidAddress))
+			_, err := NewClient(ToUint128(0), "")
+			if err == nil {
+				t.Fatal("expected an error")
+			}
 		},
 	)
 
 	test(
 		"create_client_rejects_empty_addresses",
 		func(t *testing.T, client Client) {
-			_, err := NewClient(ToUint128(0), []string{",,"})
+			_, err := NewClient(ToUint128(0), ",,")
 			assert.True(t, errors.Is(err, ErrInvalidAddress))
 		},
 	)
@@ -6840,7 +6842,7 @@ func TestConformance(t *testing.T) {
 }
 
 func newClient(t *testing.T, port string) Client {
-	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), []string{port})
+	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), port)
 	if err != nil {
 		t.Fatal(err)
 	}

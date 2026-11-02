@@ -20,7 +20,7 @@ public class ConformanceTests
     public static void Initialize(TestContext _)
     {
         server = new TBServer();
-        client = new Client(0, new string[] { server.Address });
+        client = new Client(0, server.Address);
     }
 
     [ClassCleanup]
@@ -39,14 +39,14 @@ public class ConformanceTests
     [TestMethod]
     public void CreateClientCreatesAClientFromValidArguments()
     {
-        new Client(0, new string[] { server.Address }).Dispose();
+        new Client(0, server.Address).Dispose();
     }
 
     [TestMethod]
     public void CreateClientRejectsAnInvalidAddress()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "not-an-address" })
+            () => new Client(0, "not-an-address")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -55,7 +55,7 @@ public class ConformanceTests
     public void CreateClientRejectsAnAddressWithAPortAboveTheMaximum()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "127.0.0.1:99999" })
+            () => new Client(0, "127.0.0.1:99999")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -64,7 +64,7 @@ public class ConformanceTests
     public void CreateClientRejectsMoreAddressesThanReplicas()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010" })
+            () => new Client(0, "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010")
         );
         Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
     }
@@ -72,17 +72,16 @@ public class ConformanceTests
     [TestMethod]
     public void CreateClientRejectsAnEmptyAddress()
     {
-        var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "" })
+        Assert.ThrowsException<InitializationException>(
+            () => new Client(0, "")
         );
-        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
 
     [TestMethod]
     public void CreateClientRejectsEmptyAddresses()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { ",," })
+            () => new Client(0, ",,")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -6183,7 +6182,7 @@ public class ConformanceTests
     [TestMethod]
     public void CloseClientFailsOperationsAfterClose()
     {
-        using var client = new Client(0, new string[] { server.Address });
+        using var client = new Client(0, server.Address);
         client.Close();
         Assert.ThrowsException<ClientClosedException>(
             () => client.LookupAccounts(new UInt128[] {
@@ -6194,7 +6193,7 @@ public class ConformanceTests
     [TestMethod]
     public void CloseClientIgnoresASecondClose()
     {
-        using var client = new Client(0, new string[] { server.Address });
+        using var client = new Client(0, server.Address);
         client.Close();
         client.Close();
     }
@@ -6211,14 +6210,14 @@ public class ConformanceTests
     [TestMethod]
     public async Task CreateClientCreatesAClientFromValidArgumentsAsync()
     {
-        new Client(0, new string[] { server.Address }).Dispose();
+        new Client(0, server.Address).Dispose();
     }
 
     [TestMethod]
     public async Task CreateClientRejectsAnInvalidAddressAsync()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "not-an-address" })
+            () => new Client(0, "not-an-address")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -6227,7 +6226,7 @@ public class ConformanceTests
     public async Task CreateClientRejectsAnAddressWithAPortAboveTheMaximumAsync()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "127.0.0.1:99999" })
+            () => new Client(0, "127.0.0.1:99999")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -6236,7 +6235,7 @@ public class ConformanceTests
     public async Task CreateClientRejectsMoreAddressesThanReplicasAsync()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010" })
+            () => new Client(0, "3001,3002,3003,3004,3005,3006,3007,3008,3009,3010")
         );
         Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
     }
@@ -6244,17 +6243,16 @@ public class ConformanceTests
     [TestMethod]
     public async Task CreateClientRejectsAnEmptyAddressAsync()
     {
-        var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { "" })
+        Assert.ThrowsException<InitializationException>(
+            () => new Client(0, "")
         );
-        Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
 
     [TestMethod]
     public async Task CreateClientRejectsEmptyAddressesAsync()
     {
         var exception = Assert.ThrowsException<InitializationException>(
-            () => new Client(0, new string[] { ",," })
+            () => new Client(0, ",,")
         );
         Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
     }
@@ -12355,7 +12353,7 @@ public class ConformanceTests
     [TestMethod]
     public async Task CloseClientFailsOperationsAfterCloseAsync()
     {
-        using var client = new Client(0, new string[] { server.Address });
+        using var client = new Client(0, server.Address);
         client.Close();
         await Assert.ThrowsExceptionAsync<ClientClosedException>(
             () => client.LookupAccountsAsync(new UInt128[] {
@@ -12366,7 +12364,7 @@ public class ConformanceTests
     [TestMethod]
     public async Task CloseClientIgnoresASecondCloseAsync()
     {
-        using var client = new Client(0, new string[] { server.Address });
+        using var client = new Client(0, server.Address);
         client.Close();
         client.Close();
     }

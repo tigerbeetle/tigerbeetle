@@ -299,7 +299,7 @@ fn emit_create_client(
     };
     switch (outcome) {
         .success => {
-            try printer.print_indented("testClient, err {s} NewClient({s}, []string{{{s}}})", .{
+            try printer.print_indented("testClient, err {s} NewClient({s}, {s})", .{
                 scope.error_assign(true),
                 cluster_id,
                 replica_addresses,
@@ -308,7 +308,7 @@ fn emit_create_client(
             try printer.write_indented("testClient.Close()");
         },
         .failure => |client_error| {
-            try printer.print_indented("_, err {s} NewClient({s}, []string{{{s}}})", .{
+            try printer.print_indented("_, err {s} NewClient({s}, {s})", .{
                 scope.error_assign(false),
                 cluster_id,
                 replica_addresses,
@@ -576,7 +576,7 @@ fn emit_new_client(printer: *Printer) !void {
     try printer.write_indented("func newClient(t *testing.T, port string) Client {");
     printer.indent();
     try printer.write_indented(
-        "client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), []string{port})",
+        "client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), port)",
     );
     try emit_error_check(printer, .t_fatal);
     try printer.write_empty_line();

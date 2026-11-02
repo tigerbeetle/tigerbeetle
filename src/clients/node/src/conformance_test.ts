@@ -22,7 +22,7 @@ import {
   TransferFlags,
 } from '.'
 
-const REPLICA_ADDRESSES = [process.env.TB_ADDRESS || '3000'];
+const REPLICA_ADDRESSES = process.env.TB_ADDRESS || '3000';
 
 // Every field is required, so cases spread these and override only what they set.
 const account_default: Account = {
@@ -118,7 +118,7 @@ test(
     assert.throws(
       () => createClient({
         cluster_id: 0n,
-        replica_addresses: ['not-an-address'],
+        replica_addresses: 'not-an-address',
       }),
       { message: 'Invalid replica address.' },
     )
@@ -131,7 +131,7 @@ test(
     assert.throws(
       () => createClient({
         cluster_id: 0n,
-        replica_addresses: ['127.0.0.1:99999'],
+        replica_addresses: '127.0.0.1:99999',
       }),
       { message: 'Invalid replica address.' },
     )
@@ -144,7 +144,7 @@ test(
     assert.throws(
       () => createClient({
         cluster_id: 0n,
-        replica_addresses: ['3001,3002,3003,3004,3005,3006,3007,3008,3009,3010'],
+        replica_addresses: '3001,3002,3003,3004,3005,3006,3007,3008,3009,3010',
       }),
       { message: 'Too many replica addresses.' },
     )
@@ -157,9 +157,8 @@ test(
     assert.throws(
       () => createClient({
         cluster_id: 0n,
-        replica_addresses: [''],
+        replica_addresses: '',
       }),
-      { message: 'Invalid replica address.' },
     )
   },
 )
@@ -170,7 +169,7 @@ test(
     assert.throws(
       () => createClient({
         cluster_id: 0n,
-        replica_addresses: [',,'],
+        replica_addresses: ',,',
       }),
       { message: 'Invalid replica address.' },
     )
