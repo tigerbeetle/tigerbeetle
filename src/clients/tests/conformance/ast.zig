@@ -13,6 +13,7 @@ pub const Case = struct {
     description: []const u8,
     steps: []const Step,
     requirement: ?Requirement = null,
+    isolated_client: bool = false,
 
     pub const Requirement = stdx.EnumType(api_decl_names_matching(is_requirement));
 };

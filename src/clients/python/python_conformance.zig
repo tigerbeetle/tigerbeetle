@@ -64,7 +64,7 @@ fn emit(printer: *Printer) !void {
             \\## Sync client ##
             \\#################
             \\
-            \\@pytest.fixture
+            \\@pytest.fixture(scope="module")
             \\def client():
             \\    client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
             \\    yield client
@@ -76,18 +76,20 @@ fn emit(printer: *Printer) !void {
             \\## Async client ##
             \\##################
             \\
+            \\@pytest.fixture(scope="module")
+            \\def client_async():
+            \\    client = tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses)
+            \\    yield client
+            \\    asyncio.run(client.close())
+            \\
             \\def async_test(case):
             \\    @functools.wraps(case)
-            \\    def test():
-            \\        async def run():
-            \\            client = tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses)
-            \\            try:
-            \\                await case(client)
-            \\            finally:
-            \\                await client.close()
-            \\        asyncio.run(run())
-            \\    # PEP 362: Stop pytest from treating the test's `client` parameter as a fixture.
-            \\    test.__signature__ = inspect.Signature()
+            \\    def test(client_async):
+            \\        asyncio.run(case(client_async))
+            \\    # PEP 362: Make pytest pass the `client_async` fixture instead of the case's `client`.
+            \\    test.__signature__ = inspect.Signature(
+            \\        [inspect.Parameter("client_async", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+            \\    )
             \\    return test
             \\
             ,
@@ -111,8 +113,10 @@ fn emit(printer: *Printer) !void {
                 }
                 const case_name = try printer.to_case_alloc(.snake_case, case.description);
                 switch (variant) {
-                    .synchronous => try printer.print_indented("def test_{s}_{s}(client):", .{
-                        suite.name, case_name,
+                    .synchronous => try printer.print_indented("def test_{s}_{s}({s}):", .{
+                        suite.name,
+                        case_name,
+                        if (case.isolated_client) "" else "client",
                     }),
                     .asynchronous => {
                         try printer.write_indented("@async_test");
@@ -122,7 +126,17 @@ fn emit(printer: *Printer) !void {
                     },
                 }
                 printer.indent();
+                if (case.isolated_client) {
+                    try printer.write_indented(switch (variant) {
+                        .synchronous => "with tb.ClientSync(" ++
+                            "cluster_id=0, replica_addresses=replica_addresses) as client:",
+                        .asynchronous => "async with tb.ClientAsync(" ++
+                            "cluster_id=0, replica_addresses=replica_addresses) as client:",
+                    });
+                    printer.indent();
+                }
                 for (case.steps) |step| try emit_step(printer, step, variant);
+                if (case.isolated_client) printer.dedent();
                 printer.dedent();
             }
         }

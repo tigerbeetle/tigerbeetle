@@ -49,30 +49,20 @@ fn emit(printer: *Printer) !void {
         \\public class ConformanceTests
         \\{
         \\    private static TBServer server = null!;
-        \\    private Client client = null!;
+        \\    private static Client client = null!;
         \\
         \\    [ClassInitialize]
         \\    public static void Initialize(TestContext _)
         \\    {
         \\        server = new TBServer();
+        \\        client = new Client(0, new string[] { server.Address });
         \\    }
         \\
         \\    [ClassCleanup]
         \\    public static void Cleanup()
         \\    {
-        \\        server.Dispose();
-        \\    }
-        \\
-        \\    [TestInitialize]
-        \\    public void CreateClient()
-        \\    {
-        \\        client = new Client(0, new string[] { server.Address });
-        \\    }
-        \\
-        \\    [TestCleanup]
-        \\    public void CloseClient()
-        \\    {
         \\        client.Dispose();
+        \\        server.Dispose();
         \\    }
         \\
     );
@@ -127,6 +117,11 @@ fn emit(printer: *Printer) !void {
                 });
                 try printer.write_indented("{");
                 printer.indent();
+                if (case.isolated_client) {
+                    try printer.write_indented(
+                        "using var client = new Client(0, new string[] { server.Address });",
+                    );
+                }
                 for (case.steps) |step| try emit_step(printer, step, variant);
                 printer.dedent();
                 try printer.write_indented("}");

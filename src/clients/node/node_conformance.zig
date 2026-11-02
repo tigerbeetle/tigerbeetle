@@ -122,6 +122,19 @@ fn emit(printer: *Printer) !void {
         \\function test(name: string, fn: (client: Client) => Promise<void>) {
         \\  tests.push({ name, fn })
         \\}
+        \\function testIsolated(name: string, fn: (client: Client) => Promise<void>) {
+        \\  test(name, async () => {
+        \\    const client = createClient({
+        \\      cluster_id: 0n,
+        \\      replica_addresses: REPLICA_ADDRESSES,
+        \\    })
+        \\    try {
+        \\      await fn(client)
+        \\    } finally {
+        \\      client.destroy()
+        \\    }
+        \\  })
+        \\}
         \\
     );
     for (conformance.sources) |source| {
@@ -141,7 +154,7 @@ fn emit(printer: *Printer) !void {
                     continue;
                 }
             }
-            try printer.write_indented("test(");
+            try printer.write_indented(if (case.isolated_client) "testIsolated(" else "test(");
             printer.indent();
             try printer.print_indented("'{s}_{s}',", .{
                 suite.name,
@@ -160,21 +173,21 @@ fn emit(printer: *Printer) !void {
         \\
         \\async function main () {
         \\  const start = new Date().getTime()
-        \\  for (let i = 0; i < tests.length; i++) {
-        \\    const client = createClient({
-        \\      cluster_id: 0n,
-        \\      replica_addresses: REPLICA_ADDRESSES,
-        \\    })
-        \\    try {
+        \\  const client = createClient({
+        \\    cluster_id: 0n,
+        \\    replica_addresses: REPLICA_ADDRESSES,
+        \\  })
+        \\  try {
+        \\    for (let i = 0; i < tests.length; i++) {
         \\      await tests[i].fn(client).then(() => {
         \\        console.log(tests[i].name + ": PASSED")
         \\      }).catch(error => {
         \\        console.log(tests[i].name + ": FAILED")
         \\        throw error
         \\      })
-        \\    } finally {
-        \\      client.destroy()
         \\    }
+        \\  } finally {
+        \\    client.destroy()
         \\  }
         \\  const end = new Date().getTime()
         \\  console.log('Time taken (s):', (end - start)/1000)

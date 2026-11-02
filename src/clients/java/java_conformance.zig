@@ -55,9 +55,7 @@ fn emit(printer: *Printer) !void {
         \\import java.util.concurrent.CompletableFuture;
         \\import java.util.concurrent.ExecutionException;
         \\
-        \\import org.junit.After;
         \\import org.junit.AfterClass;
-        \\import org.junit.Before;
         \\import org.junit.BeforeClass;
         \\import org.junit.Test;
         \\import static org.junit.Assert.assertArrayEquals;
@@ -70,26 +68,18 @@ fn emit(printer: *Printer) !void {
         \\
         \\    private static Server server;
         \\
-        \\    private Client client;
+        \\    private static Client client;
         \\
         \\    @BeforeClass
         \\    public static void initialize() throws Exception {
         \\        server = new Server("conformance");
+        \\        client = new Client(clusterId, new String[] {server.getAddress()});
         \\    }
         \\
         \\    @AfterClass
         \\    public static void cleanup() throws Exception {
-        \\        server.close();
-        \\    }
-        \\
-        \\    @Before
-        \\    public void createClient() throws Exception {
-        \\        client = new Client(clusterId, new String[] {server.getAddress()});
-        \\    }
-        \\
-        \\    @After
-        \\    public void closeClient() throws Exception {
         \\        client.close();
+        \\        server.close();
         \\    }
         \\
         \\    private static byte[] u128(final String value) {
@@ -141,7 +131,18 @@ fn emit(printer: *Printer) !void {
                 });
                 try emit_signature(printer, name);
                 printer.indent();
-                try emit_case(printer, case, variant);
+                if (case.isolated_client) {
+                    try printer.write_indented(
+                        "try (final Client client = " ++
+                            "new Client(clusterId, new String[] {server.getAddress()})) {",
+                    );
+                    printer.indent();
+                    try emit_case(printer, case, variant);
+                    printer.dedent();
+                    try printer.write_indented("}");
+                } else {
+                    try emit_case(printer, case, variant);
+                }
                 printer.dedent();
                 try printer.write_indented("}");
             }
