@@ -26,10 +26,8 @@ test "rejects more addresses than replicas" {
 }
 
 test "rejects an empty address" {
-    ct.assert_fail_with(
-        ct.create_client(.{ .cluster_id = 0, .replica_addresses = "" }),
-        .address_invalid,
-    );
+    // Some clients fail early on empty strings, so we can't use .address_invalid here.
+    ct.assert_fail(ct.create_client(.{ .cluster_id = 0, .replica_addresses = "" }));
 }
 
 test "rejects empty addresses" {

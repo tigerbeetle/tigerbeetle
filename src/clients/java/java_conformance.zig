@@ -73,7 +73,7 @@ fn emit(printer: *Printer) !void {
         \\    @BeforeClass
         \\    public static void initialize() throws Exception {
         \\        server = new Server("conformance");
-        \\        client = new Client(clusterId, new String[] {server.getAddress()});
+        \\        client = new Client(clusterId, server.getAddress());
         \\    }
         \\
         \\    @AfterClass
@@ -134,7 +134,7 @@ fn emit(printer: *Printer) !void {
                 if (case.isolated_client) {
                     try printer.write_indented(
                         "try (final Client client = " ++
-                            "new Client(clusterId, new String[] {server.getAddress()})) {",
+                            "new Client(clusterId, server.getAddress())) {",
                     );
                     printer.indent();
                     try emit_case(printer, case, variant);
@@ -433,7 +433,7 @@ fn emit_create_client(
     };
     switch (outcome) {
         .success => try printer.print_indented(
-            "new Client({s}, new String[] {{{s}}}).close();",
+            "new Client({s}, {s}).close();",
             .{ cluster_id, replica_addresses },
         ),
         .failure => |client_error| {
@@ -454,7 +454,7 @@ fn emit_create_client(
             printer.indent();
             printer.indent();
             try printer.print_indented("{s},", .{cluster_id});
-            try printer.print_indented("new String[] {{{s}}}));", .{replica_addresses});
+            try printer.print_indented("{s}));", .{replica_addresses});
             printer.dedent();
             printer.dedent();
             printer.dedent();

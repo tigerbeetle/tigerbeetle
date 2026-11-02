@@ -55,7 +55,7 @@ fn emit(printer: *Printer) !void {
         \\    public static void Initialize(TestContext _)
         \\    {
         \\        server = new TBServer();
-        \\        client = new Client(0, new string[] { server.Address });
+        \\        client = new Client(0, server.Address);
         \\    }
         \\
         \\    [ClassCleanup]
@@ -119,7 +119,7 @@ fn emit(printer: *Printer) !void {
                 printer.indent();
                 if (case.isolated_client) {
                     try printer.write_indented(
-                        "using var client = new Client(0, new string[] { server.Address });",
+                        "using var client = new Client(0, server.Address);",
                     );
                 }
                 for (case.steps) |step| try emit_step(printer, step, variant);
@@ -147,7 +147,7 @@ fn emit_create_client(
     arguments: ast.ClientInitArgs,
     outcome: union(enum) { success, failure: ?ast.ClientError },
 ) !void {
-    const construction = try printer.string_alloc("new Client({s}, new string[] {{ {s} }})", .{
+    const construction = try printer.string_alloc("new Client({s}, {s})", .{
         try render_uint128(printer, arguments.cluster_id),
         switch (arguments.replica_addresses) {
             .server => "server.Address",

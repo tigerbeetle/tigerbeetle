@@ -55,7 +55,7 @@ fn emit(printer: *Printer) !void {
         \\  TransferFlags,
         \\} from '.'
         \\
-        \\const REPLICA_ADDRESSES = [process.env.TB_ADDRESS || '3000'];
+        \\const REPLICA_ADDRESSES = process.env.TB_ADDRESS || '3000';
         \\
         \\// Every field is required, so cases spread these and override only what they set.
         \\const account_default: Account = {
@@ -220,7 +220,7 @@ fn emit_create_client(
     const cluster_id = try render_bigint(printer, arguments.cluster_id);
     const replica_addresses = switch (arguments.replica_addresses) {
         .server => "REPLICA_ADDRESSES",
-        .literal => |text| try printer.string_alloc("['{s}']", .{text}),
+        .literal => |text| try printer.string_alloc("'{s}'", .{text}),
     };
     switch (outcome) {
         .success => try printer.print_indented(
