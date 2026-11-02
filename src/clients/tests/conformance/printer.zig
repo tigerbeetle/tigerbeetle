@@ -11,14 +11,14 @@ const ast = @import("ast.zig");
 const Arena = @import("arena.zig").Arena;
 
 pub const Printer = struct {
-    // For GO* see: https://go.dev/wiki/CodeReviewComments#initialisms
+    // For go_* see: https://go.dev/wiki/CodeReviewComments#initialisms
     const Casing = enum {
+        camel_case,
+        go_camel_case,
+        go_pascal_case,
+        pascal_case,
         snake_case,
-        camelCase,
-        PascalCase,
-        UPPER_CASE,
-        GOPascalCase,
-        GOCamelCase,
+        upper_case,
     };
 
     pub const Options = struct {
@@ -118,15 +118,15 @@ pub const Printer = struct {
         while (words.next()) |word| {
             const first = result.items.len == 0;
             switch (casing) {
-                .snake_case, .UPPER_CASE => {
+                .snake_case, .upper_case => {
                     if (!first) result.appendAssumeCapacity('_');
                     for (word) |char| result.appendAssumeCapacity(
-                        if (casing == .UPPER_CASE) std.ascii.toUpper(char) else char,
+                        if (casing == .upper_case) std.ascii.toUpper(char) else char,
                     );
                 },
-                .camelCase, .PascalCase, .GOPascalCase, .GOCamelCase => {
-                    const go = casing == .GOPascalCase or casing == .GOCamelCase;
-                    const lowercase = first and (casing == .camelCase or casing == .GOCamelCase);
+                .camel_case, .pascal_case, .go_pascal_case, .go_camel_case => {
+                    const go = casing == .go_pascal_case or casing == .go_camel_case;
+                    const lowercase = first and (casing == .camel_case or casing == .go_camel_case);
                     if (go and is_go_initialism(word)) {
                         for (word) |char| result.appendAssumeCapacity(
                             if (lowercase) std.ascii.toLower(char) else std.ascii.toUpper(char),

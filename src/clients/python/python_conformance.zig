@@ -567,7 +567,7 @@ fn render_flag(printer: *Printer, record_type: ast.Record.Type, flag: ast.FieldV
     assert(flag.value == .boolean and flag.value.boolean);
     return printer.string_alloc("tb.{s}.{s}", .{
         @tagName(record_type),
-        try printer.to_case_alloc(.UPPER_CASE, flag.field.name),
+        try printer.to_case_alloc(.upper_case, flag.field.name),
     });
 }
 
@@ -602,7 +602,7 @@ fn render_typed_value(
         .enum_literal => |literal| {
             return printer.string_alloc("tb.{s}.{s}", .{
                 field.type.enum_name,
-                try printer.to_case_alloc(.UPPER_CASE, literal),
+                try printer.to_case_alloc(.upper_case, literal),
             });
         },
         .record => |record| {

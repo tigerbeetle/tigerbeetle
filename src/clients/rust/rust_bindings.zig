@@ -175,7 +175,7 @@ fn emit_bitflags(
             if (skip) continue;
 
             assert(field.type == bool);
-            const field_name = stdx.to_case(field.name, .PascalCase);
+            const field_name = stdx.to_case(field.name, .pascal_case);
             try writer.print("    pub const {s}: {s} = {s}(1 << {});\n", .{
                 field_name,
                 rust_name,
@@ -215,7 +215,7 @@ fn emit_enum_direct(
     try writer.print("pub enum {s} {{\n", .{rust_name});
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        const field_name = stdx.to_case(field.name, .PascalCase);
+        const field_name = stdx.to_case(field.name, .pascal_case);
         const int_value = @intFromEnum(@field(Type, field.name));
         const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
         try writer.print("    {s} = " ++ int_fmt ++ ",\n", .{ field_name, int_value });
@@ -231,7 +231,7 @@ fn emit_enum_direct(
         , .{ backing_type_text, rust_name });
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.to_case(field.name, .PascalCase);
+            const field_name = stdx.to_case(field.name, .pascal_case);
             const int_value = @intFromEnum(@field(Type, field.name));
             const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
             try writer.print("            " ++ int_fmt ++ " => {s}::{s},\n", .{
@@ -268,7 +268,7 @@ fn emit_enum_direct(
         , .{ .enum_name = rust_name });
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.to_case(field.name, .PascalCase);
+            const field_name = stdx.to_case(field.name, .pascal_case);
             try writer.print(
                 "             Self::{[field_name]s} => f.write_str(\"{[field_name]s}\"),\n",
                 .{ .field_name = field_name },
@@ -300,7 +300,7 @@ fn emit_enum_manual(
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
 
-        const field_name = stdx.to_case(field.name, .UPPER_CASE);
+        const field_name = stdx.to_case(field.name, .upper_case);
         const int_value = @intFromEnum(@field(Type, field.name));
         try writer.print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
             rust_name,
@@ -391,7 +391,7 @@ fn emit_operations(
         if (skip) continue;
 
         const op_enum = @field(Operation, field.name);
-        const op_name = stdx.to_case(field.name, .PascalCase);
+        const op_name = stdx.to_case(field.name, .pascal_case);
 
         try writer.print("pub(crate) struct {s};\n", .{op_name});
         try writer.print(

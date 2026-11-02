@@ -465,7 +465,7 @@ fn node_error_code(client_error: ast.ClientError) []const u8 {
 }
 
 fn method_name(printer: *Printer, name: ast.Call.Name) ![]const u8 {
-    return printer.to_case_alloc(.camelCase, @tagName(name));
+    return printer.to_case_alloc(.camel_case, @tagName(name));
 }
 
 fn record_default(record_type: ast.Record.Type) []const u8 {
