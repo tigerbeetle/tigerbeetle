@@ -6093,14 +6093,24 @@ class TestConformance < TigerBeetleIntegrationTest
   # Suite: close_client
 
   def test_close_client_fails_operations_after_close
-    @client.close
-    assert_raises(TB::ClientClosedError) do
-      @client.lookup_accounts([TB.id])
+    @client = TB::Client.new(cluster_id: 0, replica_addresses: @tb_address)
+    begin
+      @client.close
+      assert_raises(TB::ClientClosedError) do
+        @client.lookup_accounts([TB.id])
+      end
+    ensure
+      @client.close
     end
   end
 
   def test_close_client_ignores_a_second_close
-    @client.close
-    @client.close
+    @client = TB::Client.new(cluster_id: 0, replica_addresses: @tb_address)
+    begin
+      @client.close
+      @client.close
+    ensure
+      @client.close
+    end
   end
 end

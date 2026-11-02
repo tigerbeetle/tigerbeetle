@@ -59,7 +59,22 @@ fn emit(printer: *Printer) !void {
                 try printer.to_case_alloc(.snake_case, case.description),
             });
             printer.indent();
-            for (case.steps) |step| try emit_step(printer, step);
+            if (case.isolated_client) {
+                try printer.write_indented(
+                    "@client = TB::Client.new(cluster_id: 0, replica_addresses: @tb_address)",
+                );
+                try printer.write_indented("begin");
+                printer.indent();
+                for (case.steps) |step| try emit_step(printer, step);
+                printer.dedent();
+                try printer.write_indented("ensure");
+                printer.indent();
+                try printer.write_indented("@client.close");
+                printer.dedent();
+                try printer.write_indented("end");
+            } else {
+                for (case.steps) |step| try emit_step(printer, step);
+            }
             printer.dedent();
             try printer.write_indented("end");
         }

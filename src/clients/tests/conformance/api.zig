@@ -42,10 +42,15 @@ pub fn requires_fractional_amounts() void {
     @compileError(ct_compile_error);
 }
 
-/// The client the test harness creates for each case.
+/// The client the test harness shares between all cases.
 /// NOTE: This doesn't do anything in the emitters. I just tried to avoid having an implicit client
 /// magically available in all test.
 pub const default_client: Client = .{};
+
+/// Gives the case a client the test harness creates for it alone. Used to test client closing.
+pub fn use_isolated_client() void {
+    @compileError(ct_compile_error);
+}
 
 /// Used for client construction tests. Creates a client and closes it again.
 pub fn create_client(arguments: struct {

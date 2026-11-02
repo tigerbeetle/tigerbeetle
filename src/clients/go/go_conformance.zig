@@ -54,9 +54,22 @@ fn emit(printer: *Printer) !void {
     try printer.write_indented("func TestConformance(t *testing.T) {");
     printer.indent();
     try printer.write_indented("port := startServer(t)");
+    try printer.write_indented("client := newClient(t, port)");
+    try printer.write_indented("defer client.Close()");
     try printer.write_empty_line();
     try printer.write_indented(
         "test := func(name string, body func(t *testing.T, client Client)) {",
+    );
+    printer.indent();
+    try printer.write_indented("t.Run(name, func(t *testing.T) {");
+    printer.indent();
+    try printer.write_indented("body(t, client)");
+    printer.dedent();
+    try printer.write_indented("})");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_indented(
+        "testIsolated := func(name string, body func(t *testing.T, client Client)) {",
     );
     printer.indent();
     try printer.write_indented("t.Run(name, func(t *testing.T) {");
@@ -85,7 +98,7 @@ fn emit(printer: *Printer) !void {
                     continue;
                 }
             }
-            try printer.write_indented("test(");
+            try printer.write_indented(if (case.isolated_client) "testIsolated(" else "test(");
             printer.indent();
             try printer.print_indented("\"{s}_{s}\",", .{
                 suite.name,

@@ -89,6 +89,19 @@ const tests: Array<{ name: string, fn: (client: Client) => Promise<void> }> = []
 function test(name: string, fn: (client: Client) => Promise<void>) {
   tests.push({ name, fn })
 }
+function testIsolated(name: string, fn: (client: Client) => Promise<void>) {
+  test(name, async () => {
+    const client = createClient({
+      cluster_id: 0n,
+      replica_addresses: REPLICA_ADDRESSES,
+    })
+    try {
+      await fn(client)
+    } finally {
+      client.destroy()
+    }
+  })
+}
 
 // Suite: create_client
 
@@ -6387,7 +6400,7 @@ test(
 
 // Suite: close_client
 
-test(
+testIsolated(
   'close_client_fails_operations_after_close',
   async (client) => {
     client.destroy()
@@ -6401,7 +6414,7 @@ test(
   },
 )
 
-test(
+testIsolated(
   'close_client_ignores_a_second_close',
   async (client) => {
     client.destroy()
@@ -6411,21 +6424,21 @@ test(
 
 async function main () {
   const start = new Date().getTime()
-  for (let i = 0; i < tests.length; i++) {
-    const client = createClient({
-      cluster_id: 0n,
-      replica_addresses: REPLICA_ADDRESSES,
-    })
-    try {
+  const client = createClient({
+    cluster_id: 0n,
+    replica_addresses: REPLICA_ADDRESSES,
+  })
+  try {
+    for (let i = 0; i < tests.length; i++) {
       await tests[i].fn(client).then(() => {
         console.log(tests[i].name + ": PASSED")
       }).catch(error => {
         console.log(tests[i].name + ": FAILED")
         throw error
       })
-    } finally {
-      client.destroy()
     }
+  } finally {
+    client.destroy()
   }
   const end = new Date().getTime()
   console.log('Time taken (s):', (end - start)/1000)

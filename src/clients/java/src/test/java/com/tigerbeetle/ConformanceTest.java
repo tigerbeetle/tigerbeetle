@@ -10,9 +10,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
-import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import static org.junit.Assert.assertArrayEquals;
@@ -25,26 +23,18 @@ public class ConformanceTest {
 
     private static Server server;
 
-    private Client client;
+    private static Client client;
 
     @BeforeClass
     public static void initialize() throws Exception {
         server = new Server("conformance");
+        client = new Client(clusterId, new String[] {server.getAddress()});
     }
 
     @AfterClass
     public static void cleanup() throws Exception {
-        server.close();
-    }
-
-    @Before
-    public void createClient() throws Exception {
-        client = new Client(clusterId, new String[] {server.getAddress()});
-    }
-
-    @After
-    public void closeClient() throws Exception {
         client.close();
+        server.close();
     }
 
     private static byte[] u128(final String value) {
@@ -6644,19 +6634,23 @@ public class ConformanceTest {
     @Test
     public void testCloseClientFailsOperationsAfterClose()
             throws Exception {
-        client.close();
-        {
-            final var idBatch = new IdBatch(1);
-            idBatch.add(UInt128.id());
-            assertThrows(ClientClosedException.class, () -> client.lookupAccounts(idBatch));
+        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+            client.close();
+            {
+                final var idBatch = new IdBatch(1);
+                idBatch.add(UInt128.id());
+                assertThrows(ClientClosedException.class, () -> client.lookupAccounts(idBatch));
+            }
         }
     }
 
     @Test
     public void testCloseClientIgnoresASecondClose()
             throws Exception {
-        client.close();
-        client.close();
+        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+            client.close();
+            client.close();
+        }
     }
 
     //////////////////
@@ -13228,24 +13222,28 @@ public class ConformanceTest {
     @Test
     public void testCloseClientFailsOperationsAfterCloseAsync()
             throws Exception {
-        client.close();
-        {
-            final var idBatch = new IdBatch(1);
-            idBatch.add(UInt128.id());
-            assertThrows(ClientClosedException.class, () -> {
-                try {
-                    client.lookupAccountsAsync(idBatch).get();
-                } catch (ExecutionException exception) {
-                    throw exception.getCause();
-                }
-            });
+        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+            client.close();
+            {
+                final var idBatch = new IdBatch(1);
+                idBatch.add(UInt128.id());
+                assertThrows(ClientClosedException.class, () -> {
+                    try {
+                        client.lookupAccountsAsync(idBatch).get();
+                    } catch (ExecutionException exception) {
+                        throw exception.getCause();
+                    }
+                });
+            }
         }
     }
 
     @Test
     public void testCloseClientIgnoresASecondCloseAsync()
             throws Exception {
-        client.close();
-        client.close();
+        try (final Client client = new Client(clusterId, new String[] {server.getAddress()})) {
+            client.close();
+            client.close();
+        }
     }
 }

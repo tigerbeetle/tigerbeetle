@@ -137,12 +137,15 @@ const Parser = struct {
 
         var buffer: [2]std.zig.Ast.Node.Index = undefined;
         var statements = tree.blockStatements(&buffer, block).?;
-        // NOTE: We only support a single requirement and it needs to come first.
+        // NOTE: We only support a single requirement or isolated client and it needs to come first.
         const requirement: ?ast.Case.Requirement = if (statements.len > 0)
             try parser.parse_requirement(statements[0])
         else
             null;
         if (requirement != null) statements = statements[1..];
+        const isolated_client = requirement == null and statements.len > 0 and
+            try parser.parse_isolated_client(statements[0]);
+        if (isolated_client) statements = statements[1..];
         const steps = try parser.arena.alloc(ast.Step, statements.len);
         for (statements, 0..) |statement, index| {
             steps[index] = try parser.parse_step(statement);
@@ -152,7 +155,18 @@ const Parser = struct {
             .description = description,
             .steps = steps,
             .requirement = requirement,
+            .isolated_client = isolated_client,
         };
+    }
+
+    fn parse_isolated_client(parser: *Parser, node: std.zig.Ast.Node.Index) !bool {
+        const tree = &parser.tree;
+        var buffer: [1]std.zig.Ast.Node.Index = undefined;
+        const call = tree.fullCall(&buffer, node) orelse return false;
+        const name = parser.parse_api_name(call.ast.fn_expr) orelse return false;
+        if (!std.mem.eql(u8, name, "use_isolated_client")) return false;
+        try parser.assert_zero_arguments(call);
+        return true;
     }
 
     fn parse_requirement(

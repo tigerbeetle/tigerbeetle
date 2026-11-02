@@ -24,7 +24,7 @@ if not replica_addresses:
 ## Sync client ##
 #################
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def client():
     client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
     yield client
@@ -6701,31 +6701,35 @@ def test_create_transfers_concurrent_applies_a_transfer_once_when_its_id_is_subm
 
 # Suite: close_client
 
-def test_close_client_fails_operations_after_close(client):
-    client.close()
-    with pytest.raises(tb.ClientClosedError):
-        client.lookup_accounts([tb.id()])
+def test_close_client_fails_operations_after_close():
+    with tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses) as client:
+        client.close()
+        with pytest.raises(tb.ClientClosedError):
+            client.lookup_accounts([tb.id()])
 
-def test_close_client_ignores_a_second_close(client):
-    client.close()
-    client.close()
+def test_close_client_ignores_a_second_close():
+    with tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses) as client:
+        client.close()
+        client.close()
 
 ##################
 ## Async client ##
 ##################
 
+@pytest.fixture(scope="module")
+def client_async():
+    client = tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses)
+    yield client
+    asyncio.run(client.close())
+
 def async_test(case):
     @functools.wraps(case)
-    def test():
-        async def run():
-            client = tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses)
-            try:
-                await case(client)
-            finally:
-                await client.close()
-        asyncio.run(run())
-    # PEP 362: Stop pytest from treating the test's `client` parameter as a fixture.
-    test.__signature__ = inspect.Signature()
+    def test(client_async):
+        asyncio.run(case(client_async))
+    # PEP 362: Make pytest pass the `client_async` fixture instead of the case's `client`.
+    test.__signature__ = inspect.Signature(
+        [inspect.Parameter("client_async", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    )
     return test
 
 # Suite: create_client
@@ -13544,11 +13548,13 @@ async def test_create_transfers_concurrent_applies_a_transfer_once_when_its_id_i
 
 @async_test
 async def test_close_client_fails_operations_after_close_async(client):
-    await client.close()
-    with pytest.raises(tb.ClientClosedError):
-        await client.lookup_accounts([tb.id()])
+    async with tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses) as client:
+        await client.close()
+        with pytest.raises(tb.ClientClosedError):
+            await client.lookup_accounts([tb.id()])
 
 @async_test
 async def test_close_client_ignores_a_second_close_async(client):
-    await client.close()
-    await client.close()
+    async with tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses) as client:
+        await client.close()
+        await client.close()

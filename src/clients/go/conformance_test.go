@@ -16,8 +16,15 @@ import (
 
 func TestConformance(t *testing.T) {
 	port := startServer(t)
+	client := newClient(t, port)
+	defer client.Close()
 
 	test := func(name string, body func(t *testing.T, client Client)) {
+		t.Run(name, func(t *testing.T) {
+			body(t, client)
+		})
+	}
+	testIsolated := func(name string, body func(t *testing.T, client Client)) {
 		t.Run(name, func(t *testing.T) {
 			client := newClient(t, port)
 			defer client.Close()
@@ -6814,7 +6821,7 @@ func TestConformance(t *testing.T) {
 
 	// Suite: close_client
 
-	test(
+	testIsolated(
 		"close_client_fails_operations_after_close",
 		func(t *testing.T, client Client) {
 			client.Close()
@@ -6823,7 +6830,7 @@ func TestConformance(t *testing.T) {
 		},
 	)
 
-	test(
+	testIsolated(
 		"close_client_ignores_a_second_close",
 		func(t *testing.T, client Client) {
 			client.Close()

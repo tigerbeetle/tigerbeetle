@@ -14,30 +14,20 @@ namespace TigerBeetle.Tests;
 public class ConformanceTests
 {
     private static TBServer server = null!;
-    private Client client = null!;
+    private static Client client = null!;
 
     [ClassInitialize]
     public static void Initialize(TestContext _)
     {
         server = new TBServer();
+        client = new Client(0, new string[] { server.Address });
     }
 
     [ClassCleanup]
     public static void Cleanup()
     {
-        server.Dispose();
-    }
-
-    [TestInitialize]
-    public void CreateClient()
-    {
-        client = new Client(0, new string[] { server.Address });
-    }
-
-    [TestCleanup]
-    public void CloseClient()
-    {
         client.Dispose();
+        server.Dispose();
     }
 
     /////////////////
@@ -6193,6 +6183,7 @@ public class ConformanceTests
     [TestMethod]
     public void CloseClientFailsOperationsAfterClose()
     {
+        using var client = new Client(0, new string[] { server.Address });
         client.Close();
         Assert.ThrowsException<ClientClosedException>(
             () => client.LookupAccounts(new UInt128[] {
@@ -6203,6 +6194,7 @@ public class ConformanceTests
     [TestMethod]
     public void CloseClientIgnoresASecondClose()
     {
+        using var client = new Client(0, new string[] { server.Address });
         client.Close();
         client.Close();
     }
@@ -12363,6 +12355,7 @@ public class ConformanceTests
     [TestMethod]
     public async Task CloseClientFailsOperationsAfterCloseAsync()
     {
+        using var client = new Client(0, new string[] { server.Address });
         client.Close();
         await Assert.ThrowsExceptionAsync<ClientClosedException>(
             () => client.LookupAccountsAsync(new UInt128[] {
@@ -12373,6 +12366,7 @@ public class ConformanceTests
     [TestMethod]
     public async Task CloseClientIgnoresASecondCloseAsync()
     {
+        using var client = new Client(0, new string[] { server.Address });
         client.Close();
         client.Close();
     }
