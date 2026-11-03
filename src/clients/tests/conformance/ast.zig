@@ -99,6 +99,10 @@ pub const Assertion = union(enum) {
     empty: []const u8,
     id_ascending: []const u8,
     greater_than: FieldComparison,
+    all_greater_than: struct {
+        actual: []const u8,
+        expected: Record,
+    },
     fail: struct {
         action: Action,
         client_error: ?ClientError,

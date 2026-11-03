@@ -156,6 +156,10 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateAccountStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -185,6 +189,10 @@ public class ConformanceTest {
         assertEquals(CreateAccountStatus.IdMustNotBeZero, results.getStatus());
         assertTrue(results.next());
         assertEquals(CreateAccountStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -642,6 +650,10 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -694,6 +706,10 @@ public class ConformanceTest {
         assertEquals(CreateTransferStatus.IdMustNotBeZero, results.getStatus());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -6767,6 +6783,10 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateAccountStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -6796,6 +6816,10 @@ public class ConformanceTest {
         assertEquals(CreateAccountStatus.IdMustNotBeZero, results.getStatus());
         assertTrue(results.next());
         assertEquals(CreateAccountStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -7253,6 +7277,10 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test
@@ -7305,6 +7333,10 @@ public class ConformanceTest {
         assertEquals(CreateTransferStatus.IdMustNotBeZero, results.getStatus());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Created, results.getStatus());
+        results.beforeFirst();
+        while (results.next()) {
+            assertTrue(results.getTimestamp() > 0L);
+        }
     }
 
     @Test

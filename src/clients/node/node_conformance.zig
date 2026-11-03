@@ -420,14 +420,20 @@ fn emit_assertion(
             });
         },
         .greater_than => |comparison| {
-            const value = try render_typed_value(
-                printer,
-                comparison.actual.field,
-                comparison.expected.expression,
-            );
-            try printer.print_indented("assert.ok({s}.{s} > {s})", .{
-                comparison.actual.reference, comparison.actual.field.name, value,
-            });
+            try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
+        },
+        .all_greater_than => |greater_than| {
+            try printer.print_indented("for (const el of {s}) {{", .{greater_than.actual});
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try emit_greater_than(
+                    printer,
+                    .{ .reference = "el", .field = field.field },
+                    field.value,
+                );
+            }
+            printer.dedent();
+            try printer.write_indented("}");
         },
         .fail => |failure| switch (failure.action) {
             .call => |call| {
@@ -528,6 +534,13 @@ fn render_flags(printer: *Printer, record: ast.Record) ![]const u8 {
         try text.writer.print("{s}.{s}", .{ @tagName(record.type), field.field.name });
     }
     return text.written();
+}
+
+fn emit_greater_than(printer: *Printer, actual: ast.FieldReference, value: ast.Expression) !void {
+    try printer.print_indented("assert.ok({s} > {s})", .{
+        try render_field_access(printer, actual),
+        try render_typed_value(printer, actual.field, value),
+    });
 }
 
 fn render_field_access(

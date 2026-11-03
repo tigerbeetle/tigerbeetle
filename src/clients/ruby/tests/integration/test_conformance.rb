@@ -102,6 +102,9 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::CREATED, results[0].status)
+    results.each do |el|
+      assert_operator(el.timestamp, :>, 0)
+    end
   end
 
   def test_create_accounts_returns_a_result_per_account_in_a_batch
@@ -128,6 +131,9 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(TB::CreateAccountStatus::CREATED, results[0].status)
     assert_equal(TB::CreateAccountStatus::ID_MUST_NOT_BE_ZERO, results[1].status)
     assert_equal(TB::CreateAccountStatus::CREATED, results[2].status)
+    results.each do |el|
+      assert_operator(el.timestamp, :>, 0)
+    end
   end
 
   def test_create_accounts_returns_exists_for_a_duplicate_account
@@ -491,6 +497,9 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
+    results.each do |el|
+      assert_operator(el.timestamp, :>, 0)
+    end
   end
 
   def test_create_transfers_returns_a_result_per_transfer_in_a_batch
@@ -542,6 +551,9 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
     assert_equal(TB::CreateTransferStatus::ID_MUST_NOT_BE_ZERO, results[1].status)
     assert_equal(TB::CreateTransferStatus::CREATED, results[2].status)
+    results.each do |el|
+      assert_operator(el.timestamp, :>, 0)
+    end
   end
 
   def test_create_transfers_returns_exists_for_a_duplicate_transfer

@@ -420,15 +420,23 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
             try printer.write_indented("}");
         },
         .greater_than => |comparison| {
-            try printer.print_indented("Assert.IsTrue({s} > {s});", .{
-                try render_field_access(printer, comparison.actual),
-                try render_typed_value(
-                    printer,
-                    comparison.actual.field,
-                    comparison.expected.expression,
-                    .{},
-                ),
+            try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
+        },
+        .all_greater_than => |greater_than| {
+            try printer.print_indented("foreach (var el in {s})", .{
+                try printer.to_case_alloc(.camel_case, greater_than.actual),
             });
+            try printer.write_indented("{");
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try emit_greater_than(
+                    printer,
+                    .{ .reference = "el", .field = field.field },
+                    field.value,
+                );
+            }
+            printer.dedent();
+            try printer.write_indented("}");
         },
         .fail => |failure| switch (failure.action) {
             .call => |call| {
@@ -461,6 +469,17 @@ fn dotnet_exception_name(client_error: ast.ClientError) []const u8 {
         .client_closed => "ClientClosedException",
         .address_invalid, .address_limit_exceeded, .cluster_id_invalid => unreachable,
     };
+}
+
+fn emit_greater_than(
+    printer: *Printer,
+    actual: ast.FieldReference,
+    value: ast.Expression,
+) !void {
+    try printer.print_indented("Assert.IsTrue({s} > {s});", .{
+        try render_field_access(printer, actual),
+        try render_typed_value(printer, actual.field, value, .{}),
+    });
 }
 
 fn render_field_access(printer: *Printer, reference: ast.FieldReference) ![]const u8 {

@@ -427,18 +427,22 @@ fn emit_assertion(printer: *Printer, scope: *Scope, assertion: ast.Assertion) !v
             try printer.print_indented("assert.Equal(t, {s}, {s})", .{ value, actual });
         },
         .greater_than => |comparison| {
-            // `assert.Greater` type-asserts both sides to `uint64` rather than converting.
-            const bits = comparison.actual.field.type.int;
-            if (bits > 64) @panic("assert_greater_than has no Go form for a u128 field");
-            const reference = try render_field_access(printer, comparison.actual);
-            const actual = if (bits == 64)
-                reference
-            else
-                try printer.string_alloc("uint64({s})", .{reference});
-            try printer.print_indented("assert.Greater(t, {s}, uint64({s}))", .{
-                actual,
-                comparison.expected.expression.integer,
+            try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
+        },
+        .all_greater_than => |greater_than| {
+            try printer.print_indented("for _, el := range {s} {{", .{
+                try printer.to_case_alloc(.go_camel_case, greater_than.actual),
             });
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try emit_greater_than(
+                    printer,
+                    .{ .reference = "el", .field = field.field },
+                    field.value,
+                );
+            }
+            printer.dedent();
+            try printer.write_indented("}");
         },
         .fail => |failure| switch (failure.action) {
             .call => |call| try emit_call(printer, scope, call, .{
@@ -450,6 +454,21 @@ fn emit_assertion(printer: *Printer, scope: *Scope, assertion: ast.Assertion) !v
             }),
         },
     }
+}
+
+fn emit_greater_than(printer: *Printer, actual: ast.FieldReference, value: ast.Expression) !void {
+    // `assert.Greater` type-asserts both sides to `uint64` rather than converting.
+    const bits = actual.field.type.int;
+    if (bits > 64) @panic("assert_greater_than has no Go form for a u128 field");
+    const reference = try render_field_access(printer, actual);
+    const actual_value = if (bits == 64)
+        reference
+    else
+        try printer.string_alloc("uint64({s})", .{reference});
+    try printer.print_indented("assert.Greater(t, {s}, uint64({s}))", .{
+        actual_value,
+        value.integer,
+    });
 }
 
 fn render_field_access(

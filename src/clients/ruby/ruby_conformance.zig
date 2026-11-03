@@ -316,9 +316,20 @@ fn emit_assertion(
             try printer.print_indented("assert_equal({s}, {s})", .{ value, actual });
         },
         .greater_than => |comparison| {
-            const actual = try render_field_access(printer, comparison.actual);
-            const value = try render_expression(printer, comparison.expected.expression);
-            try printer.print_indented("assert_operator({s}, :>, {s})", .{ actual, value });
+            try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
+        },
+        .all_greater_than => |greater_than| {
+            try printer.print_indented("{s}.each do |el|", .{greater_than.actual});
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try emit_greater_than(
+                    printer,
+                    .{ .reference = "el", .field = field.field },
+                    field.value,
+                );
+            }
+            printer.dedent();
+            try printer.write_indented("end");
         },
         .fail => |failure| switch (failure.action) {
             .call => |call| {
@@ -339,6 +350,13 @@ fn emit_assertion(
             },
         },
     }
+}
+
+fn emit_greater_than(printer: *Printer, actual: ast.FieldReference, value: ast.Expression) !void {
+    try printer.print_indented("assert_operator({s}, :>, {s})", .{
+        try render_field_access(printer, actual),
+        try render_expression(printer, value),
+    });
 }
 
 fn render_field_access(

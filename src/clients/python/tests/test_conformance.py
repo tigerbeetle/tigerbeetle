@@ -109,6 +109,8 @@ def test_create_accounts_creates_an_account(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 def test_create_accounts_returns_a_result_per_account_in_a_batch(client):
     results = client.create_accounts(
@@ -134,6 +136,8 @@ def test_create_accounts_returns_a_result_per_account_in_a_batch(client):
     assert results[0].status == tb.CreateAccountStatus.CREATED
     assert results[1].status == tb.CreateAccountStatus.ID_MUST_NOT_BE_ZERO
     assert results[2].status == tb.CreateAccountStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 def test_create_accounts_returns_exists_for_a_duplicate_account(client):
     account_id = tb.id()
@@ -478,6 +482,8 @@ def test_create_transfers_creates_a_transfer(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 def test_create_transfers_returns_a_result_per_transfer_in_a_batch(client):
     debit_account_id = tb.id()
@@ -528,6 +534,8 @@ def test_create_transfers_returns_a_result_per_transfer_in_a_batch(client):
     assert results[0].status == tb.CreateTransferStatus.CREATED
     assert results[1].status == tb.CreateTransferStatus.ID_MUST_NOT_BE_ZERO
     assert results[2].status == tb.CreateTransferStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 def test_create_transfers_returns_exists_for_a_duplicate_transfer(client):
     debit_account_id = tb.id()
@@ -6820,6 +6828,8 @@ async def test_create_accounts_creates_an_account_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 @async_test
 async def test_create_accounts_returns_a_result_per_account_in_a_batch_async(client):
@@ -6846,6 +6856,8 @@ async def test_create_accounts_returns_a_result_per_account_in_a_batch_async(cli
     assert results[0].status == tb.CreateAccountStatus.CREATED
     assert results[1].status == tb.CreateAccountStatus.ID_MUST_NOT_BE_ZERO
     assert results[2].status == tb.CreateAccountStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 @async_test
 async def test_create_accounts_returns_exists_for_a_duplicate_account_async(client):
@@ -7211,6 +7223,8 @@ async def test_create_transfers_creates_a_transfer_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 @async_test
 async def test_create_transfers_returns_a_result_per_transfer_in_a_batch_async(client):
@@ -7262,6 +7276,8 @@ async def test_create_transfers_returns_a_result_per_transfer_in_a_batch_async(c
     assert results[0].status == tb.CreateTransferStatus.CREATED
     assert results[1].status == tb.CreateTransferStatus.ID_MUST_NOT_BE_ZERO
     assert results[2].status == tb.CreateTransferStatus.CREATED
+    for el in results:
+        assert el.timestamp > 0
 
 @async_test
 async def test_create_transfers_returns_exists_for_a_duplicate_transfer_async(client):

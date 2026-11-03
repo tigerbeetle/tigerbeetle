@@ -124,7 +124,9 @@ pub fn assert_id_ascending(ids: []const u128) void {
     @compileError(ct_compile_error);
 }
 
-/// Asserts that `actual` is greater than `value`.
+/// Asserts that `actual` is greater than `value`. If `actual` is a
+/// collection, `value` is a record, and every element's listed fields must be
+/// greater than its values.
 pub fn assert_greater_than(actual: anytype, value: anytype) void {
     _ = actual;
     _ = value;
