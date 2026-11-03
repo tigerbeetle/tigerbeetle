@@ -138,6 +138,9 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountCreated, results[0].Status)
+			for _, el := range results {
+				assert.Greater(t, el.Timestamp, uint64(0))
+			}
 		},
 	)
 
@@ -168,6 +171,9 @@ func TestConformance(t *testing.T) {
 			assert.Equal(t, AccountCreated, results[0].Status)
 			assert.Equal(t, AccountIDMustNotBeZero, results[1].Status)
 			assert.Equal(t, AccountCreated, results[2].Status)
+			for _, el := range results {
+				assert.Greater(t, el.Timestamp, uint64(0))
+			}
 		},
 	)
 
@@ -638,6 +644,9 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferCreated, results[0].Status)
+			for _, el := range results {
+				assert.Greater(t, el.Timestamp, uint64(0))
+			}
 		},
 	)
 
@@ -694,6 +703,9 @@ func TestConformance(t *testing.T) {
 			assert.Equal(t, TransferCreated, results[0].Status)
 			assert.Equal(t, TransferIDMustNotBeZero, results[1].Status)
 			assert.Equal(t, TransferCreated, results[2].Status)
+			for _, el := range results {
+				assert.Greater(t, el.Timestamp, uint64(0))
+			}
 		},
 	)
 

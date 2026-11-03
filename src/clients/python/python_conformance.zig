@@ -456,14 +456,19 @@ fn emit_assertion(
             });
         },
         .greater_than => |comparison| {
-            const value = try render_typed_value(
-                printer,
-                comparison.actual.field,
-                comparison.expected.expression,
-            );
-            try printer.print_indented("assert {s}.{s} > {s}", .{
-                comparison.actual.reference, comparison.actual.field.name, value,
-            });
+            try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
+        },
+        .all_greater_than => |greater_than| {
+            try printer.print_indented("for el in {s}:", .{greater_than.actual});
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try emit_greater_than(
+                    printer,
+                    .{ .reference = "el", .field = field.field },
+                    field.value,
+                );
+            }
+            printer.dedent();
         },
         .fail => |failure| switch (failure.action) {
             .call => |call| {
@@ -568,6 +573,13 @@ fn render_flag(printer: *Printer, record_type: ast.Record.Type, flag: ast.FieldV
     return printer.string_alloc("tb.{s}.{s}", .{
         @tagName(record_type),
         try printer.to_case_alloc(.upper_case, flag.field.name),
+    });
+}
+
+fn emit_greater_than(printer: *Printer, actual: ast.FieldReference, value: ast.Expression) !void {
+    try printer.print_indented("assert {s} > {s}", .{
+        try render_field_access(printer, actual),
+        try render_typed_value(printer, actual.field, value),
     });
 }
 

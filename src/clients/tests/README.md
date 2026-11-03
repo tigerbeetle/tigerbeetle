@@ -103,6 +103,7 @@ There are currently two defined requirements:
 - `assert_equal(results, .{…})` checks the exact length, but for each record it compares only the fields listed. An empty tuple is rejected. Use `assert_empty` instead.
 - `assert_equal(a.x, b.y)` compares two fields and requires the same field type.
 - `assert_greater_than` compares a field to an integer literal.
+- `assert_greater_than(results, .{ .timestamp = 0 })` applies one record to every element of a result. It accepts only integer fields with integer literals.
 - `assert_fail_with` checks the error against the action:
   - `address_invalid`, `address_limit_exceeded`, `cluster_id_invalid` are valid only on `create_client`.
   - `client_closed` and `too_much_data` are valid only on client calls.

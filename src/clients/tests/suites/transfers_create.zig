@@ -27,6 +27,7 @@ test "creates a transfer" {
     });
 
     ct.assert_equal(results, .{.{ .status = .created }});
+    ct.assert_greater_than(results, .{ .timestamp = 0 });
 }
 
 test "returns a result per transfer in a batch" {
@@ -69,6 +70,7 @@ test "returns a result per transfer in a batch" {
         .{ .status = .id_must_not_be_zero },
         .{ .status = .created },
     });
+    ct.assert_greater_than(results, .{ .timestamp = 0 });
 }
 
 test "returns exists for a duplicate transfer" {

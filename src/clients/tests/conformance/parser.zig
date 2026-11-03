@@ -618,6 +618,37 @@ const Parser = struct {
             },
             .assert_greater_than => {
                 const args = try parser.assert_two_arguments(call, "(actual, value)");
+                if (tree.nodeTag(args[0]) != .field_access) {
+                    const actual_token = tree.firstToken(args[0]);
+                    const actual = try parser.parse_expression(args[0]);
+                    const record_type = try parser.result_record_type(actual, actual_token);
+
+                    var buffer: [2]std.zig.Ast.Node.Index = undefined;
+                    const struct_init = tree.fullStructInit(&buffer, args[1]) orelse
+                        return parser.fail_node(args[1], "expected a record");
+                    if (struct_init.ast.type_expr != .none) {
+                        return parser.fail_node(args[1], "record type is implied, use .{{...}}");
+                    }
+                    for (struct_init.ast.fields) |field_init| {
+                        if (tree.nodeTag(field_init) != .number_literal) {
+                            return parser.fail_node(field_init, "expected an integer");
+                        }
+                    }
+                    const expected = try parser.parse_record(record_type, struct_init);
+                    for (expected.fields, struct_init.ast.fields) |field, field_init| {
+                        if (field.field.type != .int) {
+                            return parser.fail(
+                                tree.firstToken(field_init) - 2,
+                                "field '{s}' is not an integer",
+                                .{field.field.name},
+                            );
+                        }
+                    }
+                    return .{ .all_greater_than = .{
+                        .actual = actual.reference,
+                        .expected = expected,
+                    } };
+                }
                 if (tree.nodeTag(args[1]) != .number_literal) {
                     return parser.fail_node(args[1], "expected an integer");
                 }

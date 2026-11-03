@@ -853,6 +853,23 @@ fn emit_assertion(
                 ),
             });
         },
+        .all_greater_than => |greater_than| {
+            const actual = try printer.to_case_alloc(.camel_case, greater_than.actual);
+            if (try scope.walk(actual)) {
+                try printer.print_indented("{s}.beforeFirst();", .{actual});
+            }
+            try printer.print_indented("while ({s}.next()) {{", .{actual});
+            printer.indent();
+            for (greater_than.expected.fields) |field| {
+                try printer.print_indented("assertTrue({s}.get{s}() > {s});", .{
+                    actual,
+                    try printer.to_case_alloc(.pascal_case, field.field.name),
+                    try render_typed_value(printer, field.field, field.value),
+                });
+            }
+            printer.dedent();
+            try printer.write_indented("}");
+        },
         .fail => |failure| switch (failure.action) {
             .call => |call| try emit_call(printer, call, variant, .{
                 .expect_error = true,
