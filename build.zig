@@ -1710,6 +1710,71 @@ fn build_tb_client(
     };
 }
 
+/// Builds a static library by first building an object, then archiving it with `zig ar`. This is
+/// useful where (1) we don't want the build machine's full cache path in the archive (see
+/// https://github.com/ziglang/zig/issues/18830), e.g., for byte-by-byte reproducible client builds,
+/// and (2) to align 8-byte align Mach-O members (Apple's ld rejects them in newer versions).
+///
+/// `zig ar` uses basenames instead of full paths, aligns it, and `D` zeroes timestamps/uids/modes.
+///
+/// TODO(Zig): Alignment (2) is fixed in zig 17, so we can remove this part once upgraded.
+fn build_static_library(
+    b: *std.Build,
+    name: []const u8,
+    root_module: *std.Build.Module,
+) struct {
+    object: *std.Build.Step.Compile,
+    archive_path: std.Build.LazyPath,
+    archive_name: []const u8,
+} {
+    const object = b.addObject(.{ .name = name, .root_module = root_module });
+    object.root_module.link_libc = true;
+    object.pie = true;
+
+    // We can't seem to put compiler_rt into an object (`-fcompiler-rt` with build-obj fails),
+    // so build it as its own object like Zig does internally. Maybe related:
+    // https://github.com/ziglang/zig/issues/7264
+    const compiler_rt = b.addObject(.{ .name = "compiler_rt", .root_module = b.createModule(.{
+        .root_source_file = .{ .cwd_relative = b.pathJoin(&.{
+            b.graph.zig_lib_directory.path.?,
+            "compiler_rt.zig",
+        }) },
+        .target = object.root_module.resolved_target,
+        .optimize = object.root_module.optimize,
+        .strip = true,
+        .stack_protector = false,
+        .pic = true,
+    }) });
+    compiler_rt.root_module.no_builtin = true;
+
+    const os = object.rootModuleTarget().os.tag;
+    const archive_name = switch (os) {
+        .windows => b.fmt("{s}.lib", .{name}),
+        else => b.fmt("lib{s}.a", .{name}),
+    };
+    // Note: zig_ar operations and modifiers are single-letter, so we cannot use long forms there.
+    // - r (operation): replace or insert files into the archive
+    // - c (modifier): do not warn that the archive had to be created (we're creating one!)
+    // - s (modifier): create an archive index
+    // - D (modifier): use zero for timestamps and modes (important for reproducibility)
+    // Besides `D`, the actual effects we want are all inherent to zig ar (no paths, alignment).
+    const zig_ar = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD", switch (os) {
+        .macos => "--format=darwin",
+        .windows => "--format=coff",
+        else => "--format=gnu",
+    } });
+    const archive_path = zig_ar.addOutputFileArg(archive_name);
+
+    zig_ar.addFileArg(object.getEmittedBin());
+    zig_ar.addFileArg(compiler_rt.getEmittedBin());
+
+    return .{
+        .object = object,
+        .archive_path = archive_path,
+        .archive_name = archive_name,
+    };
+}
+
 fn build_rust_client(
     b: *std.Build,
     step_clients_rust: *std.Build.Step,
@@ -1740,24 +1805,17 @@ fn build_rust_client(
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
+            .stack_protector = false,
         });
         root_module.addImport("vsr", options.vsr_module);
         root_module.addOptions("vsr_options", options.vsr_options);
         if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
-        const static_lib = b.addLibrary(.{
-            .name = "tb_client",
-            .linkage = .static,
-            .root_module = root_module,
-        });
-        static_lib.bundle_compiler_rt = true;
-        static_lib.pie = true;
-        static_lib.root_module.link_libc = true;
-
-        client_files.addCopyFileToSource(static_lib.getEmittedBin(), b.pathJoin(&.{
+        const archive = build_static_library(b, "tb_client", root_module);
+        client_files.addCopyFileToSource(archive.archive_path, b.pathJoin(&.{
             "src/clients/rust/assets/lib",
             platform.target(),
-            static_lib.out_filename,
+            archive.archive_name,
         }));
     }
 
@@ -1830,26 +1888,19 @@ fn build_go_client(
         root_module.addOptions("vsr_options", options.vsr_options);
         if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
-        const lib = b.addLibrary(.{
-            .name = "tb_client",
-            .linkage = .static,
-            .root_module = root_module,
-        });
-        lib.root_module.link_libc = true;
-        lib.pie = true;
-        lib.bundle_compiler_rt = true;
-        lib.step.dependOn(&bindings.step);
+        const archive = build_static_library(b, "tb_client", root_module);
+        archive.object.step.dependOn(&bindings.step);
 
         const file_name: []const u8, const extension: []const u8 = cut: {
-            assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
-            var it = std.mem.splitScalar(u8, lib.out_lib_filename, '.');
+            assert(std.mem.count(u8, archive.archive_name, ".") == 1);
+            var it = std.mem.splitScalar(u8, archive.archive_name, '.');
             defer assert(it.next() == null);
 
             break :cut .{ it.next().?, it.next().? };
         };
 
         client_files.addCopyFileToSource(
-            lib.getEmittedBin(),
+            archive.archive_path,
             b.fmt("src/clients/go/native/{s}_{s}.{s}", .{
                 file_name,
                 platform.go_target(),
