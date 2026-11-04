@@ -42,3 +42,17 @@ pub const sources: []const Source = sources: {
 };
 
 pub const parse = parser.parse;
+
+// We're keeping this as a freestanding function so Printer doesn't need to
+// depend on ast.Case.
+pub fn write_not_applicable(printer: *Printer, case: ast.Case) !void {
+    try printer.print_indented("{s} N/A: \"{s}\"", .{
+        printer.options.comment_marker, case.description,
+    });
+    try printer.write_indent();
+    try printer.print("{s} Reason: ", .{printer.options.comment_marker});
+    for (@tagName(case.requirement.?)) |char| {
+        try printer.writer.writeByte(if (char == '_') ' ' else char);
+    }
+    try printer.write("\n");
+}

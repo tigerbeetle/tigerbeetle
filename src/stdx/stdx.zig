@@ -1204,10 +1204,18 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
         Term{ .unknown = status };
 }
 
+pub const Casing = enum {
+    camel_case,
+    kebab_case,
+    pascal_case,
+    snake_case,
+    upper_case,
+};
+
 /// Converts a snake_case identifier to another identifier case at comptime.
 pub fn to_case(
     comptime snake_case: []const u8,
-    comptime case: enum { camel_case, kebab_case, pascal_case, upper_case },
+    comptime case: Casing,
 ) []const u8 {
     return comptime blk: {
         var output: [snake_case.len]u8 = undefined;
@@ -1232,23 +1240,33 @@ pub fn to_case(
                 output[0] = switch (case) {
                     .camel_case => std.ascii.toLower(output[0]),
                     .pascal_case => std.ascii.toUpper(output[0]),
-                    .kebab_case, .upper_case => unreachable,
+                    .kebab_case, .snake_case, .upper_case => unreachable,
                 };
 
                 break :blk comptime_slice(&output, len);
             },
+            .snake_case => unreachable,
         }
     };
 }
 
 test "to_case" {
-    try std.testing.expectEqualStrings("createAccounts", to_case("create_accounts", .camel_case));
-    try std.testing.expectEqualStrings("CreateTransfers", to_case("create_transfers", .pascal_case));
-    try std.testing.expectEqualStrings("user-data-128", to_case("user_data_128", .kebab_case));
-    try std.testing.expectEqualStrings(
-        "GET_ACCOUNT_BALANCES",
-        to_case("get_account_balances", .upper_case),
-    );
+    try std.testing.expectEqualStrings("createAccounts", to_case(
+        "create_accounts",
+        .camel_case,
+    ));
+    try std.testing.expectEqualStrings("CreateTransfers", to_case(
+        "create_transfers",
+        .pascal_case,
+    ));
+    try std.testing.expectEqualStrings("user-data-128", to_case(
+        "user_data_128",
+        .kebab_case,
+    ));
+    try std.testing.expectEqualStrings("GET_ACCOUNT_BALANCES", to_case(
+        "get_account_balances",
+        .upper_case,
+    ));
 }
 
 /// Utility for print-if debugging, a-la Rust's dbg! macro.

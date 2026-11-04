@@ -15,7 +15,9 @@ pub fn main(init: std.process.Init) !void {
     var arena = Arena.init(&memory);
     var printer = Printer.init(&arena, stdout_writer, .{
         .indent_width = 2,
+        .indent_char = ' ',
         .start_level = 1,
+        .comment_marker = "#",
     });
 
     try emit(&printer);
@@ -424,7 +426,7 @@ fn render_flags(
     for (record.fields, 0..) |field, index| {
         assert(field.value == .boolean and field.value.boolean);
         if (index > 0) {
-            const width = continuation_indent_level * printer.indent_width;
+            const width = continuation_indent_level * printer.options.indent_width;
             try text.writer.writeAll(" |\n");
             try text.writer.splatByteAll(' ', width);
         }

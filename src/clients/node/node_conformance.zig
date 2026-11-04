@@ -15,6 +15,8 @@ pub fn main(init: std.process.Init) !void {
     var arena = Arena.init(&memory);
     var printer = Printer.init(&arena, stdout_writer, .{
         .indent_width = 2,
+        .indent_char = ' ',
+        .comment_marker = "//",
     });
 
     try emit(&printer);
@@ -150,7 +152,7 @@ fn emit(printer: *Printer) !void {
             try printer.write_empty_line();
             if (case.requirement) |requirement| {
                 if (!satisfies(requirement)) {
-                    try printer.write_omission(case);
+                    try conformance.write_not_applicable(printer, case);
                     continue;
                 }
             }
