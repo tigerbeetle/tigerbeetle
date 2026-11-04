@@ -131,7 +131,7 @@ pub const Record = struct {
 
     pub const Type = stdx.EnumType(api_decl_names_matching(is_record));
 
-    // Returns the API struct type for a `Record.Type`.
+    /// Returns the API struct type for a `Record.Type`.
     pub fn RecordType(comptime record_type: Type) type {
         return @field(api, @tagName(record_type));
     }
