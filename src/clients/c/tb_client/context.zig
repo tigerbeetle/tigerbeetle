@@ -965,14 +965,14 @@ pub fn ContextType(
 /// Adapted from Zig 0.14's `std.Thread.Mutex.FutexImpl`.
 const Locker = extern struct {
     const Futex = struct {
-        const io = std.Io.Threaded.global_single_threaded.io();
+        const io_std = std.Io.Threaded.global_single_threaded.io();
 
         fn wait(ptr: *const std.atomic.Value(u32), expect: u32) void {
-            io.futexWaitUncancelable(u32, &ptr.raw, expect);
+            io_std.futexWaitUncancelable(u32, &ptr.raw, expect);
         }
 
         fn wake(ptr: *const std.atomic.Value(u32), max_waiters: u32) void {
-            io.futexWake(u32, &ptr.raw, max_waiters);
+            io_std.futexWake(u32, &ptr.raw, max_waiters);
         }
     };
     const unlocked: u32 = 0b00;

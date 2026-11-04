@@ -74,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
             }
         };
 
-        var context = RequestContext{ .io = init.io };
+        var context = RequestContext{ .io_std = init.io };
 
         {
             context.lock.lockUncancelable(init.io);
@@ -109,7 +109,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 const RequestContext = struct {
-    io: std.Io,
+    io_std: std.Io,
     lock: std.Io.Mutex = .init,
     condition: std.Io.Condition = .init,
     completed: bool = false,
@@ -128,8 +128,8 @@ pub fn on_complete(
     _ = timestamp;
     const context: *RequestContext = @ptrCast(@alignCast(tb_batch.*.user_data.?));
 
-    context.lock.lockUncancelable(context.io);
-    defer context.lock.unlock(context.io);
+    context.lock.lockUncancelable(context.io_std);
+    defer context.lock.unlock(context.io_std);
 
     assert(tb_batch.*.status == c.TB_BATCH_OK);
     assert(result != null);
@@ -137,7 +137,7 @@ pub fn on_complete(
     stdx.copy_disjoint(.exact, u8, context.result[0..result_size], result.?[0..result_size]);
     context.result_size = result_size;
     context.completed = true;
-    context.condition.signal(context.io);
+    context.condition.signal(context.io_std);
 }
 
 fn write_results(

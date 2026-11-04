@@ -60,7 +60,7 @@ fn trap_handler(signal: std.posix.SIG) callconv(.c) void {
 /// subprocesses will have loopback network access only.
 pub fn maybe_unshare_and_relaunch(
     gpa: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     args: std.process.Args,
     options: struct {
         pid: bool,
@@ -79,7 +79,7 @@ pub fn maybe_unshare_and_relaunch(
         }
         if (options.pid) {
             std.posix.sigaction(std.posix.SIG.TERM, &trap_action, null);
-            try fork_and_exit(gpa, io, args);
+            try fork_and_exit(gpa, io_std, args);
         }
     } else {
         // We are within the pid namespace.
@@ -252,14 +252,14 @@ pub fn linux_ip_link_loopback() !void {
     }
 }
 
-fn fork_and_exit(gpa: std.mem.Allocator, io: std.Io, args: std.process.Args) !void {
+fn fork_and_exit(gpa: std.mem.Allocator, io_std: std.Io, args: std.process.Args) !void {
     const args_ours = args.vector;
 
     // We get a fresh path to the exe instead of using the original
     // first argument so that the exe path will be correct even if
     // this process's cwd has changed relative to the original exe.
     var exe_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = exe_path_buffer[0..try std.process.executablePath(io, &exe_path_buffer)];
+    const exe_path = exe_path_buffer[0..try std.process.executablePath(io_std, &exe_path_buffer)];
 
     const args_new = try gpa.alloc([]const u8, args_ours.len);
     defer gpa.free(args_new);
@@ -270,7 +270,7 @@ fn fork_and_exit(gpa: std.mem.Allocator, io: std.Io, args: std.process.Args) !vo
         args_new[arg_index] = std.mem.span(args_ours[arg_index]);
     }
 
-    var child = try std.process.spawn(io, .{
+    var child = try std.process.spawn(io_std, .{
         .argv = args_new,
         .stdin = .inherit,
         .stdout = .inherit,
@@ -281,7 +281,7 @@ fn fork_and_exit(gpa: std.mem.Allocator, io: std.Io, args: std.process.Args) !vo
     assert(child_pid == null);
     child_pid = child.id.?;
 
-    const result = try child.wait(io);
+    const result = try child.wait(io_std);
     switch (result) {
         .exited => |code| {
             std.process.exit(code);

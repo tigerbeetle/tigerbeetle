@@ -797,7 +797,7 @@ pub fn AOFType(comptime IO: type) type {
 const testing = std.testing;
 
 test "aof write / read" {
-    const io_testing = std.testing.io;
+    const io_std = std.testing.io;
     const IO = stdx.IO;
     const AOF = AOFType(IO);
     const AOFIterator = AOF.Iterator;
@@ -807,13 +807,13 @@ test "aof write / read" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(io_testing, ".", allocator);
+    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(io_std, ".", allocator);
     defer allocator.free(tmp_dir_realpath);
 
     const aof_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_realpath, "test.aof" });
     defer allocator.free(aof_file_path);
 
-    var io = try IO.init(32, 0, io_testing);
+    var io = try IO.init(32, 0, io_std);
     defer io.deinit();
 
     const dir_fd = try io.open_dir(".");

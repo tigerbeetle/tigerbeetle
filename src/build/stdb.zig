@@ -5,15 +5,15 @@ const Allocator = std.mem.Allocator;
 
 const log = std.log;
 
-pub fn exec_ok(arena: Allocator, io: std.Io, argv: []const []const u8) bool {
+pub fn exec_ok(arena: Allocator, io_std: std.Io, argv: []const []const u8) bool {
     assert(argv.len > 0);
-    const result = std.process.run(arena, io, .{ .argv = argv }) catch return false;
+    const result = std.process.run(arena, io_std, .{ .argv = argv }) catch return false;
     return result.term == .exited and result.term.exited == 0;
 }
 
-pub fn exec(arena: Allocator, io: std.Io, argv: []const []const u8) ![]const u8 {
+pub fn exec(arena: Allocator, io_std: std.Io, argv: []const []const u8) ![]const u8 {
     assert(argv.len > 0);
-    const result = std.process.run(arena, io, .{ .argv = argv }) catch |err| {
+    const result = std.process.run(arena, io_std, .{ .argv = argv }) catch |err| {
         const argv_flat = std.mem.join(arena, " ", argv) catch "<oom>";
         log.err("running {s}: {}", .{ argv_flat, err });
         return err;

@@ -223,52 +223,55 @@ fn getsockopt(
 }
 
 pub fn aof_blocking_write_all(
-    io: std.Io,
+    io_std: std.Io,
     fd: posix.fd_t,
     buffer: []const u8,
 ) std.Io.File.Writer.Error!void {
     const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
-    return file.writeStreamingAll(io, buffer);
+    return file.writeStreamingAll(io_std, buffer);
 }
 
 pub fn aof_blocking_pread_all(
-    io: std.Io,
+    io_std: std.Io,
     fd: posix.fd_t,
     buffer: []u8,
     offset: u64,
 ) std.Io.File.ReadPositionalError!usize {
     const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
-    return file.readPositionalAll(io, buffer, offset);
+    return file.readPositionalAll(io_std, buffer, offset);
 }
 
-pub fn aof_blocking_close(io: std.Io, fd: posix.fd_t) void {
+pub fn aof_blocking_close(io_std: std.Io, fd: posix.fd_t) void {
     const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
-    file.close(io);
+    file.close(io_std);
 }
 
-pub fn aof_blocking_stat(io: std.Io, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
-    return std.Io.Dir.cwd().statFile(io, path, .{});
+pub fn aof_blocking_stat(
+    io_std: std.Io,
+    path: []const u8,
+) std.Io.Dir.StatFileError!std.Io.File.Stat {
+    return std.Io.Dir.cwd().statFile(io_std, path, .{});
 }
 
-pub fn aof_blocking_fstat(io: std.Io, fd: posix.fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
+pub fn aof_blocking_fstat(io_std: std.Io, fd: posix.fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
     const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
-    return file.stat(io);
+    return file.stat(io_std);
 }
 
-pub fn aof_blocking_open(io: std.Io, dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
+pub fn aof_blocking_open(io_std: std.Io, dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
     assert(!std.fs.path.isAbsolute(path));
 
     const dir = std.Io.Dir{ .handle = dir_fd };
 
-    const file = try dir.createFile(io, path, .{
+    const file = try dir.createFile(io_std, path, .{
         .read = true,
         .truncate = false,
         .exclusive = false,
         .lock = .exclusive,
     });
-    errdefer file.close(io);
+    errdefer file.close(io_std);
 
-    try file.sync(io);
+    try file.sync(io_std);
 
     // We cannot fsync the directory handle on Windows.
     // We have no way to open a directory with write access.
@@ -276,8 +279,8 @@ pub fn aof_blocking_open(io: std.Io, dir_fd: posix.fd_t, path: []const u8) !posi
         try posix.fsync(dir_fd);
     }
 
-    var file_writer = file.writerStreaming(io, &.{});
-    try file_writer.seekTo(try file.length(io));
+    var file_writer = file.writerStreaming(io_std, &.{});
+    try file_writer.seekTo(try file.length(io_std));
 
     return file.handle;
 }

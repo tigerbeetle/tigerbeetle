@@ -25,13 +25,13 @@ const PageContent = struct {
     };
 };
 
-pub fn load(arena: Allocator, io: std.Io, base: std.Io.Dir, page_buffer: []u8) !Page {
-    return load_page(arena, io, base, "./", page_buffer);
+pub fn load(arena: Allocator, io_std: std.Io, base: std.Io.Dir, page_buffer: []u8) !Page {
+    return load_page(arena, io_std, base, "./", page_buffer);
 }
 
 fn load_page(
     arena: Allocator,
-    io: std.Io,
+    io_std: std.Io,
     base: std.Io.Dir,
     path: []const u8,
     page_buffer: []u8,
@@ -45,7 +45,7 @@ fn load_page(
         return error.InvalidPath;
     }
 
-    const text = try read_file(io, base, file_path, page_buffer);
+    const text = try read_file(io_std, base, file_path, page_buffer);
     const content = try parse_page_content(arena, text, .{
         .parse_children = is_dir and !is_client,
     });
@@ -63,16 +63,16 @@ fn load_page(
                 path,
                 cut_prefix(child.path, "./") orelse child.path,
             });
-        const child_page = try load_page(arena, io, base, child_path, page_buffer);
+        const child_page = try load_page(arena, io_std, base, child_path, page_buffer);
         try children.append(arena, child_page);
     }
 
     if (is_dir and !is_client) {
-        var dir = try base.openDir(io, path, .{ .iterate = true });
-        defer dir.close(io);
+        var dir = try base.openDir(io_std, path, .{ .iterate = true });
+        defer dir.close(io_std);
 
         var dir_iterator = dir.iterate();
-        while (try dir_iterator.next(io)) |entry| {
+        while (try dir_iterator.next(io_std)) |entry| {
             if (std.mem.eql(u8, entry.name, "README.md")) continue;
             if (std.mem.eql(u8, entry.name, "internals")) continue;
             if (std.mem.eql(u8, entry.name, "TIGER_STYLE.md")) continue;
@@ -155,8 +155,8 @@ fn parse_page_child(line: []const u8) !?PageContent.Child {
     };
 }
 
-fn read_file(io: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
-    const result = try dir.readFile(io, path, page_buffer);
+fn read_file(io_std: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
+    const result = try dir.readFile(io_std, path, page_buffer);
     if (result.len == page_buffer.len) return error.FileToLarge;
     return result;
 }

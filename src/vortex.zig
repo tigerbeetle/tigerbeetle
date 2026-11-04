@@ -120,9 +120,9 @@ pub fn main(init: std.process.Init) !void {
     log.info("done", .{});
 }
 
-fn setup_log(io: std.Io, log_path: []const u8) !void {
-    const log_file = try std.Io.Dir.cwd().createFile(io, log_path, .{});
-    defer log_file.close(io);
+fn setup_log(io_std: std.Io, log_path: []const u8) !void {
+    const log_file = try std.Io.Dir.cwd().createFile(io_std, log_path, .{});
+    defer log_file.close(io_std);
 
     // Redirect stderr to the file.
     switch (std.posix.errno(std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO))) {
