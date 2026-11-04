@@ -132,7 +132,7 @@ pub const Record = struct {
     pub const Type = stdx.EnumType(api_decl_names_matching(is_record));
 
     // Returns the API struct type for a `Record.Type`.
-    pub fn Struct(comptime record_type: Type) type {
+    pub fn RecordType(comptime record_type: Type) type {
         return @field(api, @tagName(record_type));
     }
 
@@ -140,7 +140,7 @@ pub const Record = struct {
     pub fn is_flags(record_type: Type) bool {
         switch (record_type) {
             inline else => |comptime_type| {
-                return @typeInfo(Struct(comptime_type)).@"struct".layout == .@"packed";
+                return @typeInfo(RecordType(comptime_type)).@"struct".layout == .@"packed";
             },
         }
     }
@@ -164,7 +164,7 @@ pub const Field = struct {
         pub fn resolve(record_type: Record.Type, field_name: []const u8) Type {
             switch (record_type) {
                 inline else => |comptime_type| {
-                    inline for (std.meta.fields(Record.Struct(comptime_type))) |field| {
+                    inline for (std.meta.fields(Record.RecordType(comptime_type))) |field| {
                         if (std.mem.eql(u8, field.name, field_name)) {
                             return switch (@typeInfo(field.type)) {
                                 .int => |info| .{ .int = info.bits },

@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const conformance = @import("conformance");
+const stdx = @import("stdx");
 
 const ast = conformance.ast;
 const Arena = conformance.Arena;
@@ -971,7 +972,7 @@ fn render_typed_value(
                 return render_uint128(printer, text);
             }
             if (bits == 64) {
-                const unsigned = std.fmt.parseInt(u64, text, 10) catch
+                const unsigned = stdx.parse_int(u64, text, .{}) catch
                     return printer.string_alloc("{s}L", .{text});
                 // -1L == ulong max value.
                 return printer.string_alloc("{d}L", .{@as(i64, @bitCast(unsigned))});
@@ -1023,7 +1024,7 @@ fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
 }
 
 fn render_big_integer(printer: *Printer, text: []const u8) ![]const u8 {
-    const value = std.fmt.parseInt(u128, text, 10) catch unreachable;
+    const value = stdx.parse_int(u128, text, .{}) catch unreachable;
     if (value <= std.math.maxInt(u64)) {
         return printer.string_alloc("BigInteger.valueOf({d}L)", .{value});
     }

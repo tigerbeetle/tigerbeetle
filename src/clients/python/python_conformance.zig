@@ -459,12 +459,12 @@ fn emit_assertion(
             try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
         },
         .all_greater_than => |greater_than| {
-            try printer.print_indented("for el in {s}:", .{greater_than.actual});
+            try printer.print_indented("for item in {s}:", .{greater_than.actual});
             printer.indent();
             for (greater_than.expected.fields) |field| {
                 try emit_greater_than(
                     printer,
-                    .{ .reference = "el", .field = field.field },
+                    .{ .reference = "item", .field = field.field },
                     field.value,
                 );
             }
@@ -503,7 +503,7 @@ fn filter_fields(record_type: ast.Record.Type) []const []const u8 {
 
 fn field_names(comptime record_type: ast.Record.Type) []const []const u8 {
     var names: []const []const u8 = &.{};
-    for (std.meta.fields(ast.Record.Struct(record_type))) |field| {
+    for (std.meta.fields(ast.Record.RecordType(record_type))) |field| {
         if (std.mem.eql(u8, field.name, "reserved")) continue;
         names = names ++ &[_][]const u8{field.name};
     }

@@ -967,7 +967,7 @@ fn field_types_equal(actual: ast.Field.Type, expected: ast.Field.Type) bool {
 
 fn api_record_type(comptime T: type) ?ast.Record.Type {
     inline for (std.enums.values(ast.Record.Type)) |record_type| {
-        if (ast.Record.Struct(record_type) == T) return record_type;
+        if (ast.Record.RecordType(record_type) == T) return record_type;
     }
     return null;
 }
@@ -999,7 +999,7 @@ fn record_field_index(record_type: ast.Record.Type, name: []const u8) ?usize {
     if (field_is_reserved(name)) return null;
     switch (record_type) {
         inline else => |comptime_type| {
-            const Field = std.meta.FieldEnum(ast.Record.Struct(comptime_type));
+            const Field = std.meta.FieldEnum(ast.Record.RecordType(comptime_type));
             const field = std.meta.stringToEnum(Field, name) orelse return null;
             return @intFromEnum(field);
         },
@@ -1012,7 +1012,7 @@ fn record_field_record_type(
 ) ?ast.Record.Type {
     switch (record_type) {
         inline else => |comptime_type| {
-            inline for (std.meta.fields(ast.Record.Struct(comptime_type))) |field| {
+            inline for (std.meta.fields(ast.Record.RecordType(comptime_type))) |field| {
                 if (@typeInfo(field.type) != .@"struct") continue;
                 if (std.mem.eql(u8, field.name, name)) return comptime api_record_type(field.type);
             }
@@ -1028,7 +1028,7 @@ fn record_field_enum_has(
 ) bool {
     switch (record_type) {
         inline else => |comptime_type| {
-            inline for (std.meta.fields(ast.Record.Struct(comptime_type))) |field| {
+            inline for (std.meta.fields(ast.Record.RecordType(comptime_type))) |field| {
                 if (@typeInfo(field.type) != .@"enum") continue;
                 if (std.mem.eql(u8, field.name, field_name)) {
                     return std.meta.stringToEnum(field.type, member) != null;

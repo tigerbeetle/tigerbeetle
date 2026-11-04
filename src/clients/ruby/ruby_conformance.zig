@@ -319,12 +319,12 @@ fn emit_assertion(
             try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
         },
         .all_greater_than => |greater_than| {
-            try printer.print_indented("{s}.each do |el|", .{greater_than.actual});
+            try printer.print_indented("{s}.each do |item|", .{greater_than.actual});
             printer.indent();
             for (greater_than.expected.fields) |field| {
                 try emit_greater_than(
                     printer,
-                    .{ .reference = "el", .field = field.field },
+                    .{ .reference = "item", .field = field.field },
                     field.value,
                 );
             }

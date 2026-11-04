@@ -31,6 +31,7 @@ pub const Arena = struct {
     pub fn restore(arena: *Arena) void {
         maybe(arena.marked_index == 0);
         defer arena.marked_index = 0;
+
         arena.fba.end_index = arena.marked_index;
     }
 

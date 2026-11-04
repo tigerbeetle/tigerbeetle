@@ -131,9 +131,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -164,9 +164,9 @@ public class ConformanceTests
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
         Assert.AreEqual(CreateAccountStatus.IdMustNotBeZero, results[1].Status);
         Assert.AreEqual(CreateAccountStatus.Created, results[2].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -568,9 +568,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -626,9 +626,9 @@ public class ConformanceTests
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
         Assert.AreEqual(CreateTransferStatus.IdMustNotBeZero, results[1].Status);
         Assert.AreEqual(CreateTransferStatus.Created, results[2].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -6318,9 +6318,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -6351,9 +6351,9 @@ public class ConformanceTests
         Assert.AreEqual(CreateAccountStatus.Created, results[0].Status);
         Assert.AreEqual(CreateAccountStatus.IdMustNotBeZero, results[1].Status);
         Assert.AreEqual(CreateAccountStatus.Created, results[2].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -6755,9 +6755,9 @@ public class ConformanceTests
         });
         Assert.AreEqual(1, results.Length);
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
@@ -6813,9 +6813,9 @@ public class ConformanceTests
         Assert.AreEqual(CreateTransferStatus.Created, results[0].Status);
         Assert.AreEqual(CreateTransferStatus.IdMustNotBeZero, results[1].Status);
         Assert.AreEqual(CreateTransferStatus.Created, results[2].Status);
-        foreach (var el in results)
+        foreach (var item in results)
         {
-            Assert.IsTrue(el.Timestamp > 0);
+            Assert.IsTrue(item.Timestamp > 0);
         }
     }
 
