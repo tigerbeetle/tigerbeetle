@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const conformance = @import("conformance");
+const stdx = @import("stdx");
 
 const ast = conformance.ast;
 const Arena = conformance.Arena;
@@ -423,7 +424,7 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
             try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
         },
         .all_greater_than => |greater_than| {
-            try printer.print_indented("foreach (var el in {s})", .{
+            try printer.print_indented("foreach (var item in {s})", .{
                 try printer.to_case_alloc(.camel_case, greater_than.actual),
             });
             try printer.write_indented("{");
@@ -431,7 +432,7 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVa
             for (greater_than.expected.fields) |field| {
                 try emit_greater_than(
                     printer,
-                    .{ .reference = "el", .field = field.field },
+                    .{ .reference = "item", .field = field.field },
                     field.value,
                 );
             }
@@ -567,7 +568,7 @@ fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
 }
 
 fn fits_ulong(text: []const u8) bool {
-    const value = std.fmt.parseInt(u128, text, 10) catch unreachable;
+    const value = stdx.parse_int(u128, text, .{}) catch unreachable;
     return value <= std.math.maxInt(u64);
 }
 

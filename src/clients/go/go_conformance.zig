@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const conformance = @import("conformance");
+const stdx = @import("stdx");
 
 const ast = conformance.ast;
 const Arena = conformance.Arena;
@@ -131,6 +132,7 @@ const Scope = struct {
 
     fn error_assign(scope: *Scope, binds_result: bool) []const u8 {
         defer scope.error_declared = true;
+
         return if (binds_result or !scope.error_declared) ":=" else "=";
     }
 };
@@ -430,14 +432,14 @@ fn emit_assertion(printer: *Printer, scope: *Scope, assertion: ast.Assertion) !v
             try emit_greater_than(printer, comparison.actual, comparison.expected.expression);
         },
         .all_greater_than => |greater_than| {
-            try printer.print_indented("for _, el := range {s} {{", .{
+            try printer.print_indented("for _, item := range {s} {{", .{
                 try printer.to_case_alloc(.go_camel_case, greater_than.actual),
             });
             printer.indent();
             for (greater_than.expected.fields) |field| {
                 try emit_greater_than(
                     printer,
-                    .{ .reference = "el", .field = field.field },
+                    .{ .reference = "item", .field = field.field },
                     field.value,
                 );
             }
@@ -553,7 +555,7 @@ fn render_id(printer: *Printer, expression: ast.Expression) ![]const u8 {
 }
 
 fn render_uint128(printer: *Printer, text: []const u8) ![]const u8 {
-    const value = std.fmt.parseInt(u128, text, 10) catch unreachable;
+    const value = stdx.parse_int(u128, text, .{}) catch unreachable;
     if (value <= std.math.maxInt(u64)) {
         return printer.string_alloc("ToUint128({s})", .{text});
     }

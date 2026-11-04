@@ -102,8 +102,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::CREATED, results[0].status)
-    results.each do |el|
-      assert_operator(el.timestamp, :>, 0)
+    results.each do |item|
+      assert_operator(item.timestamp, :>, 0)
     end
   end
 
@@ -131,8 +131,8 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(TB::CreateAccountStatus::CREATED, results[0].status)
     assert_equal(TB::CreateAccountStatus::ID_MUST_NOT_BE_ZERO, results[1].status)
     assert_equal(TB::CreateAccountStatus::CREATED, results[2].status)
-    results.each do |el|
-      assert_operator(el.timestamp, :>, 0)
+    results.each do |item|
+      assert_operator(item.timestamp, :>, 0)
     end
   end
 
@@ -497,8 +497,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
-    results.each do |el|
-      assert_operator(el.timestamp, :>, 0)
+    results.each do |item|
+      assert_operator(item.timestamp, :>, 0)
     end
   end
 
@@ -551,8 +551,8 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
     assert_equal(TB::CreateTransferStatus::ID_MUST_NOT_BE_ZERO, results[1].status)
     assert_equal(TB::CreateTransferStatus::CREATED, results[2].status)
-    results.each do |el|
-      assert_operator(el.timestamp, :>, 0)
+    results.each do |item|
+      assert_operator(item.timestamp, :>, 0)
     end
   end
 

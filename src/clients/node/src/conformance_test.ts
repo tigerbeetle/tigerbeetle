@@ -230,8 +230,8 @@ test(
     ])
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].status, CreateAccountStatus.created)
-    for (const el of results) {
-      assert.ok(el.timestamp > 0n)
+    for (const item of results) {
+      assert.ok(item.timestamp > 0n)
     }
   },
 )
@@ -263,8 +263,8 @@ test(
     assert.strictEqual(results[0].status, CreateAccountStatus.created)
     assert.strictEqual(results[1].status, CreateAccountStatus.id_must_not_be_zero)
     assert.strictEqual(results[2].status, CreateAccountStatus.created)
-    for (const el of results) {
-      assert.ok(el.timestamp > 0n)
+    for (const item of results) {
+      assert.ok(item.timestamp > 0n)
     }
   },
 )
@@ -672,8 +672,8 @@ test(
     ])
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].status, CreateTransferStatus.created)
-    for (const el of results) {
-      assert.ok(el.timestamp > 0n)
+    for (const item of results) {
+      assert.ok(item.timestamp > 0n)
     }
   },
 )
@@ -730,8 +730,8 @@ test(
     assert.strictEqual(results[0].status, CreateTransferStatus.created)
     assert.strictEqual(results[1].status, CreateTransferStatus.id_must_not_be_zero)
     assert.strictEqual(results[2].status, CreateTransferStatus.created)
-    for (const el of results) {
-      assert.ok(el.timestamp > 0n)
+    for (const item of results) {
+      assert.ok(item.timestamp > 0n)
     }
   },
 )
