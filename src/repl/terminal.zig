@@ -22,11 +22,11 @@ pub const Terminal = struct {
 
     pub fn init(
         terminal: *Terminal,
-        io: std.Io,
+        io_std: std.Io,
         interactive: bool,
     ) !void {
         const stdout = std.Io.File.stdout();
-        if (interactive and std.meta.isError(stdout.enableAnsiEscapeCodes(io))) {
+        if (interactive and std.meta.isError(stdout.enableAnsiEscapeCodes(io_std))) {
             std.debug.print("ANSI escape sequences not supported.\n", .{});
             std.process.exit(1);
         }
@@ -58,10 +58,10 @@ pub const Terminal = struct {
             .mode_start = mode_start,
             .stdin = undefined,
             .stdin_buffer = undefined,
-            .stdout = stdout.writerStreaming(io, &.{}),
-            .stderr = std.Io.File.stderr().writerStreaming(io, &.{}),
+            .stdout = stdout.writerStreaming(io_std, &.{}),
+            .stderr = std.Io.File.stderr().writerStreaming(io_std, &.{}),
         };
-        terminal.stdin = stdin.readerStreaming(io, &terminal.stdin_buffer);
+        terminal.stdin = stdin.readerStreaming(io_std, &terminal.stdin_buffer);
     }
 
     pub fn print(

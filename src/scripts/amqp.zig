@@ -61,11 +61,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
 fn run_protocol_test(
     gpa: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     options: struct { host: stdx.SocketAddress },
 ) !void {
     var context: AmqpContext = undefined;
-    try context.init(gpa, io);
+    try context.init(gpa, io_std);
     defer context.deinit(gpa);
 
     try context.connect(options.host);
@@ -183,7 +183,7 @@ fn run_protocol_test(
     try testing.expectEqualStrings("3", message_3.?.header.properties.message_id.?);
 
     // Closing the connection without a ack/nack:
-    try context.disconnect(gpa, io);
+    try context.disconnect(gpa, io_std);
     try context.connect(options.host);
 
     // The message must not be consumed:
@@ -273,11 +273,11 @@ fn run_protocol_test(
 
 fn run_serialization_test(
     gpa: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     options: struct { host: stdx.SocketAddress },
 ) !void {
     var context: AmqpContext = undefined;
-    try context.init(gpa, io);
+    try context.init(gpa, io_std);
     defer context.deinit(gpa);
 
     try context.connect(options.host);
@@ -345,7 +345,7 @@ fn run_serialization_test(
         context.publish(messages.items);
         // Maybe disconnect the client between publishes:
         if (prng.chance(ratio(20, 100))) {
-            try context.disconnect(gpa, io);
+            try context.disconnect(gpa, io_std);
             try context.connect(options.host);
         }
 
@@ -665,7 +665,7 @@ const AmqpContext = struct {
 
     // Simulates a crash by disconnecting the client and creating a new one.
     // Uses `deinit() + init()` since graceful disconnection/reconnection is not handled.
-    pub fn disconnect(self: *AmqpContext, gpa: std.mem.Allocator, io: std.Io) !void {
+    pub fn disconnect(self: *AmqpContext, gpa: std.mem.Allocator, io_std: std.Io) !void {
         assert(!self.busy);
         assert(self.client.fd != null);
         assert(self.client.awaiter == .none);
@@ -675,7 +675,7 @@ const AmqpContext = struct {
         maybe(self.client.heartbeat != .idle); // It may be processing a heartbeat.
 
         self.deinit(gpa);
-        try self.init(gpa, io);
+        try self.init(gpa, io_std);
     }
 
     pub fn queue_declare(self: *AmqpContext, options: amqp.QueueDeclareOptions) void {
@@ -924,13 +924,13 @@ const TmpRabbitMQ = struct {
 
     pub fn init(
         gpa: std.mem.Allocator,
-        io: std.Io,
+        io_std: std.Io,
         environ_map: *const std.process.Environ.Map,
         options: struct {
             image: []const u8,
         },
     ) !TmpRabbitMQ {
-        const shell = try Shell.create(gpa, io, environ_map);
+        const shell = try Shell.create(gpa, io_std, environ_map);
         defer shell.destroy();
 
         const id = shell.io.crypto_random_int(u128);
@@ -946,7 +946,7 @@ const TmpRabbitMQ = struct {
                 .image = options.image,
             },
         );
-        errdefer process.kill(io);
+        errdefer process.kill(io_std);
 
         const host: stdx.SocketAddress = host: {
             const stdout = try try_execute(shell, "docker port {id}", .{ .id = id });
@@ -982,17 +982,17 @@ const TmpRabbitMQ = struct {
     pub fn stop(
         self: *TmpRabbitMQ,
         gpa: std.mem.Allocator,
-        io: std.Io,
+        io_std: std.Io,
         environ_map: *const std.process.Environ.Map,
     ) !void {
-        const shell = try Shell.create(gpa, io, environ_map);
+        const shell = try Shell.create(gpa, io_std, environ_map);
         defer shell.destroy();
 
         try shell.exec(
             "docker stop {id}",
             .{ .id = self.id },
         );
-        const term = self.process.wait(io) catch unreachable;
+        const term = self.process.wait(io_std) catch unreachable;
         assert(term == .exited);
     }
 };

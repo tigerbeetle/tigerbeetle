@@ -16,19 +16,19 @@ pub fn main(init: std.process.Init) !void {
 
 fn collect_files(
     arena: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     url_prefix: []const u8,
     search_path: []const u8,
 ) ![]const []const u8 {
     var file_paths: std.ArrayList([]const u8) = .empty;
 
-    var dir = try std.Io.Dir.cwd().openDir(io, search_path, .{ .iterate = true });
-    defer dir.close(io);
+    var dir = try std.Io.Dir.cwd().openDir(io_std, search_path, .{ .iterate = true });
+    defer dir.close(io_std);
 
     var walker = try dir.walk(arena);
     defer walker.deinit();
 
-    while (try walker.next(io)) |entry| {
+    while (try walker.next(io_std)) |entry| {
         if (entry.kind == .file) {
             // Normalize requests by using directory with trailing slash instead of index.html.
             if (std.mem.endsWith(u8, entry.path, "index.html")) {
@@ -47,7 +47,7 @@ fn collect_files(
 
 fn write_service_worker(
     arena: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     cache_name: []const u8,
     file_paths: []const []const u8,
 ) !void {
@@ -61,5 +61,5 @@ fn write_service_worker(
         .files_to_cache = file_paths_json,
     });
 
-    try std.Io.File.stdout().writeStreamingAll(io, html.string());
+    try std.Io.File.stdout().writeStreamingAll(io_std, html.string());
 }

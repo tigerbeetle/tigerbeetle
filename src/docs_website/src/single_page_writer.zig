@@ -163,8 +163,8 @@ const AttributeIterator = struct {
     }
 };
 
-fn read_file(io: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
-    const result = try dir.readFile(io, path, page_buffer);
+fn read_file(io_std: std.Io, dir: std.Io.Dir, path: []const u8, page_buffer: []u8) ![]const u8 {
+    const result = try dir.readFile(io_std, path, page_buffer);
     if (result.len == page_buffer.len) return error.FileToLarge;
     return result;
 }

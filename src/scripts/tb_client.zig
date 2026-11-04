@@ -20,7 +20,7 @@ const Shell = stdx.Shell;
 pub const CLIArgs = struct {};
 
 const TestingContext = struct {
-    io: std.Io,
+    io_std: std.Io,
     mutex: std.Io.Mutex = .init,
     cond: std.Io.Condition = .init,
     reply: ?struct {
@@ -31,11 +31,11 @@ const TestingContext = struct {
     } = null,
 
     pub fn wait_pending(self: *TestingContext) void {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
+        self.mutex.lockUncancelable(self.io_std);
+        defer self.mutex.unlock(self.io_std);
 
         while (self.reply == null) {
-            self.cond.waitUncancelable(self.io, &self.mutex);
+            self.cond.waitUncancelable(self.io_std, &self.mutex);
         }
     }
 
@@ -49,8 +49,8 @@ const TestingContext = struct {
         _ = result;
         var self: *TestingContext = @ptrCast(@alignCast(tb_batch.*.user_data.?));
 
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
+        self.mutex.lockUncancelable(self.io_std);
+        defer self.mutex.unlock(self.io_std);
 
         assert(self.reply == null);
         self.reply = .{
@@ -59,7 +59,7 @@ const TestingContext = struct {
             .timestamp = timestamp,
             .result_size = result_size,
         };
-        self.cond.signal(self.io);
+        self.cond.signal(self.io_std);
     }
 };
 
@@ -121,8 +121,8 @@ fn test_init(gpa: std.mem.Allocator, _: []const u8) !void {
 }
 
 // Asserts the validation rules associated with the client status.
-fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
-    var request: TestingContext = .{ .io = io };
+fn test_client_status(gpa: std.mem.Allocator, io_std: std.Io, addresses: []const u8) !void {
+    var request: TestingContext = .{ .io_std = io_std };
     var batch: Batch = .{
         .operation = @intFromEnum(Operation.create_accounts),
         .user_data = &request,
@@ -166,7 +166,7 @@ fn test_client_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8)
 }
 
 // Asserts the validation rules associated with the "BatchStatus" enum.
-fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) !void {
+fn test_batch_status(gpa: std.mem.Allocator, io_std: std.Io, addresses: []const u8) !void {
     var client: ClientInterface = undefined;
     const cluster_id: u128 = 0;
     const tb_context: usize = 42;
@@ -182,12 +182,12 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
 
     const submit = struct {
         fn submit(
-            client_io: std.Io,
+            client_io_std: std.Io,
             client_interface: *ClientInterface,
             operation: u8,
             request_size: u32,
         ) !tb_client.BatchStatus {
-            var request: TestingContext = .{ .io = client_io };
+            var request: TestingContext = .{ .io_std = client_io_std };
             var batch: Batch = .{
                 .operation = operation,
                 .user_data = &request,
@@ -213,7 +213,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
 
     // Messages larger than constants.message_body_size_max should return "too_much_data":
     try std.testing.expectEqual(BatchStatus.too_much_data, try submit(
-        io,
+        io_std,
         &client,
         @intFromEnum(tb_client.Operation.create_transfers),
         constants.message_body_size_max + @sizeOf(tb_client.exports.tb_transfer_t),
@@ -222,15 +222,15 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     // All reserved and unknown operations should return "invalid_operation":
     try std.testing.expectEqual(
         BatchStatus.invalid_operation,
-        try submit(io, &client, 0, @sizeOf(u128)),
+        try submit(io_std, &client, 0, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
         BatchStatus.invalid_operation,
-        try submit(io, &client, 1, @sizeOf(u128)),
+        try submit(io_std, &client, 1, @sizeOf(u128)),
     );
     try std.testing.expectEqual(
         BatchStatus.invalid_operation,
-        try submit(io, &client, std.math.maxInt(u8), @sizeOf(u128)),
+        try submit(io_std, &client, std.math.maxInt(u8), @sizeOf(u128)),
     );
 
     // Messages not a multiple of the event size
@@ -238,7 +238,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.invalid_data_size,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.create_transfers),
             @sizeOf(tb_client.exports.tb_transfer_t) - 1,
@@ -247,7 +247,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.invalid_data_size,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.lookup_transfers),
             @sizeOf(u128) + 1,
@@ -256,7 +256,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.invalid_data_size,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.lookup_accounts),
             @sizeOf(u128) * 2.5,
@@ -267,7 +267,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.ok,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.create_accounts),
             0,
@@ -278,7 +278,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.invalid_data_size,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.query_accounts),
             0,
@@ -287,7 +287,7 @@ fn test_batch_status(gpa: std.mem.Allocator, io: std.Io, addresses: []const u8) 
     try std.testing.expectEqual(
         BatchStatus.invalid_data_size,
         try submit(
-            io,
+            io_std,
             &client,
             @intFromEnum(Operation.query_transfers),
             @sizeOf(tb_client.exports.tb_query_filter_t) * 2,

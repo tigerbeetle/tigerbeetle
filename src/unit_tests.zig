@@ -131,7 +131,7 @@ const quine =
     \\    }
     \\}
     \\
-    \\fn unit_test_files(arena: std.mem.Allocator, io: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
+    \\fn unit_test_files(arena: std.mem.Allocator, io_std: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
     \\    // Different platforms can walk the directory in different orders.
     \\    // Store the paths and sort them to ensure consistency.
     \\    var result: std.ArrayList([]const u8) = .empty;
@@ -139,12 +139,12 @@ const quine =
     \\    var src_walker = try src_dir.walkSelectively(arena);
     \\    defer src_walker.deinit();
     \\
-    \\    while (try src_walker.next(io)) |entry| {
+    \\    while (try src_walker.next(io_std)) |entry| {
     \\        if (entry.kind == .directory) {
     \\            // Skip build outputs and fetched packages, which can change concurrently.
     \\            if (std.mem.eql(u8, entry.basename, "zig-out")) continue;
     \\            if (std.mem.eql(u8, entry.basename, "zig-pkg")) continue;
-    \\            try src_walker.enter(io, entry);
+    \\            try src_walker.enter(io_std, entry);
     \\        }
     \\        if (entry.kind != .file) continue;
     \\
@@ -168,7 +168,7 @@ const quine =
     \\        if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
     \\
-    \\        const contents = try src_dir.readFileAlloc(io, entry_path, arena, .limited(1 * MiB));
+    \\        const contents = try src_dir.readFileAlloc(io_std, entry_path, arena, .limited(1 * MiB));
     \\        var line_iterator = std.mem.splitScalar(u8, contents, '\n');
     \\        while (line_iterator.next()) |line| {
     \\            const line_trimmed = std.mem.trimStart(u8, line, " ");
@@ -264,7 +264,7 @@ test quine {
     }
 }
 
-fn unit_test_files(arena: std.mem.Allocator, io: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
+fn unit_test_files(arena: std.mem.Allocator, io_std: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
     // Different platforms can walk the directory in different orders.
     // Store the paths and sort them to ensure consistency.
     var result: std.ArrayList([]const u8) = .empty;
@@ -272,12 +272,12 @@ fn unit_test_files(arena: std.mem.Allocator, io: std.Io, src_dir: std.Io.Dir) ![
     var src_walker = try src_dir.walkSelectively(arena);
     defer src_walker.deinit();
 
-    while (try src_walker.next(io)) |entry| {
+    while (try src_walker.next(io_std)) |entry| {
         if (entry.kind == .directory) {
             // Skip build outputs and fetched packages, which can change concurrently.
             if (std.mem.eql(u8, entry.basename, "zig-out")) continue;
             if (std.mem.eql(u8, entry.basename, "zig-pkg")) continue;
-            try src_walker.enter(io, entry);
+            try src_walker.enter(io_std, entry);
         }
         if (entry.kind != .file) continue;
 
@@ -301,7 +301,7 @@ fn unit_test_files(arena: std.mem.Allocator, io: std.Io, src_dir: std.Io.Dir) ![
         if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
         if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
 
-        const contents = try src_dir.readFileAlloc(io, entry_path, arena, .limited(1 * MiB));
+        const contents = try src_dir.readFileAlloc(io_std, entry_path, arena, .limited(1 * MiB));
         var line_iterator = std.mem.splitScalar(u8, contents, '\n');
         while (line_iterator.next()) |line| {
             const line_trimmed = std.mem.trimStart(u8, line, " ");

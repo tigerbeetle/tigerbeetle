@@ -21,7 +21,7 @@ port: u16,
 /// For convenience, the same port pre-converted to string.
 port_str: []const u8,
 
-io: std.Io,
+io_std: std.Io,
 tmp_dir_path: []const u8,
 
 // A separate thread for reading process stderr without blocking it. The process must be terminated
@@ -34,14 +34,14 @@ process: std.process.Child,
 
 pub fn init(
     gpa: std.mem.Allocator,
-    io: std.Io,
+    io_std: std.Io,
     environ_map: *const std.process.Environ.Map,
     options: struct {
         development: bool,
         prebuilt: ?[]const u8,
     },
 ) !TmpTigerBeetle {
-    const shell = try Shell.create(gpa, io, environ_map);
+    const shell = try Shell.create(gpa, io_std, environ_map);
     defer shell.destroy();
 
     var from_source_path: ?[:0]const u8 = null;
@@ -54,17 +54,17 @@ pub fn init(
         //
         // TODO: just run `zig build run` unconditionally here, when that doesn't do spurious
         // rebuilds.
-        _ = shell.project_root.statFile(io, tigerbeetle_exe, .{}) catch {
+        _ = shell.project_root.statFile(io_std, tigerbeetle_exe, .{}) catch {
             log.info("building TigerBeetle", .{});
             try shell.exec_zig("build", .{});
 
-            _ = try shell.project_root.statFile(io, tigerbeetle_exe, .{});
+            _ = try shell.project_root.statFile(io_std, tigerbeetle_exe, .{});
         };
 
-        from_source_path = try shell.project_root.realPathFileAlloc(io, tigerbeetle_exe, gpa);
+        from_source_path = try shell.project_root.realPathFileAlloc(io_std, tigerbeetle_exe, gpa);
     } else {
         // The build system passes paths relative to the current working directory.
-        from_source_path = try std.Io.Dir.cwd().realPathFileAlloc(io, options.prebuilt.?, gpa);
+        from_source_path = try std.Io.Dir.cwd().realPathFileAlloc(io_std, options.prebuilt.?, gpa);
     }
 
     const tigerbeetle_exe: []const u8 = try gpa.dupe(u8, from_source_path.?);
@@ -73,7 +73,7 @@ pub fn init(
 
     const tmp_dir_path = try gpa.dupe(u8, try shell.create_tmp_dir());
     errdefer gpa.free(tmp_dir_path);
-    errdefer std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
+    errdefer std.Io.Dir.cwd().deleteTree(io_std, tmp_dir_path) catch {};
 
     const data_file: []const u8 = try std.fs.path.join(gpa, &.{ tmp_dir_path, "0_0.tigerbeetle" });
     defer gpa.free(data_file);
@@ -103,11 +103,11 @@ pub fn init(
         if (reader_maybe) |reader| {
             reader.stop(gpa, &process); // Will log stderr.
         } else {
-            process.kill(io);
+            process.kill(io_std);
         }
     }
 
-    reader_maybe = try StreamReader.start(gpa, io, process.stderr.?);
+    reader_maybe = try StreamReader.start(gpa, io_std, process.stderr.?);
 
     const port = port: {
         var exit_status: ?std.process.Child.Term = null;
@@ -116,11 +116,11 @@ pub fn init(
             .{exit_status},
         );
 
-        var port_reader = process.stdout.?.readerStreaming(io, &.{});
+        var port_reader = process.stdout.?.readerStreaming(io_std, &.{});
         var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
         const port_buf_len = try port_reader.interface.readSliceShort(&port_buf);
         if (port_buf_len == 0) {
-            exit_status = try process.wait(io);
+            exit_status = try process.wait(io_std);
             return error.NoPort;
         }
 
@@ -134,7 +134,7 @@ pub fn init(
         .tigerbeetle_exe = tigerbeetle_exe,
         .port = port,
         .port_str = port_str,
-        .io = io,
+        .io_std = io_std,
         .tmp_dir_path = tmp_dir_path,
         .stderr_reader = reader_maybe.?,
         .process = process,
@@ -149,7 +149,7 @@ pub fn deinit(tb: *TmpTigerBeetle, gpa: std.mem.Allocator) void {
     tb.stderr_reader.stop(gpa, &tb.process);
     assert(tb.process.id == null);
     gpa.free(tb.port_str);
-    std.Io.Dir.cwd().deleteTree(tb.io, tb.tmp_dir_path) catch {};
+    std.Io.Dir.cwd().deleteTree(tb.io_std, tb.tmp_dir_path) catch {};
     gpa.free(tb.tmp_dir_path);
     gpa.free(tb.tigerbeetle_exe);
 }
@@ -163,16 +163,16 @@ const StreamReader = struct {
 
     log_stderr: LogStderr = LogStderr.init(.on_early_exit),
     thread: std.Thread,
-    io: std.Io,
+    io_std: std.Io,
     file: std.Io.File,
 
-    pub fn start(gpa: std.mem.Allocator, io: std.Io, file: std.Io.File) !*StreamReader {
+    pub fn start(gpa: std.mem.Allocator, io_std: std.Io, file: std.Io.File) !*StreamReader {
         var result = try gpa.create(StreamReader);
         errdefer gpa.destroy(result);
 
         result.* = .{
             .thread = undefined,
-            .io = io,
+            .io_std = io_std,
             .file = file,
         };
 
@@ -194,7 +194,7 @@ const StreamReader = struct {
         }
         assert(process.stderr != null);
         self.thread.join();
-        _ = process.wait(self.io) catch unreachable;
+        _ = process.wait(self.io_std) catch unreachable;
         assert(process.stderr == null);
         gpa.destroy(self);
     }
@@ -207,7 +207,7 @@ const StreamReader = struct {
         defer buffer.deinit(allocator);
 
         // NB: don't use `readAllAlloc` to get partial output in case of errors.
-        var file_reader = reader.file.readerStreaming(reader.io, &.{});
+        var file_reader = reader.file.readerStreaming(reader.io_std, &.{});
         file_reader.interface.appendRemaining(allocator, &buffer, .limited(100 * MiB)) catch {};
         switch (reader.log_stderr.load(.seq_cst)) {
             .on_early_exit, .yes => {

@@ -548,9 +548,9 @@ fn command_start(
         // thread is simpler, and gives us _un_graceful shutdown, which is exactly what we want
         // to keep behavior close to the normal case.
         const watchdog = try std.Thread.spawn(.{}, struct {
-            fn thread_main(watchdog_io: std.Io) void {
+            fn thread_main(watchdog_io_std: std.Io) void {
                 var buf: [1]u8 = .{0};
-                _ = std.Io.File.stdin().readStreaming(watchdog_io, &.{&buf}) catch {};
+                _ = std.Io.File.stdin().readStreaming(watchdog_io_std, &.{&buf}) catch {};
                 log.info("stdin closed, exiting", .{});
                 std.process.exit(0);
             }

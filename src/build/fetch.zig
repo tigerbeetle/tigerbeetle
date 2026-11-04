@@ -12,7 +12,7 @@ pub const std_options: std.Options = .{
 pub fn main(init: std.process.Init) !void {
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena = arena_instance.allocator();
-    const io = init.io;
+    const io_std = init.io;
 
     const args = try init.minimal.args.toSlice(arena);
     assert(args.len == 6 or args.len == 7);
@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     if (hash_optional) |hash| {
         // Fast path --- don't touch the Internet if we have the hash locally.
         const cached = path_join(arena, &.{ "zig-pkg", hash, file_name });
-        if (std.Io.Dir.cwd().copyFile(cached, std.Io.Dir.cwd(), out, io, .{})) {
+        if (std.Io.Dir.cwd().copyFile(cached, std.Io.Dir.cwd(), out, io_std, .{})) {
             log.debug("download skipped: cache hit", .{});
             return;
         } else |_| { // Time to ask for forgiveness!
@@ -34,7 +34,7 @@ pub fn main(init: std.process.Init) !void {
         log.debug("download: no hash", .{});
     }
 
-    const hash = try fetch(arena, io, .{
+    const hash = try fetch(arena, io_std, .{
         .zig = zig,
         .tmp = path_join(arena, &.{ global_cache, "tmp" }),
         .url = url,
@@ -55,33 +55,33 @@ pub fn main(init: std.process.Init) !void {
     const cached = path_join(arena, &.{ "zig-pkg", hash, file_name });
     errdefer log.err("copying from {s}", .{cached});
 
-    try std.Io.Dir.cwd().copyFile(cached, std.Io.Dir.cwd(), out, io, .{});
+    try std.Io.Dir.cwd().copyFile(cached, std.Io.Dir.cwd(), out, io_std, .{});
 }
 
 /// If curl is available, use it for robust downloads, and then
 /// `zig fetch` a local file to get the hash. Otherwise, fetch
 /// the url directly. `zig fetch` unpacks the package into `./zig-pkg/$hash`.
-fn fetch(arena: Allocator, io: std.Io, options: struct {
+fn fetch(arena: Allocator, io_std: std.Io, options: struct {
     zig: []const u8,
     tmp: []const u8,
     url: []const u8,
 }) ![]const u8 {
-    if (stdb.exec_ok(arena, io, &.{ "curl", "--version" })) {
+    if (stdb.exec_ok(arena, io_std, &.{ "curl", "--version" })) {
         log.debug("download: curl", .{});
         const url_file_name = options.url[std.mem.lastIndexOf(u8, options.url, "/").?..];
         var random_bytes: [8]u8 = undefined;
-        io.random(&random_bytes);
+        io_std.random(&random_bytes);
         const tmp_dir = path_join(arena, &.{
             options.tmp,
             &std.fmt.bytesToHex(random_bytes, .lower),
         });
-        defer std.Io.Dir.cwd().deleteTree(io, tmp_dir) catch {};
+        defer std.Io.Dir.cwd().deleteTree(io_std, tmp_dir) catch {};
 
-        try std.Io.Dir.cwd().createDirPath(io, tmp_dir);
+        try std.Io.Dir.cwd().createDirPath(io_std, tmp_dir);
 
         const curl_output = path_join(arena, &.{ tmp_dir, url_file_name });
         // TODO Go back to using stdb.exec once this curl/zip issue is debugged.
-        const curl_result = std.process.run(arena, io, .{
+        const curl_result = std.process.run(arena, io_std, .{
             .argv = &(.{
                 "curl",             "--retry-all-errors",
                 "--retry",          "5",
@@ -103,10 +103,10 @@ fn fetch(arena: Allocator, io: std.Io, options: struct {
             log.err("curl error: {}", .{curl_result.term});
             return error.Exec;
         }
-        return try stdb.exec(arena, io, &.{ options.zig, "fetch", curl_output });
+        return try stdb.exec(arena, io_std, &.{ options.zig, "fetch", curl_output });
     }
     log.debug("download: zig fetch", .{});
-    return try stdb.exec(arena, io, &.{ options.zig, "fetch", options.url });
+    return try stdb.exec(arena, io_std, &.{ options.zig, "fetch", options.url });
 }
 
 fn path_join(arena: Allocator, components: []const []const u8) []const u8 {
