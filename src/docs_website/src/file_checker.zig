@@ -56,7 +56,12 @@ fn validate_dir(arena: std.mem.Allocator, io_std: std.Io, path: []const u8) !voi
     defer walker.deinit();
 
     while (try walker.next(io_std)) |entry| switch (entry.kind) {
-        .file => try validate_file(.{ .arena = arena, .io_std = io_std, .dir = dir, .path = entry.path }),
+        .file => try validate_file(.{
+            .arena = arena,
+            .io_std = io_std,
+            .dir = dir,
+            .path = entry.path,
+        }),
         .directory => {},
         else => {
             log.err("unexpected file type: '{s}'", .{
@@ -167,7 +172,11 @@ fn check_links(context: FileValidationContext) !void {
 
     var link_iterator = LinkIterator.init(html);
     errdefer log.err("[link checker] error in {s}:{}", .{
-        context.dir.realPathFileAlloc(context.io_std, context.path, context.arena) catch unreachable,
+        context.dir.realPathFileAlloc(
+            context.io_std,
+            context.path,
+            context.arena,
+        ) catch unreachable,
         link_iterator.line_number,
     });
 

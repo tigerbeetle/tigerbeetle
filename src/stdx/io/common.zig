@@ -246,7 +246,10 @@ pub fn aof_blocking_close(io_std: std.Io, fd: posix.fd_t) void {
     file.close(io_std);
 }
 
-pub fn aof_blocking_stat(io_std: std.Io, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
+pub fn aof_blocking_stat(
+    io_std: std.Io,
+    path: []const u8,
+) std.Io.Dir.StatFileError!std.Io.File.Stat {
     return std.Io.Dir.cwd().statFile(io_std, path, .{});
 }
 

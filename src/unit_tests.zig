@@ -131,7 +131,11 @@ const quine =
     \\    }
     \\}
     \\
-    \\fn unit_test_files(arena: std.mem.Allocator, io_std: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
+    \\fn unit_test_files(
+    \\    arena: std.mem.Allocator,
+    \\    io_std: std.Io,
+    \\    src_dir: std.Io.Dir,
+    \\) ![]const []const u8 {
     \\    // Different platforms can walk the directory in different orders.
     \\    // Store the paths and sort them to ensure consistency.
     \\    var result: std.ArrayList([]const u8) = .empty;
@@ -264,7 +268,11 @@ test quine {
     }
 }
 
-fn unit_test_files(arena: std.mem.Allocator, io_std: std.Io, src_dir: std.Io.Dir) ![]const []const u8 {
+fn unit_test_files(
+    arena: std.mem.Allocator,
+    io_std: std.Io,
+    src_dir: std.Io.Dir,
+) ![]const []const u8 {
     // Different platforms can walk the directory in different orders.
     // Store the paths and sort them to ensure consistency.
     var result: std.ArrayList([]const u8) = .empty;
