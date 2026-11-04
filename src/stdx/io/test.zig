@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const posix = stdx.posix;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 const MiB = stdx.MiB;
 const Instant = stdx.Instant;
 const Duration = stdx.Duration;
@@ -852,4 +853,73 @@ test "chained zero-delay callbacks complete in a single flush" {
             }
         }
     }.run_test();
+}
+
+test "random bytes smoke test" {
+    // This smoke test tries to discover bugs like using the wrong syscall, reading from
+    // /dev/null instead of /dev/random, or not looping on short reads in the IO-specific
+    // random bytes generator.
+    //
+    // The test uses real randomness and is therefore flaky on purpose. Assuming crypto_random_bytes
+    // returns real randomness, each assertion below fails with probability around 2^-120 or less.
+    // Each fuzz iteration can be up to 2^26 assertions. As long as we have fewer than 2^30 fuzz
+    // iterations, the probability of a flaky failure is < 2^-64.
+
+    const expect = std.testing.expect;
+
+    var io = try IO.init(32, 0, null);
+    defer io.deinit();
+
+    var prng = stdx.PRNG.from_seed_testing();
+    var buffer: [128 * KiB]u8 = @splat(0);
+    var buffer_before: [128 * KiB]u8 = undefined;
+
+    var iterations: stdx.PRNG.FuzzIterations = .{};
+    while (iterations.more()) {
+        // Random number of bytes between 256 and 131,072.
+        const bytes_size = prng.int_inclusive(u32, buffer.len - 256) + 256;
+        const bytes = buffer[0..bytes_size];
+        stdx.copy_disjoint(.exact, u8, buffer_before[0..bytes_size], bytes);
+
+        // Get truly random bytes. This is the reason the test case can flake.
+        io.crypto_random_bytes(bytes);
+
+        // Pick a random chunk size between 16 and 64.
+        const chunk_size: u32 = 16 + prng.int_inclusive(u32, 48);
+        const chunk_count = @divFloor(bytes_size, chunk_size);
+
+        for (0..chunk_count) |chunk_index| {
+            const chunk_start = chunk_index * chunk_size;
+            const chunk = bytes[chunk_start..][0..chunk_size];
+
+            // Every full chunk was overwritten: <= 2^-128.
+            try expect(!std.mem.eql(
+                u8,
+                chunk,
+                buffer_before[chunk_start..][0..chunk_size],
+            ));
+
+            // Not a constant fill (all zeros or any other byte): <= 2^8 / 2^128 = 2^-120.
+            try expect(!std.mem.allEqual(u8, chunk, chunk[0]));
+
+            // We are looping over each remaining chunk for each chunk in bytes. Since we can have
+            // up to 8192 chunks, this could be up to (8192 * 8191) / 2 <= 2^26 iterations.
+            for (chunk_index + 1..chunk_count) |other_index| {
+                const other_start = other_index * chunk_size;
+                const other = bytes[other_start..][0..chunk_size];
+
+                // Chunk does not equal any later aligned chunk: <= 2^-128.
+                try expect(!std.mem.eql(u8, chunk, other));
+            }
+        }
+
+        const tail_start = @min(chunk_count * chunk_size, bytes_size - 16);
+
+        // The tail was overwritten too: <= 2^-128.
+        try expect(!std.mem.eql(
+            u8,
+            bytes[tail_start..],
+            buffer_before[tail_start..bytes_size],
+        ));
+    }
 }
