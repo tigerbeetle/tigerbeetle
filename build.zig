@@ -1716,6 +1716,8 @@ fn build_tb_client(
 /// and (2) to align 8-byte align Mach-O members (Apple's ld rejects them in newer versions).
 ///
 /// `zig ar` uses basenames instead of full paths, aligns it, and `D` zeroes timestamps/uids/modes.
+///
+/// TODO(Zig): Alignment (2) is fixed in zig 17, so we can remove this part once upgraded.
 fn build_static_library(
     b: *std.Build,
     name: []const u8,
@@ -1750,6 +1752,12 @@ fn build_static_library(
         .windows => b.fmt("{s}.lib", .{name}),
         else => b.fmt("lib{s}.a", .{name}),
     };
+    // Note: zig_ar operations and modifiers are single-letter, so we cannot use long forms there.
+    // - r (operation): replace or insert files into the archive
+    // - c (modifier): do not warn that the archive had to be created (we're creating one!)
+    // - s (modifier): create an archive index
+    // - D (modifier): use zero for timestamps and modes (important for reproducibility)
+    // Besides `D`, the actual effects we want are all inherent to zig ar (no paths, alignment).
     const zig_ar = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD", switch (os) {
         .macos => "--format=darwin",
         .windows => "--format=coff",
