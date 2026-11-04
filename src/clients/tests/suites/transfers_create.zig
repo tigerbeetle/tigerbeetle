@@ -77,9 +77,13 @@ test "returns exists for a duplicate transfer" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
     const transfer_id = ct.generate_id();
-    client.create_accounts(.{
+    const account_results = client.create_accounts(.{
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
+    });
+    ct.assert_equal(account_results, .{
+        .{ .status = .created },
+        .{ .status = .created },
     });
     const created_results = client.create_transfers(.{
         .{

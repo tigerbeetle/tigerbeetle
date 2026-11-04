@@ -715,7 +715,7 @@ func TestConformance(t *testing.T) {
 			debitAccountID := ID()
 			creditAccountID := ID()
 			transferID := ID()
-			_, err := client.CreateAccounts([]Account{
+			accountResults, err := client.CreateAccounts([]Account{
 				{
 					ID:     debitAccountID,
 					Ledger: 1,
@@ -730,6 +730,9 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			assert.Len(t, accountResults, 2)
+			assert.Equal(t, AccountCreated, accountResults[0].Status)
+			assert.Equal(t, AccountCreated, accountResults[1].Status)
 			createdResults, err := client.CreateTransfers([]Transfer{
 				{
 					ID:              transferID,

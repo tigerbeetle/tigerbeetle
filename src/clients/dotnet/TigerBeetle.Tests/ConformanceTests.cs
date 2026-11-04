@@ -638,7 +638,7 @@ public class ConformanceTests
         var debitAccountId = ID.Create();
         var creditAccountId = ID.Create();
         var transferId = ID.Create();
-        client.CreateAccounts(new Account[] {
+        var accountResults = client.CreateAccounts(new Account[] {
             new()
             {
                 Id = debitAccountId,
@@ -652,6 +652,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
+        Assert.AreEqual(2, accountResults.Length);
+        Assert.AreEqual(CreateAccountStatus.Created, accountResults[0].Status);
+        Assert.AreEqual(CreateAccountStatus.Created, accountResults[1].Status);
         var createdResults = client.CreateTransfers(new Transfer[] {
             new()
             {
@@ -6825,7 +6828,7 @@ public class ConformanceTests
         var debitAccountId = ID.Create();
         var creditAccountId = ID.Create();
         var transferId = ID.Create();
-        await client.CreateAccountsAsync(new Account[] {
+        var accountResults = await client.CreateAccountsAsync(new Account[] {
             new()
             {
                 Id = debitAccountId,
@@ -6839,6 +6842,9 @@ public class ConformanceTests
                 Code = 1,
             },
         });
+        Assert.AreEqual(2, accountResults.Length);
+        Assert.AreEqual(CreateAccountStatus.Created, accountResults[0].Status);
+        Assert.AreEqual(CreateAccountStatus.Created, accountResults[1].Status);
         var createdResults = await client.CreateTransfersAsync(new Transfer[] {
             new()
             {

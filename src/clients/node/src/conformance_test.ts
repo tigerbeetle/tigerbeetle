@@ -742,7 +742,7 @@ test(
     const debit_account_id = id()
     const credit_account_id = id()
     const transfer_id = id()
-    await client.createAccounts([
+    const account_results = await client.createAccounts([
       {
         ...account_default,
         id: debit_account_id,
@@ -756,6 +756,9 @@ test(
         code: 1,
       },
     ])
+    assert.strictEqual(account_results.length, 2)
+    assert.strictEqual(account_results[0].status, CreateAccountStatus.created)
+    assert.strictEqual(account_results[1].status, CreateAccountStatus.created)
     const created_results = await client.createTransfers([
       {
         ...transfer_default,

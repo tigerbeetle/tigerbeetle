@@ -560,7 +560,7 @@ class TestConformance < TigerBeetleIntegrationTest
     debit_account_id = TB.id
     credit_account_id = TB.id
     transfer_id = TB.id
-    @client.create_accounts(
+    account_results = @client.create_accounts(
       [
         TB::Account.new(
           id: debit_account_id,
@@ -574,6 +574,9 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    assert_equal(2, account_results.length)
+    assert_equal(TB::CreateAccountStatus::CREATED, account_results[0].status)
+    assert_equal(TB::CreateAccountStatus::CREATED, account_results[1].status)
     created_results = @client.create_transfers(
       [
         TB::Transfer.new(

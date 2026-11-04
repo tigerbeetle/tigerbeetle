@@ -541,7 +541,7 @@ def test_create_transfers_returns_exists_for_a_duplicate_transfer(client):
     debit_account_id = tb.id()
     credit_account_id = tb.id()
     transfer_id = tb.id()
-    client.create_accounts(
+    account_results = client.create_accounts(
         [
             tb.Account(
                 id=debit_account_id,
@@ -555,6 +555,9 @@ def test_create_transfers_returns_exists_for_a_duplicate_transfer(client):
             ),
         ]
     )
+    assert len(account_results) == 2
+    assert account_results[0].status == tb.CreateAccountStatus.CREATED
+    assert account_results[1].status == tb.CreateAccountStatus.CREATED
     created_results = client.create_transfers(
         [
             tb.Transfer(
@@ -7284,7 +7287,7 @@ async def test_create_transfers_returns_exists_for_a_duplicate_transfer_async(cl
     debit_account_id = tb.id()
     credit_account_id = tb.id()
     transfer_id = tb.id()
-    await client.create_accounts(
+    account_results = await client.create_accounts(
         [
             tb.Account(
                 id=debit_account_id,
@@ -7298,6 +7301,9 @@ async def test_create_transfers_returns_exists_for_a_duplicate_transfer_async(cl
             ),
         ]
     )
+    assert len(account_results) == 2
+    assert account_results[0].status == tb.CreateAccountStatus.CREATED
+    assert account_results[1].status == tb.CreateAccountStatus.CREATED
     created_results = await client.create_transfers(
         [
             tb.Transfer(

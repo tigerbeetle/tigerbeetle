@@ -718,6 +718,7 @@ public class ConformanceTest {
         final var debitAccountId = UInt128.id();
         final var creditAccountId = UInt128.id();
         final var transferId = UInt128.id();
+        final CreateAccountResultBatch accountResults;
         {
             final var accountBatch = new AccountBatch(2);
             accountBatch.add();
@@ -728,8 +729,13 @@ public class ConformanceTest {
             accountBatch.setId(creditAccountId);
             accountBatch.setLedger(1);
             accountBatch.setCode(1);
-            client.createAccounts(accountBatch);
+            accountResults = client.createAccounts(accountBatch);
         }
+        assertEquals(2, accountResults.getLength());
+        assertTrue(accountResults.next());
+        assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
+        assertTrue(accountResults.next());
+        assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
         final CreateTransferResultBatch createdResults;
         {
             final var transferBatch = new TransferBatch(1);
@@ -7345,6 +7351,7 @@ public class ConformanceTest {
         final var debitAccountId = UInt128.id();
         final var creditAccountId = UInt128.id();
         final var transferId = UInt128.id();
+        final CreateAccountResultBatch accountResults;
         {
             final var accountBatch = new AccountBatch(2);
             accountBatch.add();
@@ -7355,8 +7362,13 @@ public class ConformanceTest {
             accountBatch.setId(creditAccountId);
             accountBatch.setLedger(1);
             accountBatch.setCode(1);
-            client.createAccountsAsync(accountBatch).get();
+            accountResults = client.createAccountsAsync(accountBatch).get();
         }
+        assertEquals(2, accountResults.getLength());
+        assertTrue(accountResults.next());
+        assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
+        assertTrue(accountResults.next());
+        assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
         final CreateTransferResultBatch createdResults;
         {
             final var transferBatch = new TransferBatch(1);
