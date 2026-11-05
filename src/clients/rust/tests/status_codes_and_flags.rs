@@ -235,3 +235,16 @@ fn round_trip_create_status_unknown() {
         format!("CreateTransferStatus({status_unknown})"),
     );
 }
+
+// The binding must name the symbol that `libtb_client` actually exports, otherwise any call fails
+// to link. Unregistering when no callback is registered is a harmless call with a known result.
+#[test]
+fn register_log_callback_links() {
+    use tb::tb_client as tbc;
+
+    let status = unsafe { tbc::tb_client_register_log_callback(None, false) };
+    assert_eq!(
+        status,
+        tbc::TB_REGISTER_LOG_CALLBACK_STATUS_TB_REGISTER_LOG_CALLBACK_NOT_REGISTERED,
+    );
+}
