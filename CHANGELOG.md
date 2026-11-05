@@ -3,29 +3,316 @@
 Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes and critical issues!
 
-## TigerBeetle (unreleased)
+## TigerBeetle 0.18.0
 
-Released: 2026-07-10
+Released: 2026-11-02
+
+This release is larger than usual due to some major adjustments we have been
+making to our development infrastructure over the past few months. Going forward,
+we will be back to our regular weekly release cadence.
+
+**Notable correctness bug fixes**
+
+* [90f13b8](https://github.com/tigerbeetle/tigerbeetle/commit/90f13b812792f53dc4c2a53e8f61e952ece968ab):
+  If the following features are used simultaneously:
+  * `import` flag to import historical data into the cluster.
+  * CDC to re-export the data elsewhere.
+  * Pending transfers with timeouts _intersecting with imported events_.
+
+  CDC might have missed some events. Replaying CDC from scratch after upgrading
+  will fetch any missing data.
+
+**Notable features**
+
+* [Rust Client](https://docs.rs/tigerbeetle) has been published! It also includes
+  a new flavor of `*_reusable` APIs (for example, `create_transfers_reusable`)
+  that allow users to pass in their own request/response buffers.
+* TigerBeetle clients running atop Linux now use _epoll_ instead of _io_uring_.
+
+### Safety And Performance
+
+- [e317c9c](https://github.com/tigerbeetle/tigerbeetle/commit/e317c9c11797bfd653c02354a507c4bd780bb9be)
+
+  Correct an overzealous assertion that disallowed posting/voiding a timed
+  pending transfer using an imported transfer.
+
+- [e91c24f](https://github.com/tigerbeetle/tigerbeetle/commit/e91c24f03a744ea022a49bf5994f7ebc265703f6)
+
+  Fix a replica crash when an imported event's target timestamp is greater
+  than the _event timestamp_ (timestamp of a particular event in the batch),
+  but smaller than the _prepare timestamp_ (timestamp of the last event in
+  the batch). Now, we appropriately return `imported_event_timestamp_must_not_advance`.
+
+- [90f13b8](https://github.com/tigerbeetle/tigerbeetle/commit/90f13b812792f53dc4c2a53e8f61e952ece968ab)
+
+  Prevent imported transfers from changing balances already changed via expiry.
+
+  Earlier, imported transfer timestamps were constrained only by the latest
+  transfer committed, erroneously ignoring _expiry_ events (which change balances
+  but don't create a transfer). Consequently, _imported_ events could modify
+  balances already changed by expiry. Now, we appropriately return
+  `imported_event_timestamp_must_not_regress`.
+
+- [5f7bc22](https://github.com/tigerbeetle/tigerbeetle/commit/5f7bc222c0bacfdeadcad142425dd65448ead83f)
+
+  Fix an overzealous assertion in the state machine where creating a pending
+  transfer that burns a transfer ID (for example, if it is directed toward a
+  non-existent account) causes a lookup with that ID to _crash_ the replica.
+
+  This assertion is guarded by `constants.verify`, so it is not reachable in
+  release builds.
+
+- [9d356fe](https://github.com/tigerbeetle/tigerbeetle/commit/9d356fe939e0bbb442f966883b4828617da50f9d)
+
+  Fix an upgrade bug wherein the replica crashes if the operator replaces the
+  binary _after_ `tigerbeetle start`, but _before_ `/proc/self/exe` is evaluated.
+
+  In the aforementioned scenario, procfs reports the executable's path as
+  `/path/to/tigerbeetle (deleted)`, which is an invalid path.
+
+- [c0537c3](https://github.com/tigerbeetle/tigerbeetle/commit/c0537c327411f2f9d5d4a9ddac7a9e3b4c2ce66c)
+
+  Correct spurious assertion regarding batch queue being non-empty even when
+  request validation fails with `InvalidOperation`/`InvalidDataSize`/`TooMuchData`.
+
+- [77f9018](https://github.com/tigerbeetle/tigerbeetle/commit/77f90186bac1d3b763c14cee71623908c954154f)
+
+  Fix a liveness bug where a block that can be repaired isn't, as the repairing
+  replica perpetually runs out of budget requesting unrepairable blocks.
+
+- [f2cf0e0](https://github.com/tigerbeetle/tigerbeetle/commit/f2cf0e0ab7c4ddd4b9819ffb43d02256b9729970)
+
+  Replace `CLOCK_MONOTONIC` with `CLOCK_BOOTTIME` in epoll, to reliably enforce
+  timeouts in the face of system suspension, e.g. VM migration (the former
+  excludes elapsed time while the system is suspended).
+
+- [480413a](https://github.com/tigerbeetle/tigerbeetle/commit/480413a99935ad1d3490073a506dfb9e1bdac45f)
+
+  Fix a bug wherein state sync fails to repair one or more non-table blocks.
+
+  In practice, this issue is hard to hit since it involves overflowing a block
+  repair queue. Additionally, it is self repairing as non-table blocks are
+  rewritten often, and the grid scrubber would repair these even in idle clusters.
+
+- [0ae7ef7](https://github.com/tigerbeetle/tigerbeetle/commit/0ae7ef7b78094409c9d61c103406020fd9f84092)
+
+  Fix an overtight assertion in the journal that checks the disjointness of the
+  in-memory headers and the in-memory buffers used to write to on-disk headers.
+
+  Encountering this issue in practice is unlikely; it requires a special
+  allocator that places the aforementioned buffers adjacent to one another.
+
+- [ed3a788](https://github.com/tigerbeetle/tigerbeetle/commit/ed3a78810d132ea80e59daf69725ee006743d6fb)
+
+  Correct the timestamp associated with events in the CDC _progress tracking queue_;
+  we were incorrectly using milliseconds there instead of seconds. The fix will
+  not affect consumers, as the queue is an _internal_ one used to store CDC
+  state, and only consumed by TigerBeetle.
+
+- [d4b299b](https://github.com/tigerbeetle/tigerbeetle/commit/d4b299b886b37bec2feea38131fb1cf80089fdb0),
+  [30012ce](https://github.com/tigerbeetle/tigerbeetle/commit/30012ceb69cb1272fd7a69d681e56e4af5384c9c)
+
+  Fix IPv6 connection on Windows, and address parsing.
+
+  Earlier, TigerBeetle on Windows would crash while trying to connect to a replica
+  using an IPv6 address. Additionally, address parsing no longer accepts too
+  many leading zeroes.
+
+- [797f5f5](https://github.com/tigerbeetle/tigerbeetle/commit/797f5f5624298d9437b4041290d50a84259c9e78)
+
+  Improve caching strategy during compaction, increasing throughput by ~5%.
+
+  We now ensure that value blocks read for compaction are not admitted to the
+  cache; as they belong to LSM tables that would be released after compaction.
+
+- [eea587c](https://github.com/tigerbeetle/tigerbeetle/commit/eea587c51f3808f31e95a492bb202d379c612691)
+
+  Optimize AEGIS implementation to keep more state in registers, improving
+  end-to-end throughput by ~4%.
+
+- [7bcca04](https://github.com/tigerbeetle/tigerbeetle/commit/7bcca04b6d503eb8c35ea50ba1f5d8434cb8d0ab)
+
+  Defer LSM table coalescing until Level 0 is full, merging all tiny tables in a
+  single pass, thereby reducing write amplification.
+
+  Earlier, we _greedily_ coalesced tables every time the immutable table was
+  flushed down to Level 0. This reduced space amplification but resulted in high
+  write amplification, as we read, coalesced, and wrote back the same data repeatedly.
+
+- [339bff5](https://github.com/tigerbeetle/tigerbeetle/commit/339bff51525f2b9d33fad2e033bfd823ce154306)
+
+  Remove `futures` to get to zero dependencies in the Rust client.
+
+- [96eda26](https://github.com/tigerbeetle/tigerbeetle/commit/96eda26c5643b1af424947855be5143d142233bb)
+
+  Rewrite the state machine fuzzer to be stateful, to better explore the state space.
+
+- [230c52b](https://github.com/tigerbeetle/tigerbeetle/commit/230c52bd11bd5ce525cc4a097820df96608965cc)
+
+  Rewrite the forest fuzzer model, strengthening testing of scans and crash recovery.
+
+- [42286d8](https://github.com/tigerbeetle/tigerbeetle/commit/42286d81adfea5050c9a48f045bb36f02e0beef8)
+
+  Revamp client integration tests and remove `EchoClient`.
+
+  Integration tests now use the real client instead of a mock `EchoClient`, which
+  exposed the same types as the real one but didn't exercise production behavior.
+
+- [b903d3d](https://github.com/tigerbeetle/tigerbeetle/commit/b903d3dbfae7c1a106b1b521b6c6c09ed7f41f07)
+
+  Verify that the configured kernel send buffer and receive buffer sizes actually
+  take effect, and warn the operator if Linux silently clamps them.
+
+- [b693fff](https://github.com/tigerbeetle/tigerbeetle/commit/b693fffc85b3e4136050b078aff61866090d699e)
+
+  Tidy now fails on LLM-authored contributions, using commit metadata to detect LLM usage.
+
+- [573f0ec](https://github.com/tigerbeetle/tigerbeetle/commit/573f0ec1ba67be5d13d54f73dfd5c7d47f42d078)
+
+  Rework the state machine unit tests to run every test with and without auto-batching.
+
+- [2304d2a](https://github.com/tigerbeetle/tigerbeetle/commit/2304d2a34c615f2da18fdc1889ace32ad37799ee)
+
+  Relax assertion to ignore network messages with `client_id=0` instead of crashing.
+
+  Strictly speaking, a misbehaving client sending a garbage message
+  with a valid-checksum isn't in our fault model. However, we already ignore
+  similar cases elsewhere, so we ignore this one as well for consistency.
 
 ### Features
 
-- [#3857](https://github.com/tigerbeetle/tigerbeetle/pull/3857)
+- [133c1f7](https://github.com/tigerbeetle/tigerbeetle/commit/133c1f7045367c2f2485f78d0932fb4e0247e980)
 
-  Report the maximum LSM forest table counts in the tigerbeetle inspect tool.
+  TigerBeetle clients running atop Linux now use epoll instead of io_uring.
+
+  The rationale behind this is that some environments disable access to io_uring
+  (for example Docker and containerd removed the io_uring syscalls from their
+  default seccomp allowlist).
+
+- [74ea044](https://github.com/tigerbeetle/tigerbeetle/commit/74ea04438aecfb5b73a06e8bfbde26d2f2262071)
+
+  Add the `*_reusable` APIs (for example, `create_transfers_reusable`) to the
+  Rust client, to allow users to pass in their own request/response buffers. In
+  other words, the `*_reusable` variants eliminate the implicit allocation that
+  happens in the vanilla variants (for example `create_transfers`).
+
+- [9dcc856](https://github.com/tigerbeetle/tigerbeetle/commit/9dcc856064e6a4f9d6539a1b0e79f773ef6a6d85)
+
+  For API consistency, change the .NET, Go, Java, and Node.js clients to take
+  replica addresses as a single string of comma-separated addresses (for example
+  `"3000,3001,3002"`), instead of an array.
+
+- [2f02595](https://github.com/tigerbeetle/tigerbeetle/commit/2f02595c69bf3105d5157859855ab090dc745174)
+
+  Ruby and Python clients no longer panic on double close. Additionally, Ruby
+  now appropriately raises `PacketError`, `TooMuchDataError`,
+  `ClientEvictedError`, `ClientReleaseTooLowError`, and `ClientReleaseTooHighError`.
+  These changes make these clients' behavior consistent with the others.
+
+- [731e050](https://github.com/tigerbeetle/tigerbeetle/commit/731e050d2fa368e0509b5b67738bdfcadab22541),
+  [c95d7a5](https://github.com/tigerbeetle/tigerbeetle/commit/c95d7a53a3d044741409b03b2f334a8ed033fa3c)
+
+  Decouple client eviction and deinitialization.
+
+  Earlier, requests submitted using an evicted client were always responded to
+  with `ClientClosed`. Now, we appropriately return the specific eviction reason.
+
+- [d2a7d2f](https://github.com/tigerbeetle/tigerbeetle/commit/d2a7d2f0c9b02b1d749917cf17a43a8c5edea13f)
+
+  Update minimum required Go version to 1.26.
+
+- [1a90d33](https://github.com/tigerbeetle/tigerbeetle/commit/1a90d33bed174fac26ace95f4f43e51019bbb89d)
+
+  Add the `expire_pending_transfers` metric, which tracks the count of pending
+  transfers that were expired.
+
+- [5d81908](https://github.com/tigerbeetle/tigerbeetle/commit/5d81908983323d8399017f4f9ee3bb4ee911d0de)
+
+  Default to the minimum possible grid cache (128MiB) when `--development` is used.
+
+- [f2f183a](https://github.com/tigerbeetle/tigerbeetle/commit/f2f183a7265ee6014b316c91868e43e06be85cc3),
+  [7d51e47](https://github.com/tigerbeetle/tigerbeetle/commit/7d51e47dbe3079282e7183664c03d98e8b3f3eec),
+  [79c2de9](https://github.com/tigerbeetle/tigerbeetle/commit/79c2de9c7b80a531724d877f316ab425bd90797c),
+  [6f8e6b5](https://github.com/tigerbeetle/tigerbeetle/commit/6f8e6b58d1811bb21cd6ea4fb93cb2e9d77abd81),
+  [65b6ffe](https://github.com/tigerbeetle/tigerbeetle/commit/65b6ffe810ac01be1b55c333d59df7a527368bec),
+  [386354c](https://github.com/tigerbeetle/tigerbeetle/commit/386354c08b11667cef58e48eb6bb2a0bae622ff6),
+  [5b41694](https://github.com/tigerbeetle/tigerbeetle/commit/5b41694c54ca6dace6987da77812b2139987112a),
+  [d9567ff](https://github.com/tigerbeetle/tigerbeetle/commit/d9567fff30e3ef5f58e6f65003e163d9da923cce)
+
+  Various documentation improvements and fixes.
 
 ### Internals
 
-- [#3861](https://github.com/tigerbeetle/tigerbeetle/pull/3861)
+- [146b0ce](https://github.com/tigerbeetle/tigerbeetle/commit/146b0cec80d0dcc50be4b5b96eb83d07261d558f),
+  [2a9a009](https://github.com/tigerbeetle/tigerbeetle/commit/2a9a0090fe89c004874319f54e478c4a9cd496c9)
 
-  Introduce explicit memory limits per zig build step to prevent out-of-memory errors in the CI.
+  Simplify the [TBID](https://docs.tigerbeetle.com/coding/data-modeling/#tigerbeetle-time-based-identifiers-recommended)
+  implementation in the Rust client and TigerBeetle benchmark.
 
-- [#3855](https://github.com/tigerbeetle/tigerbeetle/pull/3855)
+- [7d9a6c6](https://github.com/tigerbeetle/tigerbeetle/commit/7d9a6c6d6d77d25fee6b37ff2c71690939078ad4)
+
+  Add support for Job Objects, Windows' abstraction to manage groups of processes
+  and impose resource limits on them.
+
+- [efbbf67](https://github.com/tigerbeetle/tigerbeetle/commit/efbbf67ffca0ba705ee29909c88b9172d7e2d889)
+
+  Refactor the ScanBuilder in preparation for querying two-phase transfers.
+
+- [31bfa46](https://github.com/tigerbeetle/tigerbeetle/commit/31bfa46d5cc11a190eda4d0429e0cd671c11624b)
+
+  Rework concurrency tests in Java to use fewer concurrent workers by increasing
+  the batch size.
+
+- [9637dbc](https://github.com/tigerbeetle/tigerbeetle/commit/9637dbc40436e69fc4c239afee03620e08d5f189)
+
+  Add formatting for `DateTimeUTC` in `RFC 1123` and `ISO 8601` formats.
+
+- [76f204e](https://github.com/tigerbeetle/tigerbeetle/commit/76f204e4ee35bf1ac7fc2cd7bc597f8a1b711287),
+  [ba5dba6](https://github.com/tigerbeetle/tigerbeetle/commit/ba5dba6a6aaa80cd69aca9ce76de8e8ce982b919),
+  [1acd5f6](https://github.com/tigerbeetle/tigerbeetle/commit/1acd5f62d691d76af86b23f64294934ca1e8042b),
+  [1e9c4a1](https://github.com/tigerbeetle/tigerbeetle/commit/1e9c4a141b9fb2a29933da5b80292b9f4962e99a),
+  [3ac8143](https://github.com/tigerbeetle/tigerbeetle/commit/3ac8143e1604ff5f3ac1130cfde67be0ebd7ba74)
+
+  Avoid global mutable state in tests: AOF, benchmark, and Rust client tests now
+  use a unique temporary directory to store their state. Additionally, we inject
+  a specific tigerbeetle binary as a dependency to the client tests via an
+  environment variable, rather than assuming that a specific path exists.
+
+- [0adc8bf](https://github.com/tigerbeetle/tigerbeetle/commit/0adc8bfe02031e218f4e0f1897611d33ff17decb),
+  [ccee42e](https://github.com/tigerbeetle/tigerbeetle/commit/ccee42e58ed8c6c54a6c9eaed7e1435e8e4555e6)
+
+  Move `Time` and `IO` from `vsr` to `stdx`, as there's nothing VSR-specific
+  about these logical interfaces. Additionally, vendor `crypto`, `futex`, and
+  `sleep` from the Zig standard library, to replace calls to `std.Io` with
+  TigerBeetle's logical IO interface `stdx.IO`.
+
+- [ede8816](https://github.com/tigerbeetle/tigerbeetle/commit/ede88162ade7572686b4c3a6edd787ae56a4da05),
+  [def437b](https://github.com/tigerbeetle/tigerbeetle/commit/def437b255cea16f9714c93e38a6223deca906d7)
+
+  Introduce os.zig in `stdx`, to house _well-typed_ syscall functionality that
+  doesn't fall cleanly under our `IO` and `Time` interfaces (for example,
+  cross-platform `getrandom`).
+
+- [c6b3e95](https://github.com/tigerbeetle/tigerbeetle/commit/c6b3e95c9c117b541c6cb0d37cd2366b1a2e94c9)
+
+  Add `.ip("::1234")` literal constructor for `IPAddresses`; a more convenient
+  syntax to create an instance of a type.
+
+- [5ec9728](https://github.com/tigerbeetle/tigerbeetle/commit/5ec972816e73452cc1ec83cd24d899b146b89ad5)
+
+  Add explicit memory limits per zig build step to bound memory usage in CI.
+
+- [f0ddb6b](https://github.com/tigerbeetle/tigerbeetle/commit/f0ddb6bcbfd1ea2b724002fbc7e6767793bbc239)
 
   Move micro-benchmarking tooling into `stdx` and add a microbenchmark for the radix sort.
 
+- [404c394](https://github.com/tigerbeetle/tigerbeetle/commit/404c39466ed1825393308734a33b6043ee52463c)
+
+  Report the maximum LSM forest table counts in `tigerbeetle inspect constants`.
+
 ### TigerTracks 🎧
 
-- [I'd love to Change the World](https://open.spotify.com/track/7n3WO6ESKS1uCI9fgkGs66)
+- [Over Country](https://open.spotify.com/track/0YyYarMXa1WsS6hwUxSt6n)
 
 ## TigerBeetle 0.17.9
 

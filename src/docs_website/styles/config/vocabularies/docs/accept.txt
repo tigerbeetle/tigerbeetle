@@ -2,6 +2,7 @@ aarch
 acked
 adduser
 alloc
+allowlist
 alte
 Amdahl's
 APIs
@@ -54,6 +55,7 @@ Comptime
 concurrency_max
 config
 configurability
+containerd
 coroutines
 Correnteza
 CPUs
@@ -82,6 +84,7 @@ dequeued
 dev
 devhub
 dfsp
+disjointness
 divdeploy
 DLLs
 Dockerfile
@@ -107,6 +110,7 @@ enums
 epoll
 español
 evented
+executable's
 execveat
 failover
 Fastrange
@@ -249,6 +253,7 @@ Onwards
 OOMKiller
 openat
 otherstuff
+overtight
 Paxos
 pdf
 peer_type
@@ -276,6 +281,7 @@ Primeagen
 println
 Println
 PRNG
+procfs
 proto
 protobeetle
 proxied
