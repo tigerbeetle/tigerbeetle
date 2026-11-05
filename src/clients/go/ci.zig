@@ -39,9 +39,17 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         else => unreachable,
     }
 
-    try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
+    {
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{
+            .development = true,
+            .prebuilt = options.tigerbeetle,
+        });
+        defer tmp_beetle.deinit(gpa);
+        errdefer tmp_beetle.log_stderr();
 
-    try shell.exec("go test", .{});
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
+        try shell.exec("go test", .{});
+    }
 
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
         log.info("testing sample '{s}'", .{sample});
