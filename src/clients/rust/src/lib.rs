@@ -404,9 +404,9 @@ impl Client {
     /// were processed.
     ///
     /// The results of events are represented individually. There are two
-    /// related event result types: `CreateAccountStatus` is the enum of
-    /// possible outcomes, and `CreateAccountResult` which includes both the
-    /// `status` enum and the `timestamp` when the event was processed.
+    /// related event result types: `CreateAccountStatus` is the status code of
+    /// the outcome, and `CreateAccountResult` which includes both the
+    /// `status` and the `timestamp` when the event was processed.
     ///
     /// Note that a status of `CreateAccountStatus::Exists` should often be treated
     /// the same as `CreateAccountStatus::Created`, as it also returns the same `timestamp`
@@ -487,7 +487,7 @@ impl Client {
     /// were processed.
     ///
     /// The results of events are represented individually. There are two related event result
-    /// types: `CreateTransferStatus`, the enum of possible outcomes, and
+    /// types: `CreateTransferStatus`, the status code of the outcome, and
     /// [`CreateTransferResult`], which includes both the `status` and the `timestamp` when the
     /// event was processed.
     ///
@@ -1098,7 +1098,12 @@ pub use tbc::QueryFilterFlags;
 
 /// The result of a single [`create_accounts`] event.
 ///
-/// For the meaning of individual enum variants see the linked protocol reference.
+/// For the meaning of individual status codes see the linked protocol reference.
+///
+/// Each known status code is an associated constant, usable both in comparisons and as a `match`
+/// pattern. The status code is a newtype rather than an `enum` because a cluster may run a newer
+/// release than this client, and so may return a status code that this client does not know.
+/// Such a code is preserved in the `.0` field, so a `match` must always have a wildcard arm.
 ///
 /// See also [`CreateAccountResult`], the type directly returned by `create_accounts`,
 /// which contains the timestamp at which the account was created. Note that a status of
@@ -1124,7 +1129,12 @@ pub use tbc::CreateAccountResult;
 
 /// The result of a single [`create_transfers`] event.
 ///
-/// For the meaning of individual enum variants see the linked protocol reference.
+/// For the meaning of individual status codes see the linked protocol reference.
+///
+/// Each known status code is an associated constant, usable both in comparisons and as a `match`
+/// pattern. The status code is a newtype rather than an `enum` because a cluster may run a newer
+/// release than this client, and so may return a status code that this client does not know.
+/// Such a code is preserved in the `.0` field, so a `match` must always have a wildcard arm.
 ///
 /// See also [`CreateTransferResult`], the type directly returned by `create_transfers`,
 /// which contains the timestamp at which the transfer was created. Note that a status of

@@ -86,342 +86,257 @@ pub struct Transfer {
     pub timestamp: u64,
 }
 
-#[repr(u32)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum CreateAccountStatus {
-    Created = 0xFFFFFFFF,
-    LinkedEventFailed = 1,
-    LinkedEventChainOpen = 2,
-    ImportedEventExpected = 22,
-    ImportedEventNotExpected = 23,
-    TimestampMustBeZero = 3,
-    ImportedEventTimestampOutOfRange = 24,
-    ImportedEventTimestampMustNotAdvance = 25,
-    ReservedField = 4,
-    ReservedFlag = 5,
-    IdMustNotBeZero = 6,
-    IdMustNotBeIntMax = 7,
-    ExistsWithDifferentFlags = 15,
-    ExistsWithDifferentUserData128 = 16,
-    ExistsWithDifferentUserData64 = 17,
-    ExistsWithDifferentUserData32 = 18,
-    ExistsWithDifferentLedger = 19,
-    ExistsWithDifferentCode = 20,
-    Exists = 21,
-    FlagsAreMutuallyExclusive = 8,
-    DebitsPendingMustBeZero = 9,
-    DebitsPostedMustBeZero = 10,
-    CreditsPendingMustBeZero = 11,
-    CreditsPostedMustBeZero = 12,
-    LedgerMustNotBeZero = 13,
-    CodeMustNotBeZero = 14,
-    ImportedEventTimestampMustNotRegress = 26,
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct CreateAccountStatus(pub u32);
+impl CreateAccountStatus {
+    pub const Created: CreateAccountStatus = CreateAccountStatus(0xFFFFFFFF);
+    pub const LinkedEventFailed: CreateAccountStatus = CreateAccountStatus(1);
+    pub const LinkedEventChainOpen: CreateAccountStatus = CreateAccountStatus(2);
+    pub const ImportedEventExpected: CreateAccountStatus = CreateAccountStatus(22);
+    pub const ImportedEventNotExpected: CreateAccountStatus = CreateAccountStatus(23);
+    pub const TimestampMustBeZero: CreateAccountStatus = CreateAccountStatus(3);
+    pub const ImportedEventTimestampOutOfRange: CreateAccountStatus = CreateAccountStatus(24);
+    pub const ImportedEventTimestampMustNotAdvance: CreateAccountStatus = CreateAccountStatus(25);
+    pub const ReservedField: CreateAccountStatus = CreateAccountStatus(4);
+    pub const ReservedFlag: CreateAccountStatus = CreateAccountStatus(5);
+    pub const IdMustNotBeZero: CreateAccountStatus = CreateAccountStatus(6);
+    pub const IdMustNotBeIntMax: CreateAccountStatus = CreateAccountStatus(7);
+    pub const ExistsWithDifferentFlags: CreateAccountStatus = CreateAccountStatus(15);
+    pub const ExistsWithDifferentUserData128: CreateAccountStatus = CreateAccountStatus(16);
+    pub const ExistsWithDifferentUserData64: CreateAccountStatus = CreateAccountStatus(17);
+    pub const ExistsWithDifferentUserData32: CreateAccountStatus = CreateAccountStatus(18);
+    pub const ExistsWithDifferentLedger: CreateAccountStatus = CreateAccountStatus(19);
+    pub const ExistsWithDifferentCode: CreateAccountStatus = CreateAccountStatus(20);
+    pub const Exists: CreateAccountStatus = CreateAccountStatus(21);
+    pub const FlagsAreMutuallyExclusive: CreateAccountStatus = CreateAccountStatus(8);
+    pub const DebitsPendingMustBeZero: CreateAccountStatus = CreateAccountStatus(9);
+    pub const DebitsPostedMustBeZero: CreateAccountStatus = CreateAccountStatus(10);
+    pub const CreditsPendingMustBeZero: CreateAccountStatus = CreateAccountStatus(11);
+    pub const CreditsPostedMustBeZero: CreateAccountStatus = CreateAccountStatus(12);
+    pub const LedgerMustNotBeZero: CreateAccountStatus = CreateAccountStatus(13);
+    pub const CodeMustNotBeZero: CreateAccountStatus = CreateAccountStatus(14);
+    pub const ImportedEventTimestampMustNotRegress: CreateAccountStatus = CreateAccountStatus(26);
 }
 
 impl From<u32> for CreateAccountStatus {
     fn from(value: u32) -> CreateAccountStatus {
-        match value {
-            0xFFFFFFFF => CreateAccountStatus::Created,
-            1 => CreateAccountStatus::LinkedEventFailed,
-            2 => CreateAccountStatus::LinkedEventChainOpen,
-            22 => CreateAccountStatus::ImportedEventExpected,
-            23 => CreateAccountStatus::ImportedEventNotExpected,
-            3 => CreateAccountStatus::TimestampMustBeZero,
-            24 => CreateAccountStatus::ImportedEventTimestampOutOfRange,
-            25 => CreateAccountStatus::ImportedEventTimestampMustNotAdvance,
-            4 => CreateAccountStatus::ReservedField,
-            5 => CreateAccountStatus::ReservedFlag,
-            6 => CreateAccountStatus::IdMustNotBeZero,
-            7 => CreateAccountStatus::IdMustNotBeIntMax,
-            15 => CreateAccountStatus::ExistsWithDifferentFlags,
-            16 => CreateAccountStatus::ExistsWithDifferentUserData128,
-            17 => CreateAccountStatus::ExistsWithDifferentUserData64,
-            18 => CreateAccountStatus::ExistsWithDifferentUserData32,
-            19 => CreateAccountStatus::ExistsWithDifferentLedger,
-            20 => CreateAccountStatus::ExistsWithDifferentCode,
-            21 => CreateAccountStatus::Exists,
-            8 => CreateAccountStatus::FlagsAreMutuallyExclusive,
-            9 => CreateAccountStatus::DebitsPendingMustBeZero,
-            10 => CreateAccountStatus::DebitsPostedMustBeZero,
-            11 => CreateAccountStatus::CreditsPendingMustBeZero,
-            12 => CreateAccountStatus::CreditsPostedMustBeZero,
-            13 => CreateAccountStatus::LedgerMustNotBeZero,
-            14 => CreateAccountStatus::CodeMustNotBeZero,
-            26 => CreateAccountStatus::ImportedEventTimestampMustNotRegress,
-            other_value => panic!("cannot convert u32 {other_value} to CreateAccountStatus")
-        }
+        CreateAccountStatus(value)
     }
 }
 
 impl From<CreateAccountStatus> for u32 {
     fn from(value: CreateAccountStatus) -> u32 {
-        value as u32
+        value.0
     }
 }
 
- impl core::fmt::Display for CreateAccountStatus {
-     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-         match self {
-             Self::Created => f.write_str("Created"),
-             Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
-             Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
-             Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
-             Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
-             Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
-             Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
-             Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
-             Self::ReservedField => f.write_str("ReservedField"),
-             Self::ReservedFlag => f.write_str("ReservedFlag"),
-             Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
-             Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
-             Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
-             Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
-             Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
-             Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
-             Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
-             Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
-             Self::Exists => f.write_str("Exists"),
-             Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
-             Self::DebitsPendingMustBeZero => f.write_str("DebitsPendingMustBeZero"),
-             Self::DebitsPostedMustBeZero => f.write_str("DebitsPostedMustBeZero"),
-             Self::CreditsPendingMustBeZero => f.write_str("CreditsPendingMustBeZero"),
-             Self::CreditsPostedMustBeZero => f.write_str("CreditsPostedMustBeZero"),
-             Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
-             Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
-             Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
+impl core::fmt::Display for CreateAccountStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match *self {
+            Self::Created => f.write_str("Created"),
+            Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
+            Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
+            Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
+            Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
+            Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
+            Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
+            Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
+            Self::ReservedField => f.write_str("ReservedField"),
+            Self::ReservedFlag => f.write_str("ReservedFlag"),
+            Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
+            Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
+            Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
+            Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
+            Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
+            Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
+            Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
+            Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
+            Self::Exists => f.write_str("Exists"),
+            Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
+            Self::DebitsPendingMustBeZero => f.write_str("DebitsPendingMustBeZero"),
+            Self::DebitsPostedMustBeZero => f.write_str("DebitsPostedMustBeZero"),
+            Self::CreditsPendingMustBeZero => f.write_str("CreditsPendingMustBeZero"),
+            Self::CreditsPostedMustBeZero => f.write_str("CreditsPostedMustBeZero"),
+            Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
+            Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
+            Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
+            Self(value) => write!(f, "CreateAccountStatus({value})"),
         }
     }
 }
 
-#[repr(u32)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum CreateTransferStatus {
-    Created = 0xFFFFFFFF,
-    LinkedEventFailed = 1,
-    LinkedEventChainOpen = 2,
-    ImportedEventExpected = 56,
-    ImportedEventNotExpected = 57,
-    TimestampMustBeZero = 3,
-    ImportedEventTimestampOutOfRange = 58,
-    ImportedEventTimestampMustNotAdvance = 59,
-    ReservedFlag = 4,
-    IdMustNotBeZero = 5,
-    IdMustNotBeIntMax = 6,
-    ExistsWithDifferentFlags = 36,
-    ExistsWithDifferentPendingId = 40,
-    ExistsWithDifferentTimeout = 44,
-    ExistsWithDifferentDebitAccountId = 37,
-    ExistsWithDifferentCreditAccountId = 38,
-    ExistsWithDifferentAmount = 39,
-    ExistsWithDifferentUserData128 = 41,
-    ExistsWithDifferentUserData64 = 42,
-    ExistsWithDifferentUserData32 = 43,
-    ExistsWithDifferentLedger = 67,
-    ExistsWithDifferentCode = 45,
-    Exists = 46,
-    IdAlreadyFailed = 68,
-    FlagsAreMutuallyExclusive = 7,
-    DebitAccountIdMustNotBeZero = 8,
-    DebitAccountIdMustNotBeIntMax = 9,
-    CreditAccountIdMustNotBeZero = 10,
-    CreditAccountIdMustNotBeIntMax = 11,
-    AccountsMustBeDifferent = 12,
-    PendingIdMustBeZero = 13,
-    PendingIdMustNotBeZero = 14,
-    PendingIdMustNotBeIntMax = 15,
-    PendingIdMustBeDifferent = 16,
-    TimeoutReservedForPendingTransfer = 17,
-    ClosingTransferMustBePending = 64,
-    LedgerMustNotBeZero = 19,
-    CodeMustNotBeZero = 20,
-    DebitAccountNotFound = 21,
-    CreditAccountNotFound = 22,
-    AccountsMustHaveTheSameLedger = 23,
-    TransferMustHaveTheSameLedgerAsAccounts = 24,
-    PendingTransferNotFound = 25,
-    PendingTransferNotPending = 26,
-    PendingTransferHasDifferentDebitAccountId = 27,
-    PendingTransferHasDifferentCreditAccountId = 28,
-    PendingTransferHasDifferentLedger = 29,
-    PendingTransferHasDifferentCode = 30,
-    ExceedsPendingTransferAmount = 31,
-    PendingTransferHasDifferentAmount = 32,
-    PendingTransferAlreadyPosted = 33,
-    PendingTransferAlreadyVoided = 34,
-    PendingTransferExpired = 35,
-    ImportedEventTimestampMustNotRegress = 60,
-    ImportedEventTimestampMustPostdateDebitAccount = 61,
-    ImportedEventTimestampMustPostdateCreditAccount = 62,
-    ImportedEventTimeoutMustBeZero = 63,
-    DebitAccountAlreadyClosed = 65,
-    CreditAccountAlreadyClosed = 66,
-    OverflowsDebitsPending = 47,
-    OverflowsCreditsPending = 48,
-    OverflowsDebitsPosted = 49,
-    OverflowsCreditsPosted = 50,
-    OverflowsDebits = 51,
-    OverflowsCredits = 52,
-    OverflowsTimeout = 53,
-    ExceedsCredits = 54,
-    ExceedsDebits = 55,
+impl core::fmt::Debug for CreateAccountStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Display::fmt(self, f)
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct CreateTransferStatus(pub u32);
+impl CreateTransferStatus {
+    pub const Created: CreateTransferStatus = CreateTransferStatus(0xFFFFFFFF);
+    pub const LinkedEventFailed: CreateTransferStatus = CreateTransferStatus(1);
+    pub const LinkedEventChainOpen: CreateTransferStatus = CreateTransferStatus(2);
+    pub const ImportedEventExpected: CreateTransferStatus = CreateTransferStatus(56);
+    pub const ImportedEventNotExpected: CreateTransferStatus = CreateTransferStatus(57);
+    pub const TimestampMustBeZero: CreateTransferStatus = CreateTransferStatus(3);
+    pub const ImportedEventTimestampOutOfRange: CreateTransferStatus = CreateTransferStatus(58);
+    pub const ImportedEventTimestampMustNotAdvance: CreateTransferStatus = CreateTransferStatus(59);
+    pub const ReservedFlag: CreateTransferStatus = CreateTransferStatus(4);
+    pub const IdMustNotBeZero: CreateTransferStatus = CreateTransferStatus(5);
+    pub const IdMustNotBeIntMax: CreateTransferStatus = CreateTransferStatus(6);
+    pub const ExistsWithDifferentFlags: CreateTransferStatus = CreateTransferStatus(36);
+    pub const ExistsWithDifferentPendingId: CreateTransferStatus = CreateTransferStatus(40);
+    pub const ExistsWithDifferentTimeout: CreateTransferStatus = CreateTransferStatus(44);
+    pub const ExistsWithDifferentDebitAccountId: CreateTransferStatus = CreateTransferStatus(37);
+    pub const ExistsWithDifferentCreditAccountId: CreateTransferStatus = CreateTransferStatus(38);
+    pub const ExistsWithDifferentAmount: CreateTransferStatus = CreateTransferStatus(39);
+    pub const ExistsWithDifferentUserData128: CreateTransferStatus = CreateTransferStatus(41);
+    pub const ExistsWithDifferentUserData64: CreateTransferStatus = CreateTransferStatus(42);
+    pub const ExistsWithDifferentUserData32: CreateTransferStatus = CreateTransferStatus(43);
+    pub const ExistsWithDifferentLedger: CreateTransferStatus = CreateTransferStatus(67);
+    pub const ExistsWithDifferentCode: CreateTransferStatus = CreateTransferStatus(45);
+    pub const Exists: CreateTransferStatus = CreateTransferStatus(46);
+    pub const IdAlreadyFailed: CreateTransferStatus = CreateTransferStatus(68);
+    pub const FlagsAreMutuallyExclusive: CreateTransferStatus = CreateTransferStatus(7);
+    pub const DebitAccountIdMustNotBeZero: CreateTransferStatus = CreateTransferStatus(8);
+    pub const DebitAccountIdMustNotBeIntMax: CreateTransferStatus = CreateTransferStatus(9);
+    pub const CreditAccountIdMustNotBeZero: CreateTransferStatus = CreateTransferStatus(10);
+    pub const CreditAccountIdMustNotBeIntMax: CreateTransferStatus = CreateTransferStatus(11);
+    pub const AccountsMustBeDifferent: CreateTransferStatus = CreateTransferStatus(12);
+    pub const PendingIdMustBeZero: CreateTransferStatus = CreateTransferStatus(13);
+    pub const PendingIdMustNotBeZero: CreateTransferStatus = CreateTransferStatus(14);
+    pub const PendingIdMustNotBeIntMax: CreateTransferStatus = CreateTransferStatus(15);
+    pub const PendingIdMustBeDifferent: CreateTransferStatus = CreateTransferStatus(16);
+    pub const TimeoutReservedForPendingTransfer: CreateTransferStatus = CreateTransferStatus(17);
+    pub const ClosingTransferMustBePending: CreateTransferStatus = CreateTransferStatus(64);
+    pub const LedgerMustNotBeZero: CreateTransferStatus = CreateTransferStatus(19);
+    pub const CodeMustNotBeZero: CreateTransferStatus = CreateTransferStatus(20);
+    pub const DebitAccountNotFound: CreateTransferStatus = CreateTransferStatus(21);
+    pub const CreditAccountNotFound: CreateTransferStatus = CreateTransferStatus(22);
+    pub const AccountsMustHaveTheSameLedger: CreateTransferStatus = CreateTransferStatus(23);
+    pub const TransferMustHaveTheSameLedgerAsAccounts: CreateTransferStatus = CreateTransferStatus(24);
+    pub const PendingTransferNotFound: CreateTransferStatus = CreateTransferStatus(25);
+    pub const PendingTransferNotPending: CreateTransferStatus = CreateTransferStatus(26);
+    pub const PendingTransferHasDifferentDebitAccountId: CreateTransferStatus = CreateTransferStatus(27);
+    pub const PendingTransferHasDifferentCreditAccountId: CreateTransferStatus = CreateTransferStatus(28);
+    pub const PendingTransferHasDifferentLedger: CreateTransferStatus = CreateTransferStatus(29);
+    pub const PendingTransferHasDifferentCode: CreateTransferStatus = CreateTransferStatus(30);
+    pub const ExceedsPendingTransferAmount: CreateTransferStatus = CreateTransferStatus(31);
+    pub const PendingTransferHasDifferentAmount: CreateTransferStatus = CreateTransferStatus(32);
+    pub const PendingTransferAlreadyPosted: CreateTransferStatus = CreateTransferStatus(33);
+    pub const PendingTransferAlreadyVoided: CreateTransferStatus = CreateTransferStatus(34);
+    pub const PendingTransferExpired: CreateTransferStatus = CreateTransferStatus(35);
+    pub const ImportedEventTimestampMustNotRegress: CreateTransferStatus = CreateTransferStatus(60);
+    pub const ImportedEventTimestampMustPostdateDebitAccount: CreateTransferStatus = CreateTransferStatus(61);
+    pub const ImportedEventTimestampMustPostdateCreditAccount: CreateTransferStatus = CreateTransferStatus(62);
+    pub const ImportedEventTimeoutMustBeZero: CreateTransferStatus = CreateTransferStatus(63);
+    pub const DebitAccountAlreadyClosed: CreateTransferStatus = CreateTransferStatus(65);
+    pub const CreditAccountAlreadyClosed: CreateTransferStatus = CreateTransferStatus(66);
+    pub const OverflowsDebitsPending: CreateTransferStatus = CreateTransferStatus(47);
+    pub const OverflowsCreditsPending: CreateTransferStatus = CreateTransferStatus(48);
+    pub const OverflowsDebitsPosted: CreateTransferStatus = CreateTransferStatus(49);
+    pub const OverflowsCreditsPosted: CreateTransferStatus = CreateTransferStatus(50);
+    pub const OverflowsDebits: CreateTransferStatus = CreateTransferStatus(51);
+    pub const OverflowsCredits: CreateTransferStatus = CreateTransferStatus(52);
+    pub const OverflowsTimeout: CreateTransferStatus = CreateTransferStatus(53);
+    pub const ExceedsCredits: CreateTransferStatus = CreateTransferStatus(54);
+    pub const ExceedsDebits: CreateTransferStatus = CreateTransferStatus(55);
 }
 
 impl From<u32> for CreateTransferStatus {
     fn from(value: u32) -> CreateTransferStatus {
-        match value {
-            0xFFFFFFFF => CreateTransferStatus::Created,
-            1 => CreateTransferStatus::LinkedEventFailed,
-            2 => CreateTransferStatus::LinkedEventChainOpen,
-            56 => CreateTransferStatus::ImportedEventExpected,
-            57 => CreateTransferStatus::ImportedEventNotExpected,
-            3 => CreateTransferStatus::TimestampMustBeZero,
-            58 => CreateTransferStatus::ImportedEventTimestampOutOfRange,
-            59 => CreateTransferStatus::ImportedEventTimestampMustNotAdvance,
-            4 => CreateTransferStatus::ReservedFlag,
-            5 => CreateTransferStatus::IdMustNotBeZero,
-            6 => CreateTransferStatus::IdMustNotBeIntMax,
-            36 => CreateTransferStatus::ExistsWithDifferentFlags,
-            40 => CreateTransferStatus::ExistsWithDifferentPendingId,
-            44 => CreateTransferStatus::ExistsWithDifferentTimeout,
-            37 => CreateTransferStatus::ExistsWithDifferentDebitAccountId,
-            38 => CreateTransferStatus::ExistsWithDifferentCreditAccountId,
-            39 => CreateTransferStatus::ExistsWithDifferentAmount,
-            41 => CreateTransferStatus::ExistsWithDifferentUserData128,
-            42 => CreateTransferStatus::ExistsWithDifferentUserData64,
-            43 => CreateTransferStatus::ExistsWithDifferentUserData32,
-            67 => CreateTransferStatus::ExistsWithDifferentLedger,
-            45 => CreateTransferStatus::ExistsWithDifferentCode,
-            46 => CreateTransferStatus::Exists,
-            68 => CreateTransferStatus::IdAlreadyFailed,
-            7 => CreateTransferStatus::FlagsAreMutuallyExclusive,
-            8 => CreateTransferStatus::DebitAccountIdMustNotBeZero,
-            9 => CreateTransferStatus::DebitAccountIdMustNotBeIntMax,
-            10 => CreateTransferStatus::CreditAccountIdMustNotBeZero,
-            11 => CreateTransferStatus::CreditAccountIdMustNotBeIntMax,
-            12 => CreateTransferStatus::AccountsMustBeDifferent,
-            13 => CreateTransferStatus::PendingIdMustBeZero,
-            14 => CreateTransferStatus::PendingIdMustNotBeZero,
-            15 => CreateTransferStatus::PendingIdMustNotBeIntMax,
-            16 => CreateTransferStatus::PendingIdMustBeDifferent,
-            17 => CreateTransferStatus::TimeoutReservedForPendingTransfer,
-            64 => CreateTransferStatus::ClosingTransferMustBePending,
-            19 => CreateTransferStatus::LedgerMustNotBeZero,
-            20 => CreateTransferStatus::CodeMustNotBeZero,
-            21 => CreateTransferStatus::DebitAccountNotFound,
-            22 => CreateTransferStatus::CreditAccountNotFound,
-            23 => CreateTransferStatus::AccountsMustHaveTheSameLedger,
-            24 => CreateTransferStatus::TransferMustHaveTheSameLedgerAsAccounts,
-            25 => CreateTransferStatus::PendingTransferNotFound,
-            26 => CreateTransferStatus::PendingTransferNotPending,
-            27 => CreateTransferStatus::PendingTransferHasDifferentDebitAccountId,
-            28 => CreateTransferStatus::PendingTransferHasDifferentCreditAccountId,
-            29 => CreateTransferStatus::PendingTransferHasDifferentLedger,
-            30 => CreateTransferStatus::PendingTransferHasDifferentCode,
-            31 => CreateTransferStatus::ExceedsPendingTransferAmount,
-            32 => CreateTransferStatus::PendingTransferHasDifferentAmount,
-            33 => CreateTransferStatus::PendingTransferAlreadyPosted,
-            34 => CreateTransferStatus::PendingTransferAlreadyVoided,
-            35 => CreateTransferStatus::PendingTransferExpired,
-            60 => CreateTransferStatus::ImportedEventTimestampMustNotRegress,
-            61 => CreateTransferStatus::ImportedEventTimestampMustPostdateDebitAccount,
-            62 => CreateTransferStatus::ImportedEventTimestampMustPostdateCreditAccount,
-            63 => CreateTransferStatus::ImportedEventTimeoutMustBeZero,
-            65 => CreateTransferStatus::DebitAccountAlreadyClosed,
-            66 => CreateTransferStatus::CreditAccountAlreadyClosed,
-            47 => CreateTransferStatus::OverflowsDebitsPending,
-            48 => CreateTransferStatus::OverflowsCreditsPending,
-            49 => CreateTransferStatus::OverflowsDebitsPosted,
-            50 => CreateTransferStatus::OverflowsCreditsPosted,
-            51 => CreateTransferStatus::OverflowsDebits,
-            52 => CreateTransferStatus::OverflowsCredits,
-            53 => CreateTransferStatus::OverflowsTimeout,
-            54 => CreateTransferStatus::ExceedsCredits,
-            55 => CreateTransferStatus::ExceedsDebits,
-            other_value => panic!("cannot convert u32 {other_value} to CreateTransferStatus")
-        }
+        CreateTransferStatus(value)
     }
 }
 
 impl From<CreateTransferStatus> for u32 {
     fn from(value: CreateTransferStatus) -> u32 {
-        value as u32
+        value.0
     }
 }
 
- impl core::fmt::Display for CreateTransferStatus {
-     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-         match self {
-             Self::Created => f.write_str("Created"),
-             Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
-             Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
-             Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
-             Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
-             Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
-             Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
-             Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
-             Self::ReservedFlag => f.write_str("ReservedFlag"),
-             Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
-             Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
-             Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
-             Self::ExistsWithDifferentPendingId => f.write_str("ExistsWithDifferentPendingId"),
-             Self::ExistsWithDifferentTimeout => f.write_str("ExistsWithDifferentTimeout"),
-             Self::ExistsWithDifferentDebitAccountId => f.write_str("ExistsWithDifferentDebitAccountId"),
-             Self::ExistsWithDifferentCreditAccountId => f.write_str("ExistsWithDifferentCreditAccountId"),
-             Self::ExistsWithDifferentAmount => f.write_str("ExistsWithDifferentAmount"),
-             Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
-             Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
-             Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
-             Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
-             Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
-             Self::Exists => f.write_str("Exists"),
-             Self::IdAlreadyFailed => f.write_str("IdAlreadyFailed"),
-             Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
-             Self::DebitAccountIdMustNotBeZero => f.write_str("DebitAccountIdMustNotBeZero"),
-             Self::DebitAccountIdMustNotBeIntMax => f.write_str("DebitAccountIdMustNotBeIntMax"),
-             Self::CreditAccountIdMustNotBeZero => f.write_str("CreditAccountIdMustNotBeZero"),
-             Self::CreditAccountIdMustNotBeIntMax => f.write_str("CreditAccountIdMustNotBeIntMax"),
-             Self::AccountsMustBeDifferent => f.write_str("AccountsMustBeDifferent"),
-             Self::PendingIdMustBeZero => f.write_str("PendingIdMustBeZero"),
-             Self::PendingIdMustNotBeZero => f.write_str("PendingIdMustNotBeZero"),
-             Self::PendingIdMustNotBeIntMax => f.write_str("PendingIdMustNotBeIntMax"),
-             Self::PendingIdMustBeDifferent => f.write_str("PendingIdMustBeDifferent"),
-             Self::TimeoutReservedForPendingTransfer => f.write_str("TimeoutReservedForPendingTransfer"),
-             Self::ClosingTransferMustBePending => f.write_str("ClosingTransferMustBePending"),
-             Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
-             Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
-             Self::DebitAccountNotFound => f.write_str("DebitAccountNotFound"),
-             Self::CreditAccountNotFound => f.write_str("CreditAccountNotFound"),
-             Self::AccountsMustHaveTheSameLedger => f.write_str("AccountsMustHaveTheSameLedger"),
-             Self::TransferMustHaveTheSameLedgerAsAccounts => f.write_str("TransferMustHaveTheSameLedgerAsAccounts"),
-             Self::PendingTransferNotFound => f.write_str("PendingTransferNotFound"),
-             Self::PendingTransferNotPending => f.write_str("PendingTransferNotPending"),
-             Self::PendingTransferHasDifferentDebitAccountId => f.write_str("PendingTransferHasDifferentDebitAccountId"),
-             Self::PendingTransferHasDifferentCreditAccountId => f.write_str("PendingTransferHasDifferentCreditAccountId"),
-             Self::PendingTransferHasDifferentLedger => f.write_str("PendingTransferHasDifferentLedger"),
-             Self::PendingTransferHasDifferentCode => f.write_str("PendingTransferHasDifferentCode"),
-             Self::ExceedsPendingTransferAmount => f.write_str("ExceedsPendingTransferAmount"),
-             Self::PendingTransferHasDifferentAmount => f.write_str("PendingTransferHasDifferentAmount"),
-             Self::PendingTransferAlreadyPosted => f.write_str("PendingTransferAlreadyPosted"),
-             Self::PendingTransferAlreadyVoided => f.write_str("PendingTransferAlreadyVoided"),
-             Self::PendingTransferExpired => f.write_str("PendingTransferExpired"),
-             Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
-             Self::ImportedEventTimestampMustPostdateDebitAccount => f.write_str("ImportedEventTimestampMustPostdateDebitAccount"),
-             Self::ImportedEventTimestampMustPostdateCreditAccount => f.write_str("ImportedEventTimestampMustPostdateCreditAccount"),
-             Self::ImportedEventTimeoutMustBeZero => f.write_str("ImportedEventTimeoutMustBeZero"),
-             Self::DebitAccountAlreadyClosed => f.write_str("DebitAccountAlreadyClosed"),
-             Self::CreditAccountAlreadyClosed => f.write_str("CreditAccountAlreadyClosed"),
-             Self::OverflowsDebitsPending => f.write_str("OverflowsDebitsPending"),
-             Self::OverflowsCreditsPending => f.write_str("OverflowsCreditsPending"),
-             Self::OverflowsDebitsPosted => f.write_str("OverflowsDebitsPosted"),
-             Self::OverflowsCreditsPosted => f.write_str("OverflowsCreditsPosted"),
-             Self::OverflowsDebits => f.write_str("OverflowsDebits"),
-             Self::OverflowsCredits => f.write_str("OverflowsCredits"),
-             Self::OverflowsTimeout => f.write_str("OverflowsTimeout"),
-             Self::ExceedsCredits => f.write_str("ExceedsCredits"),
-             Self::ExceedsDebits => f.write_str("ExceedsDebits"),
+impl core::fmt::Display for CreateTransferStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match *self {
+            Self::Created => f.write_str("Created"),
+            Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
+            Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
+            Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
+            Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
+            Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
+            Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
+            Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
+            Self::ReservedFlag => f.write_str("ReservedFlag"),
+            Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
+            Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
+            Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
+            Self::ExistsWithDifferentPendingId => f.write_str("ExistsWithDifferentPendingId"),
+            Self::ExistsWithDifferentTimeout => f.write_str("ExistsWithDifferentTimeout"),
+            Self::ExistsWithDifferentDebitAccountId => f.write_str("ExistsWithDifferentDebitAccountId"),
+            Self::ExistsWithDifferentCreditAccountId => f.write_str("ExistsWithDifferentCreditAccountId"),
+            Self::ExistsWithDifferentAmount => f.write_str("ExistsWithDifferentAmount"),
+            Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
+            Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
+            Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
+            Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
+            Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
+            Self::Exists => f.write_str("Exists"),
+            Self::IdAlreadyFailed => f.write_str("IdAlreadyFailed"),
+            Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
+            Self::DebitAccountIdMustNotBeZero => f.write_str("DebitAccountIdMustNotBeZero"),
+            Self::DebitAccountIdMustNotBeIntMax => f.write_str("DebitAccountIdMustNotBeIntMax"),
+            Self::CreditAccountIdMustNotBeZero => f.write_str("CreditAccountIdMustNotBeZero"),
+            Self::CreditAccountIdMustNotBeIntMax => f.write_str("CreditAccountIdMustNotBeIntMax"),
+            Self::AccountsMustBeDifferent => f.write_str("AccountsMustBeDifferent"),
+            Self::PendingIdMustBeZero => f.write_str("PendingIdMustBeZero"),
+            Self::PendingIdMustNotBeZero => f.write_str("PendingIdMustNotBeZero"),
+            Self::PendingIdMustNotBeIntMax => f.write_str("PendingIdMustNotBeIntMax"),
+            Self::PendingIdMustBeDifferent => f.write_str("PendingIdMustBeDifferent"),
+            Self::TimeoutReservedForPendingTransfer => f.write_str("TimeoutReservedForPendingTransfer"),
+            Self::ClosingTransferMustBePending => f.write_str("ClosingTransferMustBePending"),
+            Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
+            Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
+            Self::DebitAccountNotFound => f.write_str("DebitAccountNotFound"),
+            Self::CreditAccountNotFound => f.write_str("CreditAccountNotFound"),
+            Self::AccountsMustHaveTheSameLedger => f.write_str("AccountsMustHaveTheSameLedger"),
+            Self::TransferMustHaveTheSameLedgerAsAccounts => f.write_str("TransferMustHaveTheSameLedgerAsAccounts"),
+            Self::PendingTransferNotFound => f.write_str("PendingTransferNotFound"),
+            Self::PendingTransferNotPending => f.write_str("PendingTransferNotPending"),
+            Self::PendingTransferHasDifferentDebitAccountId => f.write_str("PendingTransferHasDifferentDebitAccountId"),
+            Self::PendingTransferHasDifferentCreditAccountId => f.write_str("PendingTransferHasDifferentCreditAccountId"),
+            Self::PendingTransferHasDifferentLedger => f.write_str("PendingTransferHasDifferentLedger"),
+            Self::PendingTransferHasDifferentCode => f.write_str("PendingTransferHasDifferentCode"),
+            Self::ExceedsPendingTransferAmount => f.write_str("ExceedsPendingTransferAmount"),
+            Self::PendingTransferHasDifferentAmount => f.write_str("PendingTransferHasDifferentAmount"),
+            Self::PendingTransferAlreadyPosted => f.write_str("PendingTransferAlreadyPosted"),
+            Self::PendingTransferAlreadyVoided => f.write_str("PendingTransferAlreadyVoided"),
+            Self::PendingTransferExpired => f.write_str("PendingTransferExpired"),
+            Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
+            Self::ImportedEventTimestampMustPostdateDebitAccount => f.write_str("ImportedEventTimestampMustPostdateDebitAccount"),
+            Self::ImportedEventTimestampMustPostdateCreditAccount => f.write_str("ImportedEventTimestampMustPostdateCreditAccount"),
+            Self::ImportedEventTimeoutMustBeZero => f.write_str("ImportedEventTimeoutMustBeZero"),
+            Self::DebitAccountAlreadyClosed => f.write_str("DebitAccountAlreadyClosed"),
+            Self::CreditAccountAlreadyClosed => f.write_str("CreditAccountAlreadyClosed"),
+            Self::OverflowsDebitsPending => f.write_str("OverflowsDebitsPending"),
+            Self::OverflowsCreditsPending => f.write_str("OverflowsCreditsPending"),
+            Self::OverflowsDebitsPosted => f.write_str("OverflowsDebitsPosted"),
+            Self::OverflowsCreditsPosted => f.write_str("OverflowsCreditsPosted"),
+            Self::OverflowsDebits => f.write_str("OverflowsDebits"),
+            Self::OverflowsCredits => f.write_str("OverflowsCredits"),
+            Self::OverflowsTimeout => f.write_str("OverflowsTimeout"),
+            Self::ExceedsCredits => f.write_str("ExceedsCredits"),
+            Self::ExceedsDebits => f.write_str("ExceedsDebits"),
+            Self(value) => write!(f, "CreateTransferStatus({value})"),
         }
+    }
+}
+
+impl core::fmt::Debug for CreateTransferStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Display::fmt(self, f)
     }
 }
 

@@ -329,3 +329,57 @@ pub(crate) extern "C" fn on_completion(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A reply comes from the cluster, which may run a newer release than this client, because
+    // replicas are upgraded before clients. Such a reply may carry a status code that this client
+    // does not know. This test feeds one known and one unknown status code through the decode path
+    // used by `on_completion`, and checks that both arrive intact. Run under Miri, it also checks
+    // that decoding the unknown status code is defined behavior.
+    #[test]
+    fn complete_preserves_unknown_status() {
+        assert!(cfg!(target_endian = "little"));
+        assert_eq!(mem::size_of::<tbc::CreateAccountResult>(), 16);
+
+        let status_unknown: u32 = u32::MAX - 1;
+        let timestamps: [u64; 2] = [1, 2];
+        let statuses: [u32; 2] = [tbc::CreateAccountStatus::Created.0, status_unknown];
+
+        #[repr(C, align(16))]
+        struct Reply([u8; 32]);
+        let mut reply = Reply([0; 32]);
+        for ((result, timestamp), status) in
+            reply.0.chunks_exact_mut(16).zip(timestamps).zip(statuses)
+        {
+            result[0..8].copy_from_slice(&timestamp.to_le_bytes());
+            result[8..12].copy_from_slice(&status.to_le_bytes());
+        }
+
+        let mut storage = PayloadBytes::new();
+        let storage_ptr: *mut PayloadBytes = &mut storage;
+        let target = unsafe {
+            PayloadBytes::cast::<tbc::CreateAccounts>(storage_ptr).write(PayloadTyped {
+                source: Vec::new(),
+                target: Vec::new(),
+            });
+            PayloadTyped::<tbc::CreateAccounts>::complete(storage_ptr, reply.0.as_ptr(), 32);
+            PayloadBytes::cast::<tbc::CreateAccounts>(storage_ptr)
+                .read()
+                .target
+        };
+
+        assert_eq!(target.len(), 2);
+        assert_eq!(target[0].timestamp, 1);
+        assert_eq!(target[0].status, tbc::CreateAccountStatus::Created);
+        assert_eq!(target[0].status.to_string(), "Created");
+        assert_eq!(target[1].timestamp, 2);
+        assert_eq!(target[1].status.0, status_unknown);
+        assert_eq!(
+            format!("{:?}", target[1].status),
+            format!("CreateAccountStatus({status_unknown})"),
+        );
+    }
+}

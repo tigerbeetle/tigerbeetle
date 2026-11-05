@@ -200,88 +200,99 @@ fn emit_bitflags(
     , .{ .rust_name = rust_name });
 }
 
-fn emit_enum_direct(
+/// Emits a status code as a transparent newtype over its backing integer, with one associated
+/// constant per known code, rather than as a Rust `enum`.
+///
+/// Status codes are read directly out of the reply that the cluster sends. Replicas are upgraded
+/// before clients, so a client may be talking to a cluster that is newer than itself, and that
+/// cluster may return a status code that this client has never heard of. A Rust `enum` must only
+/// ever hold one of its declared discriminants, so reading an unknown code into one is undefined
+/// behavior, and `#[non_exhaustive]` does not change that. Every value of a newtype is valid, so
+/// an unknown code is preserved and can be handled by the application.
+///
+/// The constants keep the same names as the former enum variants, and since the newtype derives
+/// `PartialEq` and `Eq`, they can still be used both in comparisons and as `match` patterns.
+fn emit_status(
     writer: anytype,
     comptime Type: type,
     comptime type_info: std.builtin.Type.Enum,
     comptime rust_name: []const u8,
 ) !void {
-    @setEvalBranchQuota(2000);
+    @setEvalBranchQuota(4000);
+    assert(type_info.is_exhaustive);
+    assert(std.mem.count(u8, rust_name, "_") == 0);
+    assert(rust_name[0] >= 'A' and rust_name[0] <= 'Z');
+
     const backing_type_text = resolve_rust_backing_integer(type_info.tag_type);
 
-    try writer.print("#[repr({s})]\n", .{backing_type_text});
-    try writer.print("#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]\n", .{});
-    try writer.print("#[non_exhaustive]\n", .{});
-    try writer.print("pub enum {s} {{\n", .{rust_name});
+    try writer.print(
+        \\#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+        \\#[repr(transparent)]
+        \\pub struct {[rust_name]s}(pub {[backing_type_text]s});
+        \\
+    , .{ .rust_name = rust_name, .backing_type_text = backing_type_text });
+
+    try writer.print("impl {s} {{\n", .{rust_name});
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         const field_name = stdx.to_case(field.name, .PascalCase);
         const int_value = @intFromEnum(@field(Type, field.name));
         const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
-        try writer.print("    {s} = " ++ int_fmt ++ ",\n", .{ field_name, int_value });
+        try writer.print("    pub const {s}: {s} = {s}(" ++ int_fmt ++ ");\n", .{
+            field_name,
+            rust_name,
+            rust_name,
+            int_value,
+        });
     }
-    try writer.print("}}\n\n", .{}); // enum close
+    try writer.print("}}\n\n", .{}); // impl close
 
-    { // convert from integer to enum
-        try writer.print("impl From<{s}> for {s} {{\n", .{ backing_type_text, rust_name });
+    try writer.print(
+        \\impl From<{[int_type]s}> for {[rust_name]s} {{
+        \\    fn from(value: {[int_type]s}) -> {[rust_name]s} {{
+        \\        {[rust_name]s}(value)
+        \\    }}
+        \\}}
+        \\
+        \\impl From<{[rust_name]s}> for {[int_type]s} {{
+        \\    fn from(value: {[rust_name]s}) -> {[int_type]s} {{
+        \\        value.0
+        \\    }}
+        \\}}
+        \\
+        \\
+    , .{ .rust_name = rust_name, .int_type = backing_type_text });
+
+    // Known codes print as their name, exactly as the derived `Debug` of the former enum did.
+    // Unknown codes print as the newtype, so that the raw code is never lost.
+    try writer.print(
+        \\impl core::fmt::Display for {[rust_name]s} {{
+        \\    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {{
+        \\        match *self {{
+        \\
+    , .{ .rust_name = rust_name });
+    inline for (type_info.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+        const field_name = stdx.to_case(field.name, .PascalCase);
         try writer.print(
-            \\    fn from(value: {s}) -> {s} {{
-            \\        match value {{
-            \\
-        , .{ backing_type_text, rust_name });
-        inline for (type_info.fields) |field| {
-            if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.to_case(field.name, .PascalCase);
-            const int_value = @intFromEnum(@field(Type, field.name));
-            const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
-            try writer.print("            " ++ int_fmt ++ " => {s}::{s},\n", .{
-                int_value,
-                rust_name,
-                field_name,
-            });
-        }
-        try writer.print(
-            \\            other_value => panic!("cannot convert {s} {{other_value}} to {s}")
-            \\        }}
-            \\    }}
-            \\
-        , .{ backing_type_text, rust_name });
-        try writer.print("}}\n\n", .{}); // impl From<int> close
+            "            Self::{[field_name]s} => f.write_str(\"{[field_name]s}\"),\n",
+            .{ .field_name = field_name },
+        );
     }
-    { // convert from enum to integer
-        try writer.print(
-            \\impl From<{[enum_type]s}> for {[int_type]s} {{
-            \\    fn from(value: {[enum_type]s}) -> {[int_type]s} {{
-            \\        value as {[int_type]s}
-            \\    }}
-            \\}}
-            \\
-            \\
-        , .{ .enum_type = rust_name, .int_type = backing_type_text });
-    }
-    { // implement display
-        try writer.print(
-            \\ impl core::fmt::Display for {[enum_name]s} {{
-            \\     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {{
-            \\         match self {{
-            \\
-        , .{ .enum_name = rust_name });
-        inline for (type_info.fields) |field| {
-            if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.to_case(field.name, .PascalCase);
-            try writer.print(
-                "             Self::{[field_name]s} => f.write_str(\"{[field_name]s}\"),\n",
-                .{ .field_name = field_name },
-            );
-        }
-        try writer.print(
-            \\        }}
-            \\    }}
-            \\}}
-            \\
-            \\
-        , .{});
-    }
+    try writer.print(
+        \\            Self(value) => write!(f, "{[rust_name]s}({{value}})"),
+        \\        }}
+        \\    }}
+        \\}}
+        \\
+        \\impl core::fmt::Debug for {[rust_name]s} {{
+        \\    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {{
+        \\        core::fmt::Display::fmt(self, f)
+        \\    }}
+        \\}}
+        \\
+        \\
+    , .{ .rust_name = rust_name });
 }
 
 fn emit_enum_manual(
@@ -479,7 +490,7 @@ pub fn main(init: std.process.Init) !void {
                     }),
                 },
                 .@"enum" => |info| {
-                    try emit_enum_direct(writer, type_mapping.source, info, rust_name);
+                    try emit_status(writer, type_mapping.source, info, rust_name);
                 },
                 else => try writer.print("pub type {s} = {s};\n\n", .{
                     rust_name,

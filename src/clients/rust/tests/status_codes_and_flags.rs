@@ -211,3 +211,27 @@ fn round_trip_query_filter_flags() {
         |rust_value| rust_value.0,
     );
 }
+
+// A cluster may run a newer release than this client, and so may return a status code that is
+// not in this client's `tb_client.h`. Such a code must round-trip unchanged and must format as
+// its raw value, for both status types.
+#[test]
+fn round_trip_create_status_unknown() {
+    let status_unknown: u32 = u32::MAX - 1;
+    assert!(!parse_c_enum_values("TB_CREATE_ACCOUNT_STATUS").contains(&status_unknown));
+    assert!(!parse_c_enum_values("TB_CREATE_TRANSFER_STATUS").contains(&status_unknown));
+
+    let account_status = tb::CreateAccountStatus::from(status_unknown);
+    assert_eq!(u32::from(account_status), status_unknown);
+    assert_eq!(
+        account_status.to_string(),
+        format!("CreateAccountStatus({status_unknown})"),
+    );
+
+    let transfer_status = tb::CreateTransferStatus::from(status_unknown);
+    assert_eq!(u32::from(transfer_status), status_unknown);
+    assert_eq!(
+        transfer_status.to_string(),
+        format!("CreateTransferStatus({status_unknown})"),
+    );
+}
