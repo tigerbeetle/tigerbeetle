@@ -307,7 +307,12 @@ pub(crate) extern "C" fn on_completion(
     result_ptr: *const u8,
     result_len: u32,
 ) {
-    unsafe {
+    // A panic here is an assertion failure, and the only correct way to handle it is to crash.
+    // A panic must not unwind out of this function into the Zig frames of the I/O thread: that is
+    // undefined behavior on Rust releases before 1.81, which the MSRV of 1.63 admits, and only
+    // became a guaranteed abort in 1.81. Abort explicitly, so that the crash is defined on every
+    // supported release.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         let status = (*batch).status;
 
         // This Arc is owned by the I/O thread and freed after typed completion returns.
@@ -327,6 +332,9 @@ pub(crate) extern "C" fn on_completion(
             (owner.vtable.complete)(owner.storage, result_ptr, result_len);
             Ok(owner)
         });
+    }));
+    if result.is_err() {
+        std::process::abort();
     }
 }
 
