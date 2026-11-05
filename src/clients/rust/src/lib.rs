@@ -347,6 +347,11 @@ pub struct Client {
     client: *mut tbc::tb_client_t,
 }
 
+// SAFETY: `client` points into a `Box` owned by this `Client`, so its address is stable when the
+// `Client` moves to another thread. Every `tb_client_*` entry point serializes on the client
+// interface's own lock, so calls through `&Client` may run concurrently from many threads.
+// The client is deinitialized only by `close(self)` or `drop`, both of which require exclusive
+// ownership, so no call can race with deinitialization.
 unsafe impl Send for Client {}
 unsafe impl Sync for Client {}
 
