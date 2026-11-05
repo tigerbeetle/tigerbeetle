@@ -11,7 +11,7 @@ You can enable emitting metrics by adding the following CLI flags to each replic
 [deployment method](./deploying/):
 
 ```
---experimental --statsd=127.0.0.1:8125
+--statsd=127.0.0.1:8125
 ```
 
 The `--statsd` argument must be specified as an `IP:Port` address (IPv4 or IPv6).  DNS names are not
