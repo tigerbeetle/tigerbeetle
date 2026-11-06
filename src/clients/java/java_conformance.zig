@@ -50,15 +50,10 @@ fn emit(printer: *Printer) !void {
         \\
         \\package com.tigerbeetle;
         \\
-        \\import java.io.BufferedReader;
-        \\import java.io.File;
-        \\import java.io.InputStreamReader;
-        \\import java.lang.ProcessBuilder.Redirect;
         \\import java.math.BigInteger;
         \\import java.time.Duration;
         \\import java.util.concurrent.CompletableFuture;
         \\import java.util.concurrent.ExecutionException;
-        \\import java.util.stream.Collectors;
         \\
         \\import org.junit.After;
         \\import org.junit.AfterClass;
@@ -149,7 +144,6 @@ fn emit(printer: *Printer) !void {
             }
         }
     }
-    try emit_server(printer);
     try printer.write("}\n");
 }
 
@@ -1078,126 +1072,4 @@ fn java_operation_name(name: ast.Call.Name) []const u8 {
         .query_transfers => "queryTransfers",
         .close_client => unreachable,
     };
-}
-
-fn emit_server(printer: *Printer) !void {
-    try printer.write_empty_line();
-    try printer.write_indented("private static class Server implements AutoCloseable {");
-    printer.indent();
-    try printer.write_indented(
-        "public static final String TB_SERVER = \"../../../zig-out/bin/tigerbeetle\";",
-    );
-    try printer.write_empty_line();
-    try printer.write_indented("public final String tb_file;");
-    try printer.write_indented("private final Process process;");
-    try printer.write_indented("private String address;");
-    try printer.write_empty_line();
-    try printer.write_indented("public Server(final String label) throws Exception {");
-    printer.indent();
-    try printer.write_indented("this.tb_file = \"./0_0.tigerbeetle.\" + label;");
-    try printer.write_empty_line();
-    try printer.write_indented("cleanUp();");
-    try printer.write_empty_line();
-    try printer.write_indented("String exe;");
-    try printer.write_indented("switch (JNILoader.OS.getOS()) {");
-    printer.indent();
-    try printer.write_indented("case windows:");
-    printer.indent();
-    try printer.write_indented("exe = TB_SERVER + \".exe\";");
-    try printer.write_indented("break;");
-    printer.dedent();
-    try printer.write_indented("default:");
-    printer.indent();
-    try printer.write_indented("exe = TB_SERVER;");
-    try printer.write_indented("break;");
-    printer.dedent();
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented(
-        "final var format = Runtime.getRuntime().exec(new String[] {exe, \"format\", " ++
-            "\"--cluster=0\",",
-    );
-    printer.indent();
-    printer.indent();
-    try printer.write_indented(
-        "\"--replica=0\", \"--replica-count=1\", \"--development\", tb_file});",
-    );
-    printer.dedent();
-    printer.dedent();
-    try printer.write_indented("if (format.waitFor() != 0) {");
-    printer.indent();
-    try printer.write_indented("final var reader =");
-    printer.indent();
-    printer.indent();
-    try printer.write_indented(
-        "new BufferedReader(new InputStreamReader(format.getErrorStream()));",
-    );
-    printer.dedent();
-    printer.dedent();
-    try printer.write_indented(
-        "final var error = reader.lines().collect(Collectors.joining(\". \"));",
-    );
-    try printer.write_indented("throw new Exception(\"Format failed. \" + error);");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("this.process = new ProcessBuilder()");
-    printer.indent();
-    printer.indent();
-    try printer.write_indented(
-        ".command(new String[] {exe, \"start\", \"--addresses=0\", \"--development\", tb_file})",
-    );
-    try printer.write_indented(
-        ".redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();",
-    );
-    printer.dedent();
-    printer.dedent();
-    try printer.write_empty_line();
-    try printer.write_indented("final var stdout = process.getInputStream();");
-    try printer.write_indented(
-        "try (final var reader = new BufferedReader(new InputStreamReader(stdout))) {",
-    );
-    printer.indent();
-    try printer.write_indented("this.address = reader.readLine().trim();");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("public String getAddress() {");
-    printer.indent();
-    try printer.write_indented("return address;");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("@Override");
-    try printer.write_indented("public void close() throws Exception {");
-    printer.indent();
-    try printer.write_indented("cleanUp();");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("private void cleanUp() throws Exception {");
-    printer.indent();
-    try printer.write_indented("try {");
-    printer.indent();
-    try printer.write_indented("if (process != null && process.isAlive()) {");
-    printer.indent();
-    try printer.write_indented("process.destroy();");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("final var file = new File(\"./\" + tb_file);");
-    try printer.write_indented("file.delete();");
-    printer.dedent();
-    try printer.write_indented("} catch (Throwable any) {");
-    printer.indent();
-    try printer.write_indented("throw new Exception(\"Cleanup has failed\");");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("}");
 }

@@ -42,15 +42,7 @@ fn emit(printer: *Printer) !void {
         \\
     );
     printer.indent();
-    try printer.write_indented("\"bufio\"");
-    try printer.write_indented("\"bytes\"");
     try printer.write_indented("\"errors\"");
-    try printer.write_indented("\"fmt\"");
-    try printer.write_indented("\"math/rand\"");
-    try printer.write_indented("\"os\"");
-    try printer.write_indented("\"os/exec\"");
-    try printer.write_indented("\"runtime\"");
-    try printer.write_indented("\"strings\"");
     try printer.write_indented("\"sync\"");
     try printer.write_indented("\"testing\"");
     try printer.write_indented("\"time\"");
@@ -61,7 +53,7 @@ fn emit(printer: *Printer) !void {
     try printer.write_empty_line();
     try printer.write_indented("func TestConformance(t *testing.T) {");
     printer.indent();
-    try printer.write_indented("port := startConformanceServer(t)");
+    try printer.write_indented("port := startServer(t)");
     try printer.write_empty_line();
     try printer.write_indented(
         "test := func(name string, body func(t *testing.T, client Client)) {",
@@ -106,7 +98,6 @@ fn emit(printer: *Printer) !void {
     }
     printer.dedent();
     try printer.write_indented("}");
-    try emit_server(printer);
     try emit_new_client(printer);
 }
 
@@ -627,117 +618,6 @@ fn flags_bits(flags_type: ast.Record.Type) u16 {
         .AccountFilterFlags, .QueryFilterFlags => 32,
         else => unreachable,
     };
-}
-
-fn emit_server(printer: *Printer) !void {
-    try printer.write_empty_line();
-    try printer.write_indented("func startConformanceServer(t *testing.T) string {");
-    printer.indent();
-    try printer.write_indented("var tigerbeetlePath string");
-    try printer.write_indented("if runtime.GOOS == \"windows\" {");
-    printer.indent();
-    try printer.write_indented("tigerbeetlePath = \"../../../tigerbeetle.exe\"");
-    printer.dedent();
-    try printer.write_indented("} else {");
-    printer.indent();
-    try printer.write_indented("tigerbeetlePath = \"../../../tigerbeetle\"");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented(
-        "replicaArg := fmt.Sprintf(\"--replica=%d\", TIGERBEETLE_REPLICA_ID)",
-    );
-    try printer.write_indented(
-        "replicaCountArg := fmt.Sprintf(\"--replica-count=%d\", TIGERBEETLE_REPLICA_COUNT)",
-    );
-    try printer.write_indented(
-        "clusterArg := fmt.Sprintf(\"--cluster=%d\", TIGERBEETLE_CLUSTER_ID)",
-    );
-    try printer.write_empty_line();
-    try printer.write_indented(
-        "fileName := fmt.Sprintf(\"./%d_%d_%d.tigerbeetle\", TIGERBEETLE_CLUSTER_ID, " ++
-            "TIGERBEETLE_REPLICA_ID, rand.Int())",
-    );
-    try printer.write_indented("t.Cleanup(func() {");
-    printer.indent();
-    try printer.write_indented("_ = os.Remove(fileName)");
-    printer.dedent();
-    try printer.write_indented("})");
-    try printer.write_empty_line();
-    try printer.write_indented(
-        "tbInit := exec.Command(tigerbeetlePath, \"format\", clusterArg, replicaArg, " ++
-            "replicaCountArg, fileName)",
-    );
-    try printer.write_indented("var tbErr bytes.Buffer");
-    try printer.write_indented("tbInit.Stdout = &tbErr");
-    try printer.write_indented("tbInit.Stderr = &tbErr");
-    try printer.write_indented("if err := tbInit.Run(); err != nil {");
-    printer.indent();
-    try printer.write_indented("fmt.Println(fmt.Sprint(err) + \": \" + tbErr.String())");
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("tbStart := exec.Command(tigerbeetlePath,");
-    printer.indent();
-    try printer.write_indented("\"start\",");
-    try printer.write_indented("\"--development\",");
-    try printer.write_indented("\"--addresses=0\",");
-    try printer.write_indented("fileName)");
-    printer.dedent();
-    try printer.write_empty_line();
-    try printer.write_indented("if testing.Verbose() {");
-    printer.indent();
-    try printer.write_indented("tbStart.Stderr = os.Stderr");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("// Stdin is not used,");
-    try printer.write_indented(
-        "// but when running with `--addresses=0`, the replica exits if stdin is closed.",
-    );
-    try printer.write_indented("stdin, err := tbStart.StdinPipe()");
-    try printer.write_indented("if err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_indented("_ = stdin");
-    try printer.write_empty_line();
-    try printer.write_indented("// Stdout is used to read the assigned TCP port.");
-    try printer.write_indented("stdout, err := tbStart.StdoutPipe()");
-    try printer.write_indented("if err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("if err := tbStart.Start(); err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_indented("t.Cleanup(func() {");
-    printer.indent();
-    try printer.write_indented("if err := tbStart.Process.Kill(); err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    printer.dedent();
-    try printer.write_indented("})");
-    try printer.write_empty_line();
-    try printer.write_indented("reader := bufio.NewReader(stdout)");
-    try printer.write_indented("port, err := reader.ReadString('\\n')");
-    try printer.write_indented("if err != nil {");
-    printer.indent();
-    try printer.write_indented("t.Fatal(err)");
-    printer.dedent();
-    try printer.write_indented("}");
-    try printer.write_empty_line();
-    try printer.write_indented("return strings.TrimSpace(port)");
-    printer.dedent();
-    try printer.write_indented("}");
 }
 
 fn emit_new_client(printer: *Printer) !void {
