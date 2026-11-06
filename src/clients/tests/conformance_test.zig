@@ -1,0 +1,58 @@
+pub const Arena = @import("conformance/arena.zig").Arena;
+pub const Printer = @import("conformance/printer.zig").Printer;
+pub const Words = @import("conformance/printer.zig").Words;
+pub const ast = @import("conformance/ast.zig");
+const parser = @import("conformance/parser.zig");
+
+// In the generated test files, suites appear in the order defined here. We
+// are trying to structure this like a walkthrough for readers of the
+// conformance test suite. The second tuple item is used in the generated test
+// identifiers e.g. test_get_account_balances_*.
+const suites: []const struct { []const u8, []const u8 } = &.{
+    .{ "client_create", "create_client" },
+    .{ "ids_generate", "generate_ids" },
+    .{ "accounts_create", "create_accounts" },
+    .{ "accounts_lookup", "lookup_accounts" },
+    .{ "transfers_create", "create_transfers" },
+    .{ "transfers_lookup", "lookup_transfers" },
+    .{ "account_transfers_get", "get_account_transfers" },
+    .{ "account_balances_get", "get_account_balances" },
+    .{ "accounts_query", "query_accounts" },
+    .{ "transfers_query", "query_transfers" },
+    .{ "transfers_two_phase", "two_phase_transfer" },
+    .{ "transfers_closing", "closing_transfer" },
+    .{ "accounts_import", "import_accounts" },
+    .{ "transfers_import", "import_transfers" },
+    .{ "uint128_range", "uint128_range" },
+    .{ "transfers_create_concurrent", "create_transfers_concurrent" },
+    .{ "client_close", "close_client" },
+};
+
+const Source = parser.Source;
+
+pub const sources: []const Source = sources: {
+    var result: [suites.len]Source = undefined;
+    for (suites, &result) |suite, *source| {
+        const file, const name = suite;
+        const path = "suites/" ++ file ++ ".zig";
+        source.* = .{ .path = path, .name = name, .text = @embedFile(path) };
+    }
+    const final = result;
+    break :sources &final;
+};
+
+pub const parse = parser.parse;
+
+// We're keeping this as a freestanding function so Printer doesn't need to
+// depend on ast.Case.
+pub fn write_not_applicable(printer: *Printer, case: ast.Case) !void {
+    try printer.print_indented("{s} N/A: \"{s}\"", .{
+        printer.options.comment_marker, case.description,
+    });
+    try printer.write_indent();
+    try printer.print("{s} Reason: ", .{printer.options.comment_marker});
+    for (@tagName(case.requirement.?)) |char| {
+        try printer.writer.writeByte(if (char == '_') ' ' else char);
+    }
+    try printer.write("\n");
+}

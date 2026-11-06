@@ -19,7 +19,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     // We need to build the tigerbeetle-node library manually for samples/testers to work.
     try shell.exec("npm install", .{});
 
-    for ([_][]const u8{ "test", "benchmark" }) |tester| {
+    for ([_][]const u8{ "test", "conformance_test", "benchmark" }) |tester| {
         log.info("testing {s}s", .{tester});
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io_std, &shell.env, .{

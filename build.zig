@@ -160,6 +160,10 @@ pub fn build_with_options(
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
         .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
+        .conformance_generate = b.step(
+            "conformance:generate",
+            "Generate the list of conformance suites and cases",
+        ),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -327,6 +331,11 @@ pub fn build_with_options(
         .mode = options.mode,
     });
 
+    const conformance_module = build_conformance(b, .{
+        .stdx_module = stdx_module,
+        .vsr_module = vsr_module,
+    });
+
     // zig build, zig build run
     build_tigerbeetle(b, .{
         .run = build_steps.run,
@@ -464,35 +473,46 @@ pub fn build_with_options(
     build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
     build_java_client(b, build_steps.clients_java, .{
-        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .mode = options.mode,
     });
     build_dotnet_client(b, build_steps.clients_dotnet, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .tb_client = tb_client,
         .mode = options.mode,
     });
     build_node_client(b, build_steps.clients_node, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .mode = options.mode,
     });
     build_python_client(b, build_steps.clients_python, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .tb_client = tb_client,
         .mode = options.mode,
     });
     build_ruby_client(b, build_steps.clients_ruby, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .tb_client_header = tb_client.header,
         .tb_client = tb_client,
         .mode = options.mode,
@@ -745,6 +765,22 @@ fn build_check(
     tigerbeetle.root_module.addImport("stdx", options.stdx_module);
     tigerbeetle.root_module.addImport("vsr", options.vsr_module);
     step_check.dependOn(&tigerbeetle.step);
+}
+
+fn build_conformance(
+    b: *std.Build,
+    options: struct {
+        stdx_module: *std.Build.Module,
+        vsr_module: *std.Build.Module,
+    },
+) *std.Build.Module {
+    const conformance_module = b.createModule(.{
+        .root_source_file = b.path("src/clients/tests/conformance_test.zig"),
+        .target = b.graph.host,
+    });
+    conformance_module.addImport("stdx", options.stdx_module);
+    conformance_module.addImport("vsr", options.vsr_module);
+    return conformance_module;
 }
 
 fn build_tigerbeetle(
@@ -1842,6 +1878,8 @@ fn build_go_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
@@ -1851,6 +1889,21 @@ fn build_go_client(
         .from = options.tb_client_header,
         .path = "./src/clients/go/native/tb_client.h",
     });
+
+    const go_conformance_generator = b.addExecutable(.{
+        .name = "go_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/go/go_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    go_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    go_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = go_conformance_generator,
+        .path = "./src/clients/go/conformance_test.go",
+    });
+    step_clients_go.dependOn(&conformance_tests.step);
 
     const go_bindings_generator = b.addExecutable(.{
         .name = "go_bindings",
@@ -1914,12 +1967,28 @@ fn build_java_client(
     b: *std.Build,
     step_clients_java: *std.Build.Step,
     options: struct {
-        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const java_conformance_generator = b.addExecutable(.{
+        .name = "java_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/java/java_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    java_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    java_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = java_conformance_generator,
+        .path = "./src/clients/java/src/test/java/com/tigerbeetle/ConformanceTest.java",
+    });
+    step_clients_java.dependOn(&conformance_tests.step);
+
     const java_bindings_generator = b.addExecutable(.{
         .name = "java_bindings",
         .root_module = b.createModule(.{
@@ -1976,10 +2045,27 @@ fn build_dotnet_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const dotnet_conformance_generator = b.addExecutable(.{
+        .name = "dotnet_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/dotnet/dotnet_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    dotnet_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    dotnet_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = dotnet_conformance_generator,
+        .path = "./src/clients/dotnet/TigerBeetle.Tests/ConformanceTests.cs",
+    });
+    step_clients_dotnet.dependOn(&conformance_tests.step);
+
     const dotnet_bindings_generator = b.addExecutable(.{
         .name = "dotnet_bindings",
         .root_module = b.createModule(.{
@@ -2013,9 +2099,26 @@ fn build_node_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const node_conformance_generator = b.addExecutable(.{
+        .name = "node_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/node/node_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    node_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    node_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = node_conformance_generator,
+        .path = "./src/clients/node/src/conformance_test.ts",
+    });
+    step_clients_node.dependOn(&conformance_tests.step);
+
     const node_bindings_generator = b.addExecutable(.{
         .name = "node_bindings",
         .root_module = b.createModule(.{
@@ -2123,10 +2226,30 @@ fn build_python_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const python_conformance_generator = b.addExecutable(.{
+        .name = "python_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/python/python_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    python_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    python_conformance_generator.root_module.addImport(
+        "conformance",
+        options.conformance_module,
+    );
+    const conformance_tests = Generated.file(b, .{
+        .generator = python_conformance_generator,
+        .path = "./src/clients/python/tests/test_conformance.py",
+    });
+    step_clients_python.dependOn(&conformance_tests.step);
+
     const python_bindings_generator = b.addExecutable(.{
         .name = "python_bindings",
         .root_module = b.createModule(.{
@@ -2159,11 +2282,28 @@ fn build_ruby_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         tb_client_header: std.Build.LazyPath,
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const ruby_conformance_generator = b.addExecutable(.{
+        .name = "ruby_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/ruby/ruby_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    ruby_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    ruby_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = ruby_conformance_generator,
+        .path = "./src/clients/ruby/tests/integration/test_conformance.rb",
+    });
+    step_clients_ruby.dependOn(&conformance_tests.step);
+
     // Ruby bindings for flags, structs, etc.
     step_clients_ruby.dependOn(&build_ruby_client_generate(b, .ruby, .{
         .path = "./src/clients/ruby/src/tigerbeetle/bindings.rb",

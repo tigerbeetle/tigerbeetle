@@ -203,9 +203,7 @@ pub fn slice_from_value(
     var data_length: usize = undefined;
     assert(c.napi_get_buffer_info(env, value, &data, &data_length) == c.napi_ok);
 
-    if (data_length < 1) return throw(env, .{
-        .message = key ++ " must not be empty",
-    });
+    if (data_length < 1) return &.{};
 
     return @as([*]u8, @ptrCast(data.?))[0..data_length];
 }
