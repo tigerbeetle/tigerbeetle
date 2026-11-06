@@ -470,7 +470,7 @@ pub fn build_with_options(
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
-    const go_conformance_tests = build_go_client(b, build_steps.clients_go, .{
+    build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .stdx_module = stdx_module,
@@ -478,29 +478,14 @@ pub fn build_with_options(
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
-    const java_conformance_tests = build_java_client(b, build_steps.clients_java, .{
+    build_java_client(b, build_steps.clients_java, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .stdx_module = stdx_module,
         .conformance_module = conformance_module,
         .mode = options.mode,
     });
-    const dotnet_conformance_tests = build_dotnet_client(b, build_steps.clients_dotnet, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
-        .stdx_module = stdx_module,
-        .conformance_module = conformance_module,
-        .tb_client = tb_client,
-        .mode = options.mode,
-    });
-    const node_conformance_tests = build_node_client(b, build_steps.clients_node, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
-        .stdx_module = stdx_module,
-        .conformance_module = conformance_module,
-        .mode = options.mode,
-    });
-    const python_conformance_tests = build_python_client(b, build_steps.clients_python, .{
+    build_dotnet_client(b, build_steps.clients_dotnet, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .stdx_module = stdx_module,
@@ -508,7 +493,22 @@ pub fn build_with_options(
         .tb_client = tb_client,
         .mode = options.mode,
     });
-    const ruby_conformance_tests = build_ruby_client(b, build_steps.clients_ruby, .{
+    build_node_client(b, build_steps.clients_node, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
+        .mode = options.mode,
+    });
+    build_python_client(b, build_steps.clients_python, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
+        .tb_client = tb_client,
+        .mode = options.mode,
+    });
+    build_ruby_client(b, build_steps.clients_ruby, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .stdx_module = stdx_module,
@@ -522,20 +522,6 @@ pub fn build_with_options(
         .vsr_options = vsr_options,
         .tb_client_header = tb_client.header,
         .mode = options.mode,
-    });
-
-    // zig build conformance:generate
-    build_conformance_list(b, build_steps.conformance_generate, .{
-        .stdx_module = stdx_module,
-        .conformance_module = conformance_module,
-        .tests = &.{
-            dotnet_conformance_tests,
-            go_conformance_tests,
-            java_conformance_tests,
-            node_conformance_tests,
-            python_conformance_tests,
-            ruby_conformance_tests,
-        },
     });
 
     // zig build clients:c:sample
@@ -795,39 +781,6 @@ fn build_conformance(
     conformance_module.addImport("stdx", options.stdx_module);
     conformance_module.addImport("vsr", options.vsr_module);
     return conformance_module;
-}
-
-fn build_conformance_list(
-    b: *std.Build,
-    step_generate: *std.Build.Step,
-    options: struct {
-        stdx_module: *std.Build.Module,
-        conformance_module: *std.Build.Module,
-        // The generated conformance tests of each language, linked from the list.
-        tests: []const *Generated,
-    },
-) void {
-    const conformance_list = b.addExecutable(.{
-        .name = "conformance_list",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/clients/tests/conformance_test_list.zig"),
-            .target = b.graph.host,
-        }),
-    });
-    conformance_list.root_module.addImport("stdx", options.stdx_module);
-    conformance_list.root_module.addImport("conformance", options.conformance_module);
-
-    const run = b.addRunArtifact(conformance_list);
-    run.setCwd(b.path("."));
-    for (options.tests) |generated| {
-        run.addArg(generated.destination["./".len..]);
-        run.step.dependOn(&generated.step);
-    }
-    const list = Generated.file_copy(b, .{
-        .from = run.captureStdOut(.{}),
-        .path = "./src/clients/tests/conformance_tests.md",
-    });
-    step_generate.dependOn(&list.step);
 }
 
 fn build_tigerbeetle(
@@ -1930,7 +1883,7 @@ fn build_go_client(
         tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     // Updates the generated header file:
     const tb_client_header_copy = Generated.file_copy(b, .{
         .from = options.tb_client_header,
@@ -2008,8 +1961,6 @@ fn build_go_client(
             }),
         );
     }
-
-    return conformance_tests;
 }
 
 fn build_java_client(
@@ -2022,7 +1973,7 @@ fn build_java_client(
         conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     const java_conformance_generator = b.addExecutable(.{
         .name = "java_conformance",
         .root_module = b.createModule(.{
@@ -2086,8 +2037,6 @@ fn build_java_client(
             lib.out_filename,
         }));
     }
-
-    return conformance_tests;
 }
 
 fn build_dotnet_client(
@@ -2101,7 +2050,7 @@ fn build_dotnet_client(
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     const dotnet_conformance_generator = b.addExecutable(.{
         .name = "dotnet_conformance",
         .root_module = b.createModule(.{
@@ -2142,8 +2091,6 @@ fn build_dotnet_client(
             platform.file_name,
         }));
     }
-
-    return conformance_tests;
 }
 
 fn build_node_client(
@@ -2156,7 +2103,7 @@ fn build_node_client(
         conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     const node_conformance_generator = b.addExecutable(.{
         .name = "node_conformance",
         .root_module = b.createModule(.{
@@ -2271,8 +2218,6 @@ fn build_node_client(
             "client.node",
         }));
     }
-
-    return conformance_tests;
 }
 
 fn build_python_client(
@@ -2286,7 +2231,7 @@ fn build_python_client(
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     const python_conformance_generator = b.addExecutable(.{
         .name = "python_conformance",
         .root_module = b.createModule(.{
@@ -2329,8 +2274,6 @@ fn build_python_client(
             platform.file_name,
         }));
     }
-
-    return conformance_tests;
 }
 
 fn build_ruby_client(
@@ -2345,7 +2288,7 @@ fn build_ruby_client(
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
-) *Generated {
+) void {
     const ruby_conformance_generator = b.addExecutable(.{
         .name = "ruby_conformance",
         .root_module = b.createModule(.{
@@ -2397,8 +2340,6 @@ fn build_ruby_client(
             platform.file_name,
         }));
     }
-
-    return conformance_tests;
 }
 
 fn build_ruby_client_generate(
