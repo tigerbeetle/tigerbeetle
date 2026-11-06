@@ -13,9 +13,11 @@ import {
   createClient,
   CreateAccountStatus,
   CreateTransferStatus,
+  ErrorCodes,
   id,
   QueryFilter,
   QueryFilterFlags,
+  RequestError,
   Transfer,
   TransferFlags,
 } from '.'
@@ -2549,6 +2551,10 @@ test('get_account_transfers_fails_when_the_limit_is_too_large', async (client) =
       limit: 10000,
       flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
     })
+  }, (error: unknown): boolean => {
+    assert.ok(error instanceof RequestError)
+    assert.strictEqual(error.code, ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
   })
 })
 
@@ -4008,6 +4014,10 @@ test('get_account_balances_fails_when_the_limit_is_too_large', async (client) =>
       limit: 10000,
       flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
     })
+  }, (error: unknown): boolean => {
+    assert.ok(error instanceof RequestError)
+    assert.strictEqual(error.code, ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
   })
 })
 
@@ -4482,6 +4492,10 @@ test('query_accounts_fails_when_the_limit_is_too_large', async (client) => {
       user_data_128: id(),
       limit: 10000,
     })
+  }, (error: unknown): boolean => {
+    assert.ok(error instanceof RequestError)
+    assert.strictEqual(error.code, ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
   })
 })
 
@@ -5210,6 +5224,10 @@ test('query_transfers_fails_when_the_limit_is_too_large', async (client) => {
       ...query_filter_default,
       limit: 10000,
     })
+  }, (error: unknown): boolean => {
+    assert.ok(error instanceof RequestError)
+    assert.strictEqual(error.code, ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
   })
 })
 
@@ -5832,6 +5850,10 @@ test('close_client_fails_operations_after_close', async (client) => {
   client.destroy()
   await assert.rejects(async (): Promise<void> => {
     await client.lookupAccounts([id()])
+  }, (error: unknown): boolean => {
+    assert.ok(error instanceof RequestError)
+    assert.strictEqual(error.code, ErrorCodes.ERR_CLIENT_CLOSED)
+    return true
   })
 })
 

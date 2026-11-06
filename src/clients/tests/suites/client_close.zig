@@ -3,7 +3,7 @@ const ct = @import("../conformance_test_api.zig");
 test "fails operations after close" {
     ct.close_client();
 
-    ct.assert_fail(ct.lookup_accounts(.{ct.generate_id()}));
+    ct.assert_fail_with(ct.lookup_accounts(.{ct.generate_id()}), .client_closed);
 }
 
 test "fails a second close" {
@@ -11,5 +11,5 @@ test "fails a second close" {
 
     ct.close_client();
 
-    ct.assert_fail(ct.close_client());
+    ct.assert_fail_with(ct.close_client(), .client_closed);
 }

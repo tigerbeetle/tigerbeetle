@@ -294,10 +294,16 @@ fn emit_assertion(
             const value = try render_expression(printer, comparison.expected.expression);
             try printer.print_indented("assert_operator({s}, :>, {s})", .{ actual, value });
         },
-        .fail => |call| {
-            try printer.write_indented("assert_raises(StandardError) do");
+        .fail => |failure| {
+            if (failure.client_error) |client_error| {
+                try printer.print_indented("assert_raises(TigerBeetle::{s}) do", .{
+                    ruby_error_name(client_error),
+                });
+            } else {
+                try printer.write_indented("assert_raises(StandardError) do");
+            }
             printer.indent();
-            try emit_invocation(printer, call, .{});
+            try emit_invocation(printer, failure.call, .{});
             printer.dedent();
             try printer.write_indented("end");
         },
@@ -384,6 +390,13 @@ fn render_arithmetic(
         operator,
         arithmetic.by,
     });
+}
+
+fn ruby_error_name(client_error: ast.ClientError) []const u8 {
+    return switch (client_error) {
+        .too_much_data => "PacketError",
+        .client_closed => "ClientClosedError",
+    };
 }
 
 fn render_flags(

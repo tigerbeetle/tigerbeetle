@@ -119,10 +119,16 @@ fn dump_assertion(assertion: ast.Assertion) void {
             dump_expression(greater_than.expected.expression);
             print(")", .{});
         },
-        .fail => |call| {
-            print("assert_fail(", .{});
-            dump_call(call);
-            print(")", .{});
+        .fail => |failure| {
+            if (failure.client_error) |client_error| {
+                print("assert_fail_with(", .{});
+                dump_call(failure.call);
+                print(", .{s})", .{@tagName(client_error)});
+            } else {
+                print("assert_fail(", .{});
+                dump_call(failure.call);
+                print(")", .{});
+            }
         },
     }
 }

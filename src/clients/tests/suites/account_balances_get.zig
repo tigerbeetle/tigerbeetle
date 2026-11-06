@@ -1147,9 +1147,9 @@ test "returns no balances without the debits or credits flag" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail(ct.get_account_balances(.{
+    ct.assert_fail_with(ct.get_account_balances(.{
         .account_id = ct.generate_id(),
         .limit = 10000,
         .flags = .{ .debits = true, .credits = true },
-    }));
+    }), .too_much_data);
 }

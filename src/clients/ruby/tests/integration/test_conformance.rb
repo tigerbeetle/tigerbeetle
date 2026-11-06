@@ -2584,7 +2584,7 @@ class TestConformance < Minitest::Test
   end
 
   def test_get_account_transfers_fails_when_the_limit_is_too_large
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::PacketError) do
       @client.get_account_transfers(
         TigerBeetle::AccountFilter.new(
           account_id: TigerBeetle.id,
@@ -4125,7 +4125,7 @@ class TestConformance < Minitest::Test
   end
 
   def test_get_account_balances_fails_when_the_limit_is_too_large
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::PacketError) do
       @client.get_account_balances(
         TigerBeetle::AccountFilter.new(
           account_id: TigerBeetle.id,
@@ -4613,7 +4613,7 @@ class TestConformance < Minitest::Test
   end
 
   def test_query_accounts_fails_when_the_limit_is_too_large
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::PacketError) do
       @client.query_accounts(
         TigerBeetle::QueryFilter.new(
           user_data_128: TigerBeetle.id,
@@ -5352,7 +5352,7 @@ class TestConformance < Minitest::Test
   end
 
   def test_query_transfers_fails_when_the_limit_is_too_large
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::PacketError) do
       @client.query_transfers(
         TigerBeetle::QueryFilter.new(
           limit: 10000
@@ -6009,14 +6009,14 @@ class TestConformance < Minitest::Test
 
   def test_close_client_fails_operations_after_close
     @client.close
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::ClientClosedError) do
       @client.lookup_accounts([TigerBeetle.id])
     end
   end
 
   def test_close_client_fails_a_second_close
     @client.close
-    assert_raises(StandardError) do
+    assert_raises(TigerBeetle::ClientClosedError) do
       @client.close
     end
   end
