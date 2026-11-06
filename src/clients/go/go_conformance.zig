@@ -231,13 +231,10 @@ fn emit_call(
         client_error: ?ast.ClientError = null,
     },
 ) !void {
-    switch (call.name) {
-        .close_client => {
-            assert(options.binding == null);
-            try printer.write_indented("client.Close()");
-            return;
-        },
-        else => {},
+    if (call.name == .close_client) {
+        assert(options.binding == null);
+        try printer.write_indented("client.Close()");
+        return;
     }
 
     try printer.write_indent();
@@ -249,16 +246,23 @@ fn emit_call(
 
     switch (call.name) {
         .create_accounts, .create_transfers => {
-            const record_type: ast.Record.Type =
-                if (call.name == .create_accounts) .Account else .Transfer;
+            const record_type: ast.Record.Type = if (call.name == .create_accounts)
+                .Account
+            else
+                .Transfer;
+
             if (call.arguments.len == 0) {
                 // gofmt collapses an empty composite literal onto a single line.
                 try printer.print("[]{s}{{}})\n", .{@tagName(record_type)});
             } else {
                 try printer.print("[]{s}{{\n", .{@tagName(record_type)});
                 printer.indent();
-                for (call.arguments) |argument| try emit_record(printer, argument.record);
+
+                for (call.arguments) |argument| {
+                    try emit_record(printer, argument.record);
+                }
                 printer.dedent();
+
                 try printer.write_indented("})");
             }
         },

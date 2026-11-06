@@ -697,7 +697,8 @@ const Parser = struct {
     ) ParseError!ast.Record {
         const tree = &parser.tree;
         const fields = try parser.arena.alloc(ast.FieldValue, struct_init.ast.fields.len);
-        var seen = std.bit_set.IntegerBitSet(64).initEmpty();
+
+        var seen: std.bit_set.IntegerBitSet(64) = .initEmpty();
         for (struct_init.ast.fields, 0..) |field_init, index| {
             const name_token = tree.firstToken(field_init) - 2;
             const field_name = tree.tokenSlice(name_token);
@@ -706,6 +707,7 @@ const Parser = struct {
                     field_name,
                     @tagName(record_type),
                 });
+
             if (seen.isSet(field_index)) {
                 return parser.fail(name_token, "duplicate field '{s}'", .{field_name});
             }
@@ -735,6 +737,7 @@ const Parser = struct {
                     field_name,
                 });
             }
+
             if (value == .enum_literal and
                 !record_field_enum_has(record_type, field_name, value.enum_literal))
             {
@@ -744,6 +747,7 @@ const Parser = struct {
                     field_name,
                 });
             }
+
             fields[index] = .{
                 .field = .{
                     .name = field_name,
@@ -752,13 +756,16 @@ const Parser = struct {
                 .value = value,
             };
         }
+
         const empty_allowed = switch (record_type) {
             .AccountFilter, .QueryFilter => true,
             else => ast.Record.is_flags(record_type),
         };
+
         if (fields.len == 0 and !empty_allowed) {
             return parser.fail(struct_init.ast.lbrace, "empty record", .{});
         }
+
         return .{ .type = record_type, .fields = fields };
     }
 
