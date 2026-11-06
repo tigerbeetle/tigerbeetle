@@ -333,7 +333,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
                     if (only_same) {
                         const n = self.prng.index(partition);
-                        partition[n] = true;
+                        partition[n] = !partition[0];
                     }
                 },
                 .isolate_single => {
