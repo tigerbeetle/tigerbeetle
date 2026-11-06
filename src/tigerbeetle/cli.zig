@@ -66,6 +66,7 @@ const CLIArgs = union(enum) {
         addresses: vsr.ClusterAddress,
         cache_grid: ?ByteSize = null,
         development: bool = false,
+        statsd: ?[]const u8 = null,
 
         // Everything from here until positional arguments is considered experimental, and requires
         // `--experimental` to be set. Experimental flags must default to null, except for bools
@@ -94,8 +95,6 @@ const CLIArgs = union(enum) {
 
         /// Legacy option. Star replication is the default behavior now.
         replicate_star: bool = false,
-
-        statsd: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -847,8 +846,9 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
-        "addresses",   "cache_grid",
-        "development", "experimental",
+        "addresses",    "cache_grid",
+        "development",  "statsd",
+        "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
         @setEvalBranchQuota(4_000);
