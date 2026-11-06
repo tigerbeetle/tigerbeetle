@@ -43,7 +43,10 @@ pub const RustDocs = Docs{
 
     .test_file_name = "main",
 
-    .install_commands = "cargo add tigerbeetle",
+    .install_commands =
+    \\# The client can be older than your TigerBeetle cluster, but must not be newer.
+    \\cargo add tigerbeetle@=X.Y.Z
+    ,
 
     .run_commands = "cargo run",
 

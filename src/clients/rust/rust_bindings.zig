@@ -543,7 +543,7 @@ pub fn main(init: std.process.Init) !void {
         \\    ) -> TB_CLIENT_STATUS;
         \\
         \\    // Registers or unregisters the application log callback.
-        \\    pub fn register_log_callback(
+        \\    pub fn tb_client_register_log_callback(
         \\        callback: ::std::option::Option<
         \\            unsafe extern "C" fn(
         \\                TB_LOG_LEVEL,
