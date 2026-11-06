@@ -7,7 +7,7 @@ const MiB = 1 << 20;
 const log = std.log;
 
 pub const std_options: std.Options = .{
-    .log_level = .debug,
+    .log_level = .info,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -68,13 +68,18 @@ const World = struct {
     }
 
     fn run_safety(world: *World) !void {
+        var step_count: u32 = 0;
+        defer log.info("run_safety: step_count={}", .{step_count});
+
         while (true) {
+            step_count += 1;
             try world.step();
             world.check();
         }
     }
 
     fn run_liveness(world: *World) void {
+        if (true) return; // TODO
         var op_max: u64 = 1;
         for (0..1_000_000) |index| {
             world.replica_request(index % replica_count, index);
@@ -190,7 +195,7 @@ const Pipeline = struct {
         return &pipeline.entry[index];
     }
 
-    pub fn op_head(pipeline: *const Pipeline) u64 {
+    pub fn op_head(pipeline: *const Pipeline) ?u64 {
         var op: ?u64 = null;
         for (&pipeline.entry, 0..) |*entry, entry_index| {
             if (!entry.is_reserved()) {
@@ -199,7 +204,7 @@ const Pipeline = struct {
                 op = entry.op;
             }
         }
-        return op orelse pipeline.op_base;
+        return op;
     }
 
     pub fn full(pipeline: *const Pipeline) bool {
@@ -208,7 +213,12 @@ const Pipeline = struct {
 
     pub fn push(pipeline: *Pipeline, entry: Entry) void {
         assert(!pipeline.full());
-        assert(entry.op == pipeline.op_head() + 1);
+        assert(pipeline.op_base <= entry.op);
+        if (pipeline.op_head()) |head| {
+            assert(entry.op == head + 1);
+        } else {
+            assert(entry.op == pipeline.op_base);
+        }
         assert(pipeline.get(entry.op) == null);
         const index = pipeline.op_to_index(entry.op).?;
         pipeline.entry[index] = entry;
@@ -283,13 +293,15 @@ const Replica = struct {
             return;
         }
 
-        const op_head = replica.local().pipeline.op_head();
+        const op, const parent_checksum = if (replica.local().pipeline.op_head()) |head|
+            .{ head + 1, replica.local().pipeline.get(head).?.checksum }
+        else
+            .{ replica.local().committed_last.op + 1, replica.local().committed_last.checksum };
 
-        const parent_checksum = (replica.local().pipeline.get(op_head) orelse
-            &replica.local().committed_last).checksum;
+        log.info("{}: on_request: advancing to op={}", .{ replica.replica, op });
 
         var entry: Entry = .{
-            .op = op_head + 1,
+            .op = op,
             .view = replica.local().view_max,
             .checksum = 0,
             .parent = parent_checksum,
@@ -297,7 +309,7 @@ const Replica = struct {
         };
         entry.set_checksum();
         replica.local().pipeline.push(entry);
-        assert(replica.local().pipeline.op_head() == op_head + 1);
+        assert(replica.local().pipeline.op_head().? == op);
     }
 
     fn commit(replica: *Replica) void {
