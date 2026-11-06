@@ -54,6 +54,8 @@ pub const TimeOS = @import("time.zig").TimeOS;
 pub const TimeSim = @import("time.zig").TimeSim;
 pub const Timer = @import("time.zig").Timer;
 
+pub const Process = @import("process.zig");
+
 const net = @import("./net.zig");
 pub const IPAddress = net.IPAddress;
 pub const SocketAddress = net.SocketAddress;
