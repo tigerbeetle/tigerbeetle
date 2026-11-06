@@ -179,7 +179,7 @@ const pipeline_max: u64 = 2;
 const Pipeline = struct {
     entry: [pipeline_max]Entry = @splat(.reserved),
     ok: [pipeline_max]bool = @splat(false),
-    last_committed_op: u64 = 1,
+    op_base: u64 = 2,
 
     fn get(pipeline: *Pipeline, op: u64) ?*Entry {
         const index = pipeline.op_to_index(op) orelse return null;
@@ -190,12 +190,35 @@ const Pipeline = struct {
         return &pipeline.entry[index];
     }
 
+    pub fn op_head(pipeline: *const Pipeline) u64 {
+        var op: ?u64 = null;
+        for (&pipeline.entry, 0..) |*entry, entry_index| {
+            if (!entry.is_reserved()) {
+                assert(entry.op == pipeline.op_base + entry_index);
+                assert(op == null or op.? < entry.op);
+                op = entry.op;
+            }
+        }
+        return op orelse pipeline.op_base;
+    }
+
+    pub fn full(pipeline: *const Pipeline) bool {
+        return !pipeline.entry[pipeline.entry.len - 1].is_reserved();
+    }
+
+    pub fn push(pipeline: *Pipeline, entry: Entry) void {
+        assert(!pipeline.full());
+        assert(entry.op == pipeline.op_head() + 1);
+        assert(pipeline.get(entry.op) == null);
+        const index = pipeline.op_to_index(entry.op).?;
+        pipeline.entry[index] = entry;
+        assert(pipeline.get(entry.op).?.checksum == entry.checksum);
+    }
+
     fn op_to_index(pipeline: *Pipeline, op: u64) ?u64 {
-        if (op <= pipeline.last_committed_op) return null;
-        assert(op > pipeline.last_committed_op);
-        const index = op - pipeline.last_committed_op - 1;
-        if (index >= pipeline_max) return null;
-        return index;
+        if (op < pipeline.op_base) return null;
+        const index = op - pipeline.op_base;
+        return if (index < pipeline.entry.len) index else null;
     }
 
     fn persist(pipeline: *Pipeline, prng: *FRNG) !void {
@@ -212,14 +235,28 @@ const Pipeline = struct {
 
     fn pop(pipeline: *Pipeline) Entry {
         const entry = pipeline.entry[0];
+        assert(!entry.is_reserved());
+        assert(pipeline.op_base == entry.op);
 
         pipeline.entry[0] = .reserved;
         pipeline.ok[0] = false;
         std.mem.rotate(Entry, &pipeline.entry, 1);
         std.mem.rotate(bool, &pipeline.ok, 1);
 
-        assert(!entry.is_reserved());
+        pipeline.op_base += 1;
+        assert(pipeline.op_base == entry.op + 1);
         return entry;
+    }
+
+    pub fn format(
+        pipeline: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print("base={}", .{pipeline.op_base});
+        for (pipeline.entry) |entry| {
+            try writer.print(" {f}", .{entry});
+        }
+        try writer.print("\n", .{});
     }
 };
 
@@ -242,17 +279,25 @@ const Replica = struct {
         if (!replica.primary()) {
             return;
         }
-        // TODO: we need to select a quorum
-        const op = replica.local().committed_last.op + 1;
-        const parent = replica.local().committed_last.checksum;
-        replica.local().committed_last = .{
-            .op = op,
+        if (replica.local().pipeline.full()) {
+            return;
+        }
+
+        const op_head = replica.local().pipeline.op_head();
+
+        const parent_checksum = (replica.local().pipeline.get(op_head) orelse
+            &replica.local().committed_last).checksum;
+
+        var entry: Entry = .{
+            .op = op_head + 1,
             .view = replica.local().view_max,
             .checksum = 0,
-            .parent = parent,
+            .parent = parent_checksum,
             .payload = payload,
         };
-        replica.local().committed_last.set_checksum();
+        entry.set_checksum();
+        replica.local().pipeline.push(entry);
+        assert(replica.local().pipeline.op_head() == op_head + 1);
     }
 
     fn commit(replica: *Replica) void {
@@ -331,7 +376,11 @@ const Entry = extern struct {
     }
 
     pub fn format(entry: *const Entry, writer: *std.Io.Writer) !void {
-        try writer.print("{}/{}={}", .{ entry.op, entry.view, entry.checksum });
+        if (entry.is_reserved()) {
+            try writer.print("_", .{});
+        } else {
+            try writer.print("{}/{}={}", .{ entry.op, entry.view, entry.checksum });
+        }
     }
 
     fn set_checksum(entry: *Entry) void {
