@@ -399,6 +399,7 @@ TOCTOUs
 toolchain
 Tornow
 tprt
+transpiler
 triaged
 Troosh
 Tunables
