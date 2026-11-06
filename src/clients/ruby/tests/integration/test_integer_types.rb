@@ -1,14 +1,6 @@
 require_relative "tiger_beetle_integration_test"
 
 class TestIntegerTypes < TigerBeetleIntegrationTest
-  def test_u128_field_rejects_float
-    transfer = TigerBeetle::Transfer.new(id: 1, amount: 1.5, ledger: 1, code: 1)
-
-    assert_type_error("amount must be an Integer, got Float") do
-      @client.create_transfers([transfer])
-    end
-  end
-
   def test_u16_field_rejects_float
     account = TigerBeetle::Account.new(id: 1, ledger: 1, code: 1.5)
 

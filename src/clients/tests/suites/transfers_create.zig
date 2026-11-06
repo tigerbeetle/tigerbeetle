@@ -197,9 +197,10 @@ test "rejects a zero debit account id" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = 0,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -209,6 +210,9 @@ test "rejects a zero debit account id" {
     });
 
     ct.assert_equal(results, .{.{ .status = .debit_account_id_must_not_be_zero }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a debit account id of the maximum u128" {
@@ -219,9 +223,10 @@ test "rejects a debit account id of the maximum u128" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = ct.uint128_max,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -231,6 +236,9 @@ test "rejects a debit account id of the maximum u128" {
     });
 
     ct.assert_equal(results, .{.{ .status = .debit_account_id_must_not_be_int_max }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a zero credit account id" {
@@ -239,9 +247,10 @@ test "rejects a zero credit account id" {
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = 0,
             .amount = 10,
@@ -251,6 +260,9 @@ test "rejects a zero credit account id" {
     });
 
     ct.assert_equal(results, .{.{ .status = .credit_account_id_must_not_be_zero }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a credit account id of the maximum u128" {
@@ -261,9 +273,10 @@ test "rejects a credit account id of the maximum u128" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = ct.uint128_max,
             .amount = 10,
@@ -273,6 +286,9 @@ test "rejects a credit account id of the maximum u128" {
     });
 
     ct.assert_equal(results, .{.{ .status = .credit_account_id_must_not_be_int_max }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a zero ledger" {
@@ -283,9 +299,10 @@ test "rejects a zero ledger" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -295,6 +312,9 @@ test "rejects a zero ledger" {
     });
 
     ct.assert_equal(results, .{.{ .status = .ledger_must_not_be_zero }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a zero code" {
@@ -305,9 +325,10 @@ test "rejects a zero code" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -317,6 +338,9 @@ test "rejects a zero code" {
     });
 
     ct.assert_equal(results, .{.{ .status = .code_must_not_be_zero }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects identical debit and credit accounts" {
@@ -325,9 +349,10 @@ test "rejects identical debit and credit accounts" {
         .{ .id = account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = account_id,
             .credit_account_id = account_id,
             .amount = 10,
@@ -337,6 +362,9 @@ test "rejects identical debit and credit accounts" {
     });
 
     ct.assert_equal(results, .{.{ .status = .accounts_must_be_different }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects an unknown debit account" {
@@ -345,9 +373,10 @@ test "rejects an unknown debit account" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = ct.generate_id(),
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -357,6 +386,9 @@ test "rejects an unknown debit account" {
     });
 
     ct.assert_equal(results, .{.{ .status = .debit_account_not_found }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects an unknown credit account" {
@@ -365,9 +397,10 @@ test "rejects an unknown credit account" {
         .{ .id = debit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = ct.generate_id(),
             .amount = 10,
@@ -377,6 +410,9 @@ test "rejects an unknown credit account" {
     });
 
     ct.assert_equal(results, .{.{ .status = .credit_account_not_found }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects accounts on different ledgers" {
@@ -387,9 +423,10 @@ test "rejects accounts on different ledgers" {
         .{ .id = credit_account_id, .ledger = 2, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -399,6 +436,9 @@ test "rejects accounts on different ledgers" {
     });
 
     ct.assert_equal(results, .{.{ .status = .accounts_must_have_the_same_ledger }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a transfer on a different ledger to its accounts" {
@@ -409,9 +449,10 @@ test "rejects a transfer on a different ledger to its accounts" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -421,6 +462,9 @@ test "rejects a transfer on a different ledger to its accounts" {
     });
 
     ct.assert_equal(results, .{.{ .status = .transfer_must_have_the_same_ledger_as_accounts }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects mutually exclusive flags" {
@@ -431,9 +475,10 @@ test "rejects mutually exclusive flags" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -444,6 +489,9 @@ test "rejects mutually exclusive flags" {
     });
 
     ct.assert_equal(results, .{.{ .status = .flags_are_mutually_exclusive }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a non-zero timestamp" {
@@ -454,9 +502,10 @@ test "rejects a non-zero timestamp" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -467,6 +516,9 @@ test "rejects a non-zero timestamp" {
     });
 
     ct.assert_equal(results, .{.{ .status = .timestamp_must_be_zero }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a transfer exceeding credits" {
@@ -482,9 +534,10 @@ test "rejects a transfer exceeding credits" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -494,6 +547,9 @@ test "rejects a transfer exceeding credits" {
     });
 
     ct.assert_equal(results, .{.{ .status = .exceeds_credits }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a transfer exceeding debits" {
@@ -509,9 +565,10 @@ test "rejects a transfer exceeding debits" {
         },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 10,
@@ -521,6 +578,9 @@ test "rejects a transfer exceeding debits" {
     });
 
     ct.assert_equal(results, .{.{ .status = .exceeds_debits }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "accepts a transfer once credits allow it" {
@@ -560,6 +620,46 @@ test "accepts a transfer once credits allow it" {
     ct.assert_equal(results, .{.{ .status = .created }});
 }
 
+test "creates a linked chain" {
+    const account_1_id = ct.generate_id();
+    const account_2_id = ct.generate_id();
+    client.create_accounts(.{
+        .{ .id = account_1_id, .ledger = 1, .code = 1 },
+        .{ .id = account_2_id, .ledger = 1, .code = 1 },
+    });
+
+    const results = client.create_transfers(.{
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 100,
+            .ledger = 1,
+            .code = 1,
+            .flags = .{ .linked = true },
+        },
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_2_id,
+            .credit_account_id = account_1_id,
+            .amount = 49,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    ct.assert_equal(results, .{
+        .{ .status = .created },
+        .{ .status = .created },
+    });
+
+    const accounts = client.lookup_accounts(.{ account_1_id, account_2_id });
+    ct.assert_equal(accounts, .{
+        .{ .id = account_1_id, .debits_posted = 100, .credits_posted = 49 },
+        .{ .id = account_2_id, .debits_posted = 49, .credits_posted = 100 },
+    });
+}
+
 test "rejects a transfer that leaves a linked chain open" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();
@@ -568,9 +668,10 @@ test "rejects a transfer that leaves a linked chain open" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     const results = client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 100,
@@ -587,6 +688,9 @@ test "rejects a transfer that leaves a linked chain open" {
         .{ .id = debit_account_id, .debits_posted = 0, .credits_posted = 0 },
         .{ .id = credit_account_id, .debits_posted = 0, .credits_posted = 0 },
     });
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a linked chain when a transfer in it fails" {
@@ -628,6 +732,9 @@ test "rejects a linked chain when a transfer in it fails" {
         .{ .id = debit_account_id, .debits_posted = 0, .credits_posted = 0 },
         .{ .id = credit_account_id, .debits_posted = 0, .credits_posted = 0 },
     });
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects an id reused after a transient failure" {
@@ -676,6 +783,9 @@ test "rejects an id reused after a transient failure" {
     });
 
     ct.assert_equal(results, .{.{ .status = .id_already_failed }});
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }
 
 test "rejects a fractional amount" {
@@ -688,9 +798,10 @@ test "rejects a fractional amount" {
         .{ .id = credit_account_id, .ledger = 1, .code = 1 },
     });
 
+    const transfer_id = ct.generate_id();
     ct.assert_fail(client.create_transfers(.{
         .{
-            .id = ct.generate_id(),
+            .id = transfer_id,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
             .amount = 1.5,
@@ -698,4 +809,7 @@ test "rejects a fractional amount" {
             .code = 1,
         },
     }));
+
+    const transfers = client.lookup_transfers(.{transfer_id});
+    ct.assert_empty(transfers);
 }

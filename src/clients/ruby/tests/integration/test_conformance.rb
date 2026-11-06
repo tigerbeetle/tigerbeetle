@@ -213,10 +213,11 @@ class TestConformance < TigerBeetleIntegrationTest
   end
 
   def test_create_accounts_rejects_a_zero_ledger
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 0,
           code: 1
         )
@@ -224,13 +225,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::LEDGER_MUST_NOT_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_zero_code
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 0
         )
@@ -238,13 +242,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::CODE_MUST_NOT_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_non_zero_debits_pending
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           debits_pending: 1
@@ -253,13 +260,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::DEBITS_PENDING_MUST_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_non_zero_debits_posted
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           debits_posted: 1
@@ -268,13 +278,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::DEBITS_POSTED_MUST_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_non_zero_credits_pending
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           credits_pending: 1
@@ -283,13 +296,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::CREDITS_PENDING_MUST_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_non_zero_credits_posted
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           credits_posted: 1
@@ -298,13 +314,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::CREDITS_POSTED_MUST_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_mutually_exclusive_flags
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           flags: TB::AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS |
@@ -314,13 +333,16 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::FLAGS_ARE_MUTUALLY_EXCLUSIVE, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   def test_create_accounts_rejects_a_non_zero_timestamp
+    account_id = TB.id
     results = @client.create_accounts(
       [
         TB::Account.new(
-          id: TB.id,
+          id: account_id,
           ledger: 1,
           code: 1,
           timestamp: 2
@@ -329,6 +351,25 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateAccountStatus::TIMESTAMP_MUST_BE_ZERO, results[0].status)
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
+  end
+
+  def test_create_accounts_rejects_a_code_above_the_maximum_u16
+    account_id = TB.id
+    assert_raises(StandardError) do
+      @client.create_accounts(
+        [
+          TB::Account.new(
+            id: account_id,
+            ledger: 1,
+            code: 65536
+          )
+        ]
+      )
+    end
+    accounts = @client.lookup_accounts([account_id])
+    assert_equal(0, accounts.length)
   end
 
   # Suite: lookup_accounts
@@ -731,10 +772,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: 0,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -745,6 +787,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128
@@ -764,10 +808,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: 340282366920938463463374607431768211455,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -778,6 +823,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::DEBIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_zero_credit_account_id
@@ -791,10 +838,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: 0,
           amount: 10,
@@ -805,6 +853,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128
@@ -824,10 +874,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: 340282366920938463463374607431768211455,
           amount: 10,
@@ -838,6 +889,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CREDIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_zero_ledger
@@ -857,10 +910,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -871,6 +925,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::LEDGER_MUST_NOT_BE_ZERO, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_zero_code
@@ -890,10 +946,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -904,6 +961,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CODE_MUST_NOT_BE_ZERO, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_identical_debit_and_credit_accounts
@@ -917,10 +976,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: account_id,
           credit_account_id: account_id,
           amount: 10,
@@ -931,6 +991,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::ACCOUNTS_MUST_BE_DIFFERENT, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_an_unknown_debit_account
@@ -944,10 +1006,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: TB.id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -958,6 +1021,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::DEBIT_ACCOUNT_NOT_FOUND, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_an_unknown_credit_account
@@ -971,10 +1036,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: TB.id,
           amount: 10,
@@ -985,6 +1051,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::CREDIT_ACCOUNT_NOT_FOUND, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_accounts_on_different_ledgers
@@ -1004,10 +1072,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1018,6 +1087,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accounts
@@ -1037,10 +1108,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1051,6 +1123,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_mutually_exclusive_flags
@@ -1070,10 +1144,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1086,6 +1161,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::FLAGS_ARE_MUTUALLY_EXCLUSIVE, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_non_zero_timestamp
@@ -1105,10 +1182,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1120,6 +1198,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::TIMESTAMP_MUST_BE_ZERO, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_transfer_exceeding_credits
@@ -1140,10 +1220,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1154,6 +1235,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::EXCEEDS_CREDITS, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_transfer_exceeding_debits
@@ -1174,10 +1257,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 10,
@@ -1188,6 +1272,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::EXCEEDS_DEBITS, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_accepts_a_transfer_once_credits_allow_it
@@ -1236,6 +1322,57 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
   end
 
+  def test_create_transfers_creates_a_linked_chain
+    account_1_id = TB.id
+    account_2_id = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1
+        ),
+        TB::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    results = @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: TB.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 100,
+          ledger: 1,
+          code: 1,
+          flags: TB::TransferFlags::LINKED
+        ),
+        TB::Transfer.new(
+          id: TB.id,
+          debit_account_id: account_2_id,
+          credit_account_id: account_1_id,
+          amount: 49,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    assert_equal(2, results.length)
+    assert_equal(TB::CreateTransferStatus::CREATED, results[0].status)
+    assert_equal(TB::CreateTransferStatus::CREATED, results[1].status)
+    accounts = @client.lookup_accounts([account_1_id, account_2_id])
+    assert_equal(2, accounts.length)
+    assert_equal(account_1_id, accounts[0].id)
+    assert_equal(100, accounts[0].debits_posted)
+    assert_equal(49, accounts[0].credits_posted)
+    assert_equal(account_2_id, accounts[1].id)
+    assert_equal(49, accounts[1].debits_posted)
+    assert_equal(100, accounts[1].credits_posted)
+  end
+
   def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open
     debit_account_id = TB.id
     credit_account_id = TB.id
@@ -1253,10 +1390,11 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     results = @client.create_transfers(
       [
         TB::Transfer.new(
-          id: TB.id,
+          id: transfer_id,
           debit_account_id: debit_account_id,
           credit_account_id: credit_account_id,
           amount: 100,
@@ -1276,6 +1414,8 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(credit_account_id, accounts[1].id)
     assert_equal(0, accounts[1].debits_posted)
     assert_equal(0, accounts[1].credits_posted)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fails
@@ -1328,6 +1468,8 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(credit_account_id, accounts[1].id)
     assert_equal(0, accounts[1].debits_posted)
     assert_equal(0, accounts[1].credits_posted)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_an_id_reused_after_a_transient_failure
@@ -1387,6 +1529,8 @@ class TestConformance < TigerBeetleIntegrationTest
     )
     assert_equal(1, results.length)
     assert_equal(TB::CreateTransferStatus::ID_ALREADY_FAILED, results[0].status)
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   def test_create_transfers_rejects_a_fractional_amount
@@ -1406,11 +1550,12 @@ class TestConformance < TigerBeetleIntegrationTest
         )
       ]
     )
+    transfer_id = TB.id
     assert_raises(StandardError) do
       @client.create_transfers(
         [
           TB::Transfer.new(
-            id: TB.id,
+            id: transfer_id,
             debit_account_id: debit_account_id,
             credit_account_id: credit_account_id,
             amount: 1.5,
@@ -1420,6 +1565,8 @@ class TestConformance < TigerBeetleIntegrationTest
         ]
       )
     end
+    transfers = @client.lookup_transfers([transfer_id])
+    assert_equal(0, transfers.length)
   end
 
   # Suite: lookup_transfers
@@ -2677,6 +2824,45 @@ class TestConformance < TigerBeetleIntegrationTest
       TB::AccountFilter.new(
         account_id: account_1_id,
         limit: 10
+      )
+    )
+    assert_equal(0, transfers.length)
+  end
+
+  def test_get_account_transfers_returns_no_transfers_for_reserved_filter_flags
+    account_1_id = TB.id
+    account_2_id = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1
+        ),
+        TB::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: TB.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfers = @client.get_account_transfers(
+      TB::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 10,
+        flags: 0xFFFF
       )
     )
     assert_equal(0, transfers.length)
@@ -4223,6 +4409,46 @@ class TestConformance < TigerBeetleIntegrationTest
     assert_equal(0, balances.length)
   end
 
+  def test_get_account_balances_returns_no_balances_for_reserved_filter_flags
+    account_1_id = TB.id
+    account_2_id = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1,
+          flags: TB::AccountFlags::HISTORY
+        ),
+        TB::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: TB.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    balances = @client.get_account_balances(
+      TB::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 10,
+        flags: 0xFFFF
+      )
+    )
+    assert_equal(0, balances.length)
+  end
+
   def test_get_account_balances_fails_when_the_limit_is_too_large
     assert_raises(TB::TooMuchDataError) do
       @client.get_account_balances(
@@ -4706,6 +4932,29 @@ class TestConformance < TigerBeetleIntegrationTest
         timestamp_min: 18446744073709551614,
         timestamp_max: 1,
         limit: 10
+      )
+    )
+    assert_equal(0, accounts.length)
+  end
+
+  def test_query_accounts_returns_no_accounts_for_reserved_filter_flags
+    account_id = TB.id
+    user_data = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: account_id,
+          user_data_128: user_data,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    accounts = @client.query_accounts(
+      TB::QueryFilter.new(
+        user_data_128: user_data,
+        limit: 10,
+        flags: 0xFFFF
       )
     )
     assert_equal(0, accounts.length)
@@ -5445,6 +5694,47 @@ class TestConformance < TigerBeetleIntegrationTest
         timestamp_min: 18446744073709551614,
         timestamp_max: 1,
         limit: 10
+      )
+    )
+    assert_equal(0, transfers.length)
+  end
+
+  def test_query_transfers_returns_no_transfers_for_reserved_filter_flags
+    debit_account_id = TB.id
+    credit_account_id = TB.id
+    user_data = TB.id
+    @client.create_accounts(
+      [
+        TB::Account.new(
+          id: debit_account_id,
+          ledger: 1,
+          code: 1
+        ),
+        TB::Account.new(
+          id: credit_account_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TB::Transfer.new(
+          id: TB.id,
+          debit_account_id: debit_account_id,
+          credit_account_id: credit_account_id,
+          amount: 10,
+          user_data_128: user_data,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfers = @client.query_transfers(
+      TB::QueryFilter.new(
+        user_data_128: user_data,
+        limit: 10,
+        flags: 0xFFFF
       )
     )
     assert_equal(0, transfers.length)

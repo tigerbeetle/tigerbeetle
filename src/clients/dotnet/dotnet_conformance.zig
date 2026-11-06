@@ -522,6 +522,9 @@ fn render_typed_value(
             return text.written();
         },
         .integer => |text| {
+            if (field.type == .flags) {
+                return printer.string_alloc("({s}){s}", .{ field.type.flags, text });
+            }
             const bits = field.type.int;
             if (bits == 128 and !fits_ulong(text)) return render_uint128(printer, text);
             if (!options.cast) return text;

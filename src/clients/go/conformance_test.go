@@ -274,9 +274,10 @@ func TestConformance(t *testing.T) {
 	test(
 		"create_accounts_rejects_a_zero_ledger",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:     ID(),
+					ID:     accountID,
 					Ledger: 0,
 					Code:   1,
 				},
@@ -286,15 +287,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountLedgerMustNotBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_zero_code",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:     ID(),
+					ID:     accountID,
 					Ledger: 1,
 					Code:   0,
 				},
@@ -304,15 +311,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountCodeMustNotBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_non_zero_debits_pending",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:            ID(),
+					ID:            accountID,
 					Ledger:        1,
 					Code:          1,
 					DebitsPending: ToUint128(1),
@@ -323,15 +336,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountDebitsPendingMustBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_non_zero_debits_posted",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:           ID(),
+					ID:           accountID,
 					Ledger:       1,
 					Code:         1,
 					DebitsPosted: ToUint128(1),
@@ -342,15 +361,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountDebitsPostedMustBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_non_zero_credits_pending",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:             ID(),
+					ID:             accountID,
 					Ledger:         1,
 					Code:           1,
 					CreditsPending: ToUint128(1),
@@ -361,15 +386,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountCreditsPendingMustBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_non_zero_credits_posted",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:            ID(),
+					ID:            accountID,
 					Ledger:        1,
 					Code:          1,
 					CreditsPosted: ToUint128(1),
@@ -380,15 +411,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountCreditsPostedMustBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_mutually_exclusive_flags",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:     ID(),
+					ID:     accountID,
 					Ledger: 1,
 					Code:   1,
 					Flags:  AccountFlags{DebitsMustNotExceedCredits: true, CreditsMustNotExceedDebits: true}.ToUint16(),
@@ -399,15 +436,21 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountFlagsAreMutuallyExclusive, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
 
 	test(
 		"create_accounts_rejects_a_non_zero_timestamp",
 		func(t *testing.T, client Client) {
+			accountID := ID()
 			results, err := client.CreateAccounts([]Account{
 				{
-					ID:        ID(),
+					ID:        accountID,
 					Ledger:    1,
 					Code:      1,
 					Timestamp: 2,
@@ -418,8 +461,16 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, AccountTimestampMustBeZero, results[0].Status)
+			accounts, err := client.LookupAccounts([]Uint128{accountID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
 		},
 	)
+
+	// N/A: "rejects a code above the maximum u16"
+	// Reason: requires unbounded integers
 
 	// Suite: lookup_accounts
 
@@ -909,9 +960,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  ToUint128(0),
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -924,6 +976,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferDebitAccountIDMustNotBeZero, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -947,9 +1004,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  u128("ffffffffffffffffffffffffffffffff"),
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -962,6 +1020,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferDebitAccountIDMustNotBeIntMax, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -979,9 +1042,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: ToUint128(0),
 					Amount:          ToUint128(10),
@@ -994,6 +1058,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferCreditAccountIDMustNotBeZero, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1017,9 +1086,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: u128("ffffffffffffffffffffffffffffffff"),
 					Amount:          ToUint128(10),
@@ -1032,6 +1102,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferCreditAccountIDMustNotBeIntMax, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1055,9 +1130,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1070,6 +1146,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferLedgerMustNotBeZero, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1093,9 +1174,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1108,6 +1190,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferCodeMustNotBeZero, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1125,9 +1212,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  accountID,
 					CreditAccountID: accountID,
 					Amount:          ToUint128(10),
@@ -1140,6 +1228,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferAccountsMustBeDifferent, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1157,9 +1250,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  ID(),
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1172,6 +1266,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferDebitAccountNotFound, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1189,9 +1288,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: ID(),
 					Amount:          ToUint128(10),
@@ -1204,6 +1304,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferCreditAccountNotFound, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1227,9 +1332,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1242,6 +1348,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferAccountsMustHaveTheSameLedger, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1265,9 +1376,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1280,6 +1392,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferTransferMustHaveTheSameLedgerAsAccounts, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1303,9 +1420,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1319,6 +1437,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferFlagsAreMutuallyExclusive, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1342,9 +1465,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1358,6 +1482,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferTimestampMustBeZero, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1382,9 +1511,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1397,6 +1527,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferExceedsCredits, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1421,9 +1556,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(10),
@@ -1436,6 +1572,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferExceedsDebits, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1492,6 +1633,65 @@ func TestConformance(t *testing.T) {
 	)
 
 	test(
+		"create_transfers_creates_a_linked_chain",
+		func(t *testing.T, client Client) {
+			account1ID := ID()
+			account2ID := ID()
+			_, err := client.CreateAccounts([]Account{
+				{
+					ID:     account1ID,
+					Ledger: 1,
+					Code:   1,
+				},
+				{
+					ID:     account2ID,
+					Ledger: 1,
+					Code:   1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := client.CreateTransfers([]Transfer{
+				{
+					ID:              ID(),
+					DebitAccountID:  account1ID,
+					CreditAccountID: account2ID,
+					Amount:          ToUint128(100),
+					Ledger:          1,
+					Code:            1,
+					Flags:           TransferFlags{Linked: true}.ToUint16(),
+				},
+				{
+					ID:              ID(),
+					DebitAccountID:  account2ID,
+					CreditAccountID: account1ID,
+					Amount:          ToUint128(49),
+					Ledger:          1,
+					Code:            1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, results, 2)
+			assert.Equal(t, TransferCreated, results[0].Status)
+			assert.Equal(t, TransferCreated, results[1].Status)
+			accounts, err := client.LookupAccounts([]Uint128{account1ID, account2ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 2)
+			assert.Equal(t, account1ID, accounts[0].ID)
+			assert.Equal(t, ToUint128(100), accounts[0].DebitsPosted)
+			assert.Equal(t, ToUint128(49), accounts[0].CreditsPosted)
+			assert.Equal(t, account2ID, accounts[1].ID)
+			assert.Equal(t, ToUint128(49), accounts[1].DebitsPosted)
+			assert.Equal(t, ToUint128(100), accounts[1].CreditsPosted)
+		},
+	)
+
+	test(
 		"create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open",
 		func(t *testing.T, client Client) {
 			debitAccountID := ID()
@@ -1511,9 +1711,10 @@ func TestConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			transferID := ID()
 			results, err := client.CreateTransfers([]Transfer{
 				{
-					ID:              ID(),
+					ID:              transferID,
 					DebitAccountID:  debitAccountID,
 					CreditAccountID: creditAccountID,
 					Amount:          ToUint128(100),
@@ -1538,6 +1739,11 @@ func TestConformance(t *testing.T) {
 			assert.Equal(t, creditAccountID, accounts[1].ID)
 			assert.Equal(t, ToUint128(0), accounts[1].DebitsPosted)
 			assert.Equal(t, ToUint128(0), accounts[1].CreditsPosted)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1598,6 +1804,11 @@ func TestConformance(t *testing.T) {
 			assert.Equal(t, creditAccountID, accounts[1].ID)
 			assert.Equal(t, ToUint128(0), accounts[1].DebitsPosted)
 			assert.Equal(t, ToUint128(0), accounts[1].CreditsPosted)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -1664,6 +1875,11 @@ func TestConformance(t *testing.T) {
 			}
 			assert.Len(t, results, 1)
 			assert.Equal(t, TransferIDAlreadyFailed, results[0].Status)
+			transfers, err := client.LookupTransfers([]Uint128{transferID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
 		},
 	)
 
@@ -3076,6 +3292,51 @@ func TestConformance(t *testing.T) {
 			transfers, err := client.GetAccountTransfers(AccountFilter{
 				AccountID: account1ID,
 				Limit:     10,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
+		},
+	)
+
+	test(
+		"get_account_transfers_returns_no_transfers_for_reserved_filter_flags",
+		func(t *testing.T, client Client) {
+			account1ID := ID()
+			account2ID := ID()
+			_, err := client.CreateAccounts([]Account{
+				{
+					ID:     account1ID,
+					Ledger: 1,
+					Code:   1,
+				},
+				{
+					ID:     account2ID,
+					Ledger: 1,
+					Code:   1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.CreateTransfers([]Transfer{
+				{
+					ID:              ID(),
+					DebitAccountID:  account1ID,
+					CreditAccountID: account2ID,
+					Amount:          ToUint128(10),
+					Ledger:          1,
+					Code:            1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			transfers, err := client.GetAccountTransfers(AccountFilter{
+				AccountID: account1ID,
+				Limit:     10,
+				Flags:     0xFFFF,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -4729,6 +4990,52 @@ func TestConformance(t *testing.T) {
 	)
 
 	test(
+		"get_account_balances_returns_no_balances_for_reserved_filter_flags",
+		func(t *testing.T, client Client) {
+			account1ID := ID()
+			account2ID := ID()
+			_, err := client.CreateAccounts([]Account{
+				{
+					ID:     account1ID,
+					Ledger: 1,
+					Code:   1,
+					Flags:  AccountFlags{History: true}.ToUint16(),
+				},
+				{
+					ID:     account2ID,
+					Ledger: 1,
+					Code:   1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.CreateTransfers([]Transfer{
+				{
+					ID:              ID(),
+					DebitAccountID:  account1ID,
+					CreditAccountID: account2ID,
+					Amount:          ToUint128(10),
+					Ledger:          1,
+					Code:            1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			balances, err := client.GetAccountBalances(AccountFilter{
+				AccountID: account1ID,
+				Limit:     10,
+				Flags:     0xFFFF,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, balances, 0)
+		},
+	)
+
+	test(
 		"get_account_balances_fails_when_the_limit_is_too_large",
 		func(t *testing.T, client Client) {
 			_, err := client.GetAccountBalances(AccountFilter{
@@ -5280,6 +5587,34 @@ func TestConformance(t *testing.T) {
 				TimestampMin: 18446744073709551614,
 				TimestampMax: 1,
 				Limit:        10,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, accounts, 0)
+		},
+	)
+
+	test(
+		"query_accounts_returns_no_accounts_for_reserved_filter_flags",
+		func(t *testing.T, client Client) {
+			accountID := ID()
+			userData := ID()
+			_, err := client.CreateAccounts([]Account{
+				{
+					ID:          accountID,
+					UserData128: userData,
+					Ledger:      1,
+					Code:        1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			accounts, err := client.QueryAccounts(QueryFilter{
+				UserData128: userData,
+				Limit:       10,
+				Flags:       0xFFFF,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -6102,6 +6437,53 @@ func TestConformance(t *testing.T) {
 				TimestampMin: 18446744073709551614,
 				TimestampMax: 1,
 				Limit:        10,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Len(t, transfers, 0)
+		},
+	)
+
+	test(
+		"query_transfers_returns_no_transfers_for_reserved_filter_flags",
+		func(t *testing.T, client Client) {
+			debitAccountID := ID()
+			creditAccountID := ID()
+			userData := ID()
+			_, err := client.CreateAccounts([]Account{
+				{
+					ID:     debitAccountID,
+					Ledger: 1,
+					Code:   1,
+				},
+				{
+					ID:     creditAccountID,
+					Ledger: 1,
+					Code:   1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.CreateTransfers([]Transfer{
+				{
+					ID:              ID(),
+					DebitAccountID:  debitAccountID,
+					CreditAccountID: creditAccountID,
+					Amount:          ToUint128(10),
+					UserData128:     userData,
+					Ledger:          1,
+					Code:            1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			transfers, err := client.QueryTransfers(QueryFilter{
+				UserData128: userData,
+				Limit:       10,
+				Flags:       0xFFFF,
 			})
 			if err != nil {
 				t.Fatal(err)

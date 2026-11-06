@@ -729,6 +729,33 @@ test "returns no transfers without the debits or credits flag" {
     ct.assert_empty(transfers);
 }
 
+test "returns no transfers for reserved filter flags" {
+    const account_1_id = ct.generate_id();
+    const account_2_id = ct.generate_id();
+    client.create_accounts(.{
+        .{ .id = account_1_id, .ledger = 1, .code = 1 },
+        .{ .id = account_2_id, .ledger = 1, .code = 1 },
+    });
+    client.create_transfers(.{
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 10,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const transfers = client.get_account_transfers(.{
+        .account_id = account_1_id,
+        .limit = 10,
+        .flags = 0xFFFF,
+    });
+
+    ct.assert_empty(transfers);
+}
+
 test "fails when the limit is too large" {
     ct.assert_fail_with(client.get_account_transfers(.{
         .account_id = ct.generate_id(),

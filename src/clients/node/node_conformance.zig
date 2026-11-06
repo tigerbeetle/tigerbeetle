@@ -586,6 +586,7 @@ fn render_typed_value(
             return render_flags(printer, record);
         },
         .integer => |text| {
+            if (field.type == .flags) return text;
             if (field.type.int >= 64) return render_bigint(printer, text);
             return text;
         },

@@ -569,6 +569,35 @@ test "returns no transfers for an inverted timestamp range at u64 max" {
     ct.assert_empty(transfers);
 }
 
+test "returns no transfers for reserved filter flags" {
+    const debit_account_id = ct.generate_id();
+    const credit_account_id = ct.generate_id();
+    const user_data = ct.generate_id();
+    client.create_accounts(.{
+        .{ .id = debit_account_id, .ledger = 1, .code = 1 },
+        .{ .id = credit_account_id, .ledger = 1, .code = 1 },
+    });
+    client.create_transfers(.{
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 10,
+            .user_data_128 = user_data,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const transfers = client.query_transfers(.{
+        .user_data_128 = user_data,
+        .limit = 10,
+        .flags = 0xFFFF,
+    });
+
+    ct.assert_empty(transfers);
+}
+
 test "fails when the limit is too large" {
     ct.assert_fail_with(client.query_transfers(.{ .limit = 10000 }), .too_much_data);
 }

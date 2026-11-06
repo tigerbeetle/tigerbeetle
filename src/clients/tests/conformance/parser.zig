@@ -961,7 +961,7 @@ fn field_types_equal(actual: ast.Field.Type, expected: ast.Field.Type) bool {
         .enum_name => |name| expected == .enum_name and
             std.mem.eql(u8, expected.enum_name, name),
         .boolean => expected == .boolean,
-        .flags => expected == .flags,
+        .flags => |name| expected == .flags and std.mem.eql(u8, expected.flags, name),
     };
 }
 

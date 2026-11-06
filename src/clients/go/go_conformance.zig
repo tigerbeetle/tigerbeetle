@@ -530,6 +530,7 @@ fn render_typed_value(
             return text.written();
         },
         .integer => |text| {
+            if (field.type == .flags) return text;
             const bits = field.type.int;
             if (bits == 128) return render_uint128(printer, text);
             return text;

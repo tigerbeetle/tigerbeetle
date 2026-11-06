@@ -70,57 +70,82 @@ test "rejects an id of the maximum u128" {
 }
 
 test "rejects a zero ledger" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 0, .code = 1 },
+        .{ .id = account_id, .ledger = 0, .code = 1 },
     });
 
     ct.assert_equal(results, .{.{ .status = .ledger_must_not_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a zero code" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 0 },
+        .{ .id = account_id, .ledger = 1, .code = 0 },
     });
 
     ct.assert_equal(results, .{.{ .status = .code_must_not_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a non-zero debits pending" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .debits_pending = 1 },
+        .{ .id = account_id, .ledger = 1, .code = 1, .debits_pending = 1 },
     });
 
     ct.assert_equal(results, .{.{ .status = .debits_pending_must_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a non-zero debits posted" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .debits_posted = 1 },
+        .{ .id = account_id, .ledger = 1, .code = 1, .debits_posted = 1 },
     });
 
     ct.assert_equal(results, .{.{ .status = .debits_posted_must_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a non-zero credits pending" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .credits_pending = 1 },
+        .{ .id = account_id, .ledger = 1, .code = 1, .credits_pending = 1 },
     });
 
     ct.assert_equal(results, .{.{ .status = .credits_pending_must_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a non-zero credits posted" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .credits_posted = 1 },
+        .{ .id = account_id, .ledger = 1, .code = 1, .credits_posted = 1 },
     });
 
     ct.assert_equal(results, .{.{ .status = .credits_posted_must_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects mutually exclusive flags" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
         .{
-            .id = ct.generate_id(),
+            .id = account_id,
             .ledger = 1,
             .code = 1,
             .flags = .{
@@ -131,12 +156,31 @@ test "rejects mutually exclusive flags" {
     });
 
     ct.assert_equal(results, .{.{ .status = .flags_are_mutually_exclusive }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }
 
 test "rejects a non-zero timestamp" {
+    const account_id = ct.generate_id();
     const results = client.create_accounts(.{
-        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .timestamp = 2 },
+        .{ .id = account_id, .ledger = 1, .code = 1, .timestamp = 2 },
     });
 
     ct.assert_equal(results, .{.{ .status = .timestamp_must_be_zero }});
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
+}
+
+test "rejects a code above the maximum u16" {
+    ct.requires_unbounded_integers();
+
+    const account_id = ct.generate_id();
+    ct.assert_fail(client.create_accounts(.{
+        .{ .id = account_id, .ledger = 1, .code = 65536 },
+    }));
+
+    const accounts = client.lookup_accounts(.{account_id});
+    ct.assert_empty(accounts);
 }

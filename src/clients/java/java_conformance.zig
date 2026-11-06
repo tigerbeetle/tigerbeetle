@@ -743,6 +743,10 @@ fn emit_filter_field(
         }
         return;
     }
+    if (field.value == .integer and field.field.type == .flags) {
+        try printer.print_indented("{s}.setFlags({s}, true);", .{ name, field.value.integer });
+        return;
+    }
     try emit_setter(
         printer,
         name,
@@ -968,6 +972,7 @@ fn render_typed_value(
             return text.written();
         },
         .integer => |text| {
+            if (field.type == .flags) return text;
             const bits = field.type.int;
             if (bits == 128) {
                 if (is_big_integer(field.name)) return render_big_integer(printer, text);

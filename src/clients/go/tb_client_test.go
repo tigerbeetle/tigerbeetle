@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/assert"
@@ -106,14 +105,6 @@ func WithClient(t testing.TB, withClient func(Client)) {
 func TestClient(t *testing.T) {
 	WithClient(t, func(client Client) {
 		doTestClient(t, client)
-	})
-}
-
-func TestImportedFlag(t *testing.T) {
-	// This test cannot run in parallel with the others because it needs an
-	// stable "timestamp max" reference.
-	WithClient(t, func(client Client) {
-		doTestImportedFlag(t, client)
 	})
 }
 
@@ -298,106 +289,6 @@ func doTestClient(t *testing.T, client Client) {
 		waitGroup.Wait()
 	})
 
-	t.Run("can query transfers for an account", func(t *testing.T) {
-		t.Parallel()
-		accountA, accountB := createTwoAccounts(t)
-
-		BATCH_MAX := uint32(8189)
-
-		// Create a new account:
-		accountC := Account{
-			ID:     ID(),
-			Ledger: 1,
-			Code:   1,
-			Flags: AccountFlags{
-				History: true,
-			}.ToUint16(),
-		}
-		account_results, err := client.CreateAccounts([]Account{accountC})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateAccountsOK(t, account_results, 1)
-
-		// Create transfers where the new account is either the debit or credit account:
-		transfers_created := make([]Transfer, 10)
-		for i := 0; i < 10; i++ {
-			transfer_id := ID()
-
-			// Swap debit and credit accounts:
-			if i%2 == 0 {
-				transfers_created[i] = Transfer{
-					ID:              transfer_id,
-					CreditAccountID: accountA.ID,
-					DebitAccountID:  accountC.ID,
-					Amount:          ToUint128(50),
-					Flags:           0,
-					Code:            1,
-					Ledger:          1,
-				}
-			} else {
-				transfers_created[i] = Transfer{
-					ID:              transfer_id,
-					CreditAccountID: accountC.ID,
-					DebitAccountID:  accountB.ID,
-					Amount:          ToUint128(50),
-					Flags:           0,
-					Code:            1,
-					Ledger:          1,
-				}
-			}
-		}
-		transfer_results, err := client.CreateTransfers(transfers_created)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateTransfersOK(t, transfer_results, len(transfers_created))
-
-		// Invalid flags:
-		filter := AccountFilter{
-			AccountID:    accountC.ID,
-			TimestampMin: 0,
-			TimestampMax: 0,
-			Limit:        BATCH_MAX,
-			Flags:        0xFFFF,
-		}
-		transfers_retrieved, err := client.GetAccountTransfers(filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		account_balances, err := client.GetAccountBalances(filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_balances, len(transfers_retrieved))
-	})
-
-	t.Run("invalid query filters", func(t *testing.T) {
-		t.Parallel()
-
-		BATCH_MAX := uint32(8189)
-
-		// Invalid flags:
-		filter := QueryFilter{
-			UserData128:  ToUint128(0),
-			UserData64:   0,
-			UserData32:   0,
-			Ledger:       0,
-			Code:         0,
-			TimestampMin: 0,
-			TimestampMax: 0,
-			Limit:        BATCH_MAX,
-			Flags:        0xFFFF,
-		}
-		query, err := client.QueryTransfers(filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, query, 0)
-	})
-
 	t.Run("get change events", func(t *testing.T) {
 		t.Parallel()
 		filter := ChangeEventsFilter{
@@ -410,96 +301,6 @@ func doTestClient(t *testing.T, client Client) {
 			t.Fatal(err)
 		}
 		assert.Len(t, events, int(filter.Limit))
-	})
-}
-
-func doTestImportedFlag(t *testing.T, client Client) {
-	t.Run("can import accounts and transfers", func(t *testing.T) {
-		tmpAccount := ID()
-		tmpResults, err := client.CreateAccounts([]Account{
-			{
-				ID:     tmpAccount,
-				Ledger: 1,
-				Code:   2,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateAccountsOK(t, tmpResults, 1)
-
-		tmpAccounts, err := client.LookupAccounts([]Uint128{tmpAccount})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, tmpAccounts, 1)
-
-		// Wait 10 ms so we can use the account's timestamp as the reference for past time
-		// after the last object inserted.
-		time.Sleep(10 * time.Millisecond)
-		timestampMax := tmpAccounts[0].Timestamp
-
-		accountA := ID()
-		accountB := ID()
-		transferA := ID()
-
-		accountResults, err := client.CreateAccounts([]Account{
-			{
-				ID:     accountA,
-				Ledger: 1,
-				Code:   1,
-				Flags: AccountFlags{
-					Imported: true,
-				}.ToUint16(),
-				Timestamp: timestampMax + 1,
-			},
-			{
-				ID:     accountB,
-				Ledger: 1,
-				Code:   2,
-				Flags: AccountFlags{
-					Imported: true,
-				}.ToUint16(),
-				Timestamp: timestampMax + 2,
-			}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateAccountsOK(t, accountResults, 2)
-
-		transferResults, err := client.CreateTransfers([]Transfer{
-			{
-				ID:              transferA,
-				CreditAccountID: accountA,
-				DebitAccountID:  accountB,
-				Amount:          ToUint128(100),
-				Ledger:          1,
-				Code:            1,
-				Flags: TransferFlags{
-					Imported: true,
-				}.ToUint16(),
-				Timestamp: timestampMax + 3,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateTransfersOK(t, transferResults, 1)
-
-		accounts, err := client.LookupAccounts([]Uint128{accountA, accountB})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, accounts, 2)
-		assert.Equal(t, timestampMax+1, accounts[0].Timestamp)
-		assert.Equal(t, timestampMax+2, accounts[1].Timestamp)
-
-		transfers, err := client.LookupTransfers([]Uint128{transferA})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, transfers, 1)
-		assert.Equal(t, timestampMax+3, transfers[0].Timestamp)
 	})
 }
 

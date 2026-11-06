@@ -351,6 +351,22 @@ test "returns no accounts for an inverted timestamp range at u64 max" {
     ct.assert_empty(accounts);
 }
 
+test "returns no accounts for reserved filter flags" {
+    const account_id = ct.generate_id();
+    const user_data = ct.generate_id();
+    client.create_accounts(.{
+        .{ .id = account_id, .user_data_128 = user_data, .ledger = 1, .code = 1 },
+    });
+
+    const accounts = client.query_accounts(.{
+        .user_data_128 = user_data,
+        .limit = 10,
+        .flags = 0xFFFF,
+    });
+
+    ct.assert_empty(accounts);
+}
+
 test "fails when the limit is too large" {
     ct.assert_fail_with(client.query_accounts(.{
         .user_data_128 = ct.generate_id(),

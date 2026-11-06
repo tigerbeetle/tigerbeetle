@@ -159,7 +159,7 @@ pub const Field = struct {
         int: u16,
         enum_name: []const u8,
         boolean,
-        flags,
+        flags: []const u8,
 
         pub fn resolve(record_type: Record.Type, field_name: []const u8) Type {
             switch (record_type) {
@@ -170,7 +170,7 @@ pub const Field = struct {
                                 .int => |info| .{ .int = info.bits },
                                 .@"enum" => .{ .enum_name = type_name(field.type) },
                                 .bool => .boolean,
-                                .@"struct" => .flags,
+                                .@"struct" => .{ .flags = type_name(field.type) },
                                 else => @panic("unsupported field type"),
                             };
                         }

@@ -15,24 +15,4 @@ class TestAccounts < TigerBeetleIntegrationTest
     )
   end
 
-  def test_create_account_duplicate
-    account = TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 1)
-
-    @client.create_accounts([account])
-
-    results = @client.create_accounts([account])
-    assert_equal(1, results.length)
-    assert_equal(TigerBeetle::CreateAccountStatus::EXISTS, results[0].status)
-    assert_equal(:exists, results[0].status_name)
-  end
-
-  def test_create_account_id_zero
-    account = TigerBeetle::Account.new(id: 0, ledger: 1, code: 1)
-
-    results = @client.create_accounts([account])
-    assert_equal(1, results.length)
-    assert_equal(TigerBeetle::CreateAccountStatus::ID_MUST_NOT_BE_ZERO, results[0].status)
-    assert_equal(:id_must_not_be_zero, results[0].status_name)
-  end
-
 end

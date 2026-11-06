@@ -212,10 +212,11 @@ def test_create_accounts_rejects_an_id_of_the_maximum_u128(client):
     assert results[0].status == tb.CreateAccountStatus.ID_MUST_NOT_BE_INT_MAX
 
 def test_create_accounts_rejects_a_zero_ledger(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=0,
                 code=1,
             ),
@@ -223,12 +224,15 @@ def test_create_accounts_rejects_a_zero_ledger(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.LEDGER_MUST_NOT_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_zero_code(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=0,
             ),
@@ -236,12 +240,15 @@ def test_create_accounts_rejects_a_zero_code(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CODE_MUST_NOT_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_non_zero_debits_pending(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 debits_pending=1,
@@ -250,12 +257,15 @@ def test_create_accounts_rejects_a_non_zero_debits_pending(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.DEBITS_PENDING_MUST_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_non_zero_debits_posted(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 debits_posted=1,
@@ -264,12 +274,15 @@ def test_create_accounts_rejects_a_non_zero_debits_posted(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.DEBITS_POSTED_MUST_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_non_zero_credits_pending(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 credits_pending=1,
@@ -278,12 +291,15 @@ def test_create_accounts_rejects_a_non_zero_credits_pending(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREDITS_PENDING_MUST_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_non_zero_credits_posted(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 credits_posted=1,
@@ -292,12 +308,15 @@ def test_create_accounts_rejects_a_non_zero_credits_posted(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREDITS_POSTED_MUST_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_mutually_exclusive_flags(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 flags=(
@@ -309,12 +328,15 @@ def test_create_accounts_rejects_mutually_exclusive_flags(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.FLAGS_ARE_MUTUALLY_EXCLUSIVE
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 def test_create_accounts_rejects_a_non_zero_timestamp(client):
+    account_id = tb.id()
     results = client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 timestamp=2,
@@ -323,6 +345,23 @@ def test_create_accounts_rejects_a_non_zero_timestamp(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.TIMESTAMP_MUST_BE_ZERO
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
+
+def test_create_accounts_rejects_a_code_above_the_maximum_u16(client):
+    account_id = tb.id()
+    with pytest.raises(Exception):
+        client.create_accounts(
+            [
+                tb.Account(
+                    id=account_id,
+                    ledger=1,
+                    code=65536,
+                ),
+            ]
+        )
+    accounts = client.lookup_accounts([account_id])
+    assert accounts == []
 
 # Suite: lookup_accounts
 
@@ -708,10 +747,11 @@ def test_create_transfers_rejects_a_zero_debit_account_id(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=0,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -722,6 +762,8 @@ def test_create_transfers_rejects_a_zero_debit_account_id(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128(client):
     debit_account_id = tb.id()
@@ -740,10 +782,11 @@ def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128(client)
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=340282366920938463463374607431768211455,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -754,6 +797,8 @@ def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128(client)
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_zero_credit_account_id(client):
     debit_account_id = tb.id()
@@ -766,10 +811,11 @@ def test_create_transfers_rejects_a_zero_credit_account_id(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=0,
                 amount=10,
@@ -780,6 +826,8 @@ def test_create_transfers_rejects_a_zero_credit_account_id(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128(client):
     debit_account_id = tb.id()
@@ -798,10 +846,11 @@ def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128(client
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=340282366920938463463374607431768211455,
                 amount=10,
@@ -812,6 +861,8 @@ def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128(client
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_zero_ledger(client):
     debit_account_id = tb.id()
@@ -830,10 +881,11 @@ def test_create_transfers_rejects_a_zero_ledger(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -844,6 +896,8 @@ def test_create_transfers_rejects_a_zero_ledger(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.LEDGER_MUST_NOT_BE_ZERO
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_zero_code(client):
     debit_account_id = tb.id()
@@ -862,10 +916,11 @@ def test_create_transfers_rejects_a_zero_code(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -876,6 +931,8 @@ def test_create_transfers_rejects_a_zero_code(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CODE_MUST_NOT_BE_ZERO
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_identical_debit_and_credit_accounts(client):
     account_id = tb.id()
@@ -888,10 +945,11 @@ def test_create_transfers_rejects_identical_debit_and_credit_accounts(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=account_id,
                 credit_account_id=account_id,
                 amount=10,
@@ -902,6 +960,8 @@ def test_create_transfers_rejects_identical_debit_and_credit_accounts(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ACCOUNTS_MUST_BE_DIFFERENT
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_an_unknown_debit_account(client):
     credit_account_id = tb.id()
@@ -914,10 +974,11 @@ def test_create_transfers_rejects_an_unknown_debit_account(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=tb.id(),
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -928,6 +989,8 @@ def test_create_transfers_rejects_an_unknown_debit_account(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_NOT_FOUND
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_an_unknown_credit_account(client):
     debit_account_id = tb.id()
@@ -940,10 +1003,11 @@ def test_create_transfers_rejects_an_unknown_credit_account(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=tb.id(),
                 amount=10,
@@ -954,6 +1018,8 @@ def test_create_transfers_rejects_an_unknown_credit_account(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_NOT_FOUND
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_accounts_on_different_ledgers(client):
     debit_account_id = tb.id()
@@ -972,10 +1038,11 @@ def test_create_transfers_rejects_accounts_on_different_ledgers(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -986,6 +1053,8 @@ def test_create_transfers_rejects_accounts_on_different_ledgers(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accounts(client):
     debit_account_id = tb.id()
@@ -1004,10 +1073,11 @@ def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accoun
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -1018,6 +1088,8 @@ def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accoun
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_mutually_exclusive_flags(client):
     debit_account_id = tb.id()
@@ -1036,10 +1108,11 @@ def test_create_transfers_rejects_mutually_exclusive_flags(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -1054,6 +1127,8 @@ def test_create_transfers_rejects_mutually_exclusive_flags(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.FLAGS_ARE_MUTUALLY_EXCLUSIVE
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_non_zero_timestamp(client):
     debit_account_id = tb.id()
@@ -1072,10 +1147,11 @@ def test_create_transfers_rejects_a_non_zero_timestamp(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -1087,6 +1163,8 @@ def test_create_transfers_rejects_a_non_zero_timestamp(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.TIMESTAMP_MUST_BE_ZERO
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_transfer_exceeding_credits(client):
     debit_account_id = tb.id()
@@ -1106,10 +1184,11 @@ def test_create_transfers_rejects_a_transfer_exceeding_credits(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -1120,6 +1199,8 @@ def test_create_transfers_rejects_a_transfer_exceeding_credits(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.EXCEEDS_CREDITS
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_transfer_exceeding_debits(client):
     debit_account_id = tb.id()
@@ -1139,10 +1220,11 @@ def test_create_transfers_rejects_a_transfer_exceeding_debits(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -1153,6 +1235,8 @@ def test_create_transfers_rejects_a_transfer_exceeding_debits(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.EXCEEDS_DEBITS
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_accepts_a_transfer_once_credits_allow_it(client):
     debit_account_id = tb.id()
@@ -1199,6 +1283,56 @@ def test_create_transfers_accepts_a_transfer_once_credits_allow_it(client):
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREATED
 
+def test_create_transfers_creates_a_linked_chain(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    results = client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=100,
+                ledger=1,
+                code=1,
+                flags=tb.TransferFlags.LINKED,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_2_id,
+                credit_account_id=account_1_id,
+                amount=49,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    assert len(results) == 2
+    assert results[0].status == tb.CreateTransferStatus.CREATED
+    assert results[1].status == tb.CreateTransferStatus.CREATED
+    accounts = client.lookup_accounts([account_1_id, account_2_id])
+    assert len(accounts) == 2
+    assert accounts[0].id == account_1_id
+    assert accounts[0].debits_posted == 100
+    assert accounts[0].credits_posted == 49
+    assert accounts[1].id == account_2_id
+    assert accounts[1].debits_posted == 49
+    assert accounts[1].credits_posted == 100
+
 def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open(client):
     debit_account_id = tb.id()
     credit_account_id = tb.id()
@@ -1216,10 +1350,11 @@ def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open(cli
             ),
         ]
     )
+    transfer_id = tb.id()
     results = client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=100,
@@ -1239,6 +1374,8 @@ def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open(cli
     assert accounts[1].id == credit_account_id
     assert accounts[1].debits_posted == 0
     assert accounts[1].credits_posted == 0
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fails(client):
     debit_account_id = tb.id()
@@ -1290,6 +1427,8 @@ def test_create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fails(cli
     assert accounts[1].id == credit_account_id
     assert accounts[1].debits_posted == 0
     assert accounts[1].credits_posted == 0
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_an_id_reused_after_a_transient_failure(client):
     debit_account_id = tb.id()
@@ -1348,6 +1487,8 @@ def test_create_transfers_rejects_an_id_reused_after_a_transient_failure(client)
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ID_ALREADY_FAILED
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 def test_create_transfers_rejects_a_fractional_amount(client):
     debit_account_id = tb.id()
@@ -1366,11 +1507,12 @@ def test_create_transfers_rejects_a_fractional_amount(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     with pytest.raises(Exception):
         client.create_transfers(
             [
                 tb.Transfer(
-                    id=tb.id(),
+                    id=transfer_id,
                     debit_account_id=debit_account_id,
                     credit_account_id=credit_account_id,
                     amount=1.5,
@@ -1379,6 +1521,8 @@ def test_create_transfers_rejects_a_fractional_amount(client):
                 ),
             ]
         )
+    transfers = client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 # Suite: lookup_transfers
 
@@ -2791,6 +2935,50 @@ def test_get_account_transfers_returns_no_transfers_without_the_debits_or_credit
             timestamp_max=0,
             limit=10,
             flags=tb.AccountFilterFlags.NONE,
+        )
+    )
+    assert transfers == []
+
+def test_get_account_transfers_returns_no_transfers_for_reserved_filter_flags(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert transfers == []
@@ -4646,6 +4834,51 @@ def test_get_account_balances_returns_no_balances_without_the_debits_or_credits_
     )
     assert balances == []
 
+def test_get_account_balances_returns_no_balances_for_reserved_filter_flags(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    balances = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
+        )
+    )
+    assert balances == []
+
 def test_get_account_balances_fails_when_the_limit_is_too_large(client):
     with pytest.raises(tb.TooMuchDataError):
         client.get_account_balances(
@@ -5223,6 +5456,34 @@ def test_query_accounts_returns_no_accounts_for_an_inverted_timestamp_range_at_u
             timestamp_max=1,
             limit=10,
             flags=tb.QueryFilterFlags.NONE,
+        )
+    )
+    assert accounts == []
+
+def test_query_accounts_returns_no_accounts_for_reserved_filter_flags(client):
+    account_id = tb.id()
+    user_data = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_id,
+                user_data_128=user_data,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    accounts = client.query_accounts(
+        tb.QueryFilter(
+            user_data_128=user_data,
+            user_data_64=0,
+            user_data_32=0,
+            ledger=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert accounts == []
@@ -6054,6 +6315,52 @@ def test_query_transfers_returns_no_transfers_for_an_inverted_timestamp_range_at
             timestamp_max=1,
             limit=10,
             flags=tb.QueryFilterFlags.NONE,
+        )
+    )
+    assert transfers == []
+
+def test_query_transfers_returns_no_transfers_for_reserved_filter_flags(client):
+    debit_account_id = tb.id()
+    credit_account_id = tb.id()
+    user_data = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=debit_account_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=credit_account_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=10,
+                user_data_128=user_data,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = client.query_transfers(
+        tb.QueryFilter(
+            user_data_128=user_data,
+            user_data_64=0,
+            user_data_32=0,
+            ledger=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert transfers == []
@@ -6940,10 +7247,11 @@ async def test_create_accounts_rejects_an_id_of_the_maximum_u128_async(client):
 
 @async_test
 async def test_create_accounts_rejects_a_zero_ledger_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=0,
                 code=1,
             ),
@@ -6951,13 +7259,16 @@ async def test_create_accounts_rejects_a_zero_ledger_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.LEDGER_MUST_NOT_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_zero_code_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=0,
             ),
@@ -6965,13 +7276,16 @@ async def test_create_accounts_rejects_a_zero_code_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CODE_MUST_NOT_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_non_zero_debits_pending_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 debits_pending=1,
@@ -6980,13 +7294,16 @@ async def test_create_accounts_rejects_a_non_zero_debits_pending_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.DEBITS_PENDING_MUST_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_non_zero_debits_posted_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 debits_posted=1,
@@ -6995,13 +7312,16 @@ async def test_create_accounts_rejects_a_non_zero_debits_posted_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.DEBITS_POSTED_MUST_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_non_zero_credits_pending_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 credits_pending=1,
@@ -7010,13 +7330,16 @@ async def test_create_accounts_rejects_a_non_zero_credits_pending_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREDITS_PENDING_MUST_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_non_zero_credits_posted_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 credits_posted=1,
@@ -7025,13 +7348,16 @@ async def test_create_accounts_rejects_a_non_zero_credits_posted_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.CREDITS_POSTED_MUST_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_mutually_exclusive_flags_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 flags=(
@@ -7043,13 +7369,16 @@ async def test_create_accounts_rejects_mutually_exclusive_flags_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.FLAGS_ARE_MUTUALLY_EXCLUSIVE
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 @async_test
 async def test_create_accounts_rejects_a_non_zero_timestamp_async(client):
+    account_id = tb.id()
     results = await client.create_accounts(
         [
             tb.Account(
-                id=tb.id(),
+                id=account_id,
                 ledger=1,
                 code=1,
                 timestamp=2,
@@ -7058,6 +7387,24 @@ async def test_create_accounts_rejects_a_non_zero_timestamp_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.TIMESTAMP_MUST_BE_ZERO
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
+
+@async_test
+async def test_create_accounts_rejects_a_code_above_the_maximum_u16_async(client):
+    account_id = tb.id()
+    with pytest.raises(Exception):
+        await client.create_accounts(
+            [
+                tb.Account(
+                    id=account_id,
+                    ledger=1,
+                    code=65536,
+                ),
+            ]
+        )
+    accounts = await client.lookup_accounts([account_id])
+    assert accounts == []
 
 # Suite: lookup_accounts
 
@@ -7458,10 +7805,11 @@ async def test_create_transfers_rejects_a_zero_debit_account_id_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=0,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7472,6 +7820,8 @@ async def test_create_transfers_rejects_a_zero_debit_account_id_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128_async(client):
@@ -7491,10 +7841,11 @@ async def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128_a
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=340282366920938463463374607431768211455,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7505,6 +7856,8 @@ async def test_create_transfers_rejects_a_debit_account_id_of_the_maximum_u128_a
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_zero_credit_account_id_async(client):
@@ -7518,10 +7871,11 @@ async def test_create_transfers_rejects_a_zero_credit_account_id_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=0,
                 amount=10,
@@ -7532,6 +7886,8 @@ async def test_create_transfers_rejects_a_zero_credit_account_id_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128_async(client):
@@ -7551,10 +7907,11 @@ async def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128_
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=340282366920938463463374607431768211455,
                 amount=10,
@@ -7565,6 +7922,8 @@ async def test_create_transfers_rejects_a_credit_account_id_of_the_maximum_u128_
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_zero_ledger_async(client):
@@ -7584,10 +7943,11 @@ async def test_create_transfers_rejects_a_zero_ledger_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7598,6 +7958,8 @@ async def test_create_transfers_rejects_a_zero_ledger_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.LEDGER_MUST_NOT_BE_ZERO
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_zero_code_async(client):
@@ -7617,10 +7979,11 @@ async def test_create_transfers_rejects_a_zero_code_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7631,6 +7994,8 @@ async def test_create_transfers_rejects_a_zero_code_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CODE_MUST_NOT_BE_ZERO
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_identical_debit_and_credit_accounts_async(client):
@@ -7644,10 +8009,11 @@ async def test_create_transfers_rejects_identical_debit_and_credit_accounts_asyn
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=account_id,
                 credit_account_id=account_id,
                 amount=10,
@@ -7658,6 +8024,8 @@ async def test_create_transfers_rejects_identical_debit_and_credit_accounts_asyn
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ACCOUNTS_MUST_BE_DIFFERENT
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_an_unknown_debit_account_async(client):
@@ -7671,10 +8039,11 @@ async def test_create_transfers_rejects_an_unknown_debit_account_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=tb.id(),
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7685,6 +8054,8 @@ async def test_create_transfers_rejects_an_unknown_debit_account_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.DEBIT_ACCOUNT_NOT_FOUND
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_an_unknown_credit_account_async(client):
@@ -7698,10 +8069,11 @@ async def test_create_transfers_rejects_an_unknown_credit_account_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=tb.id(),
                 amount=10,
@@ -7712,6 +8084,8 @@ async def test_create_transfers_rejects_an_unknown_credit_account_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CREDIT_ACCOUNT_NOT_FOUND
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_accounts_on_different_ledgers_async(client):
@@ -7731,10 +8105,11 @@ async def test_create_transfers_rejects_accounts_on_different_ledgers_async(clie
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7745,6 +8120,8 @@ async def test_create_transfers_rejects_accounts_on_different_ledgers_async(clie
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accounts_async(client):
@@ -7764,10 +8141,11 @@ async def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7778,6 +8156,8 @@ async def test_create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_mutually_exclusive_flags_async(client):
@@ -7797,10 +8177,11 @@ async def test_create_transfers_rejects_mutually_exclusive_flags_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7815,6 +8196,8 @@ async def test_create_transfers_rejects_mutually_exclusive_flags_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.FLAGS_ARE_MUTUALLY_EXCLUSIVE
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_non_zero_timestamp_async(client):
@@ -7834,10 +8217,11 @@ async def test_create_transfers_rejects_a_non_zero_timestamp_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7849,6 +8233,8 @@ async def test_create_transfers_rejects_a_non_zero_timestamp_async(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.TIMESTAMP_MUST_BE_ZERO
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_transfer_exceeding_credits_async(client):
@@ -7869,10 +8255,11 @@ async def test_create_transfers_rejects_a_transfer_exceeding_credits_async(clien
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7883,6 +8270,8 @@ async def test_create_transfers_rejects_a_transfer_exceeding_credits_async(clien
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.EXCEEDS_CREDITS
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_transfer_exceeding_debits_async(client):
@@ -7903,10 +8292,11 @@ async def test_create_transfers_rejects_a_transfer_exceeding_debits_async(client
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=10,
@@ -7917,6 +8307,8 @@ async def test_create_transfers_rejects_a_transfer_exceeding_debits_async(client
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.EXCEEDS_DEBITS
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_accepts_a_transfer_once_credits_allow_it_async(client):
@@ -7965,6 +8357,57 @@ async def test_create_transfers_accepts_a_transfer_once_credits_allow_it_async(c
     assert results[0].status == tb.CreateTransferStatus.CREATED
 
 @async_test
+async def test_create_transfers_creates_a_linked_chain_async(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    await client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    results = await client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=100,
+                ledger=1,
+                code=1,
+                flags=tb.TransferFlags.LINKED,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_2_id,
+                credit_account_id=account_1_id,
+                amount=49,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    assert len(results) == 2
+    assert results[0].status == tb.CreateTransferStatus.CREATED
+    assert results[1].status == tb.CreateTransferStatus.CREATED
+    accounts = await client.lookup_accounts([account_1_id, account_2_id])
+    assert len(accounts) == 2
+    assert accounts[0].id == account_1_id
+    assert accounts[0].debits_posted == 100
+    assert accounts[0].credits_posted == 49
+    assert accounts[1].id == account_2_id
+    assert accounts[1].debits_posted == 49
+    assert accounts[1].credits_posted == 100
+
+@async_test
 async def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open_async(client):
     debit_account_id = tb.id()
     credit_account_id = tb.id()
@@ -7982,10 +8425,11 @@ async def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_op
             ),
         ]
     )
+    transfer_id = tb.id()
     results = await client.create_transfers(
         [
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_id,
                 debit_account_id=debit_account_id,
                 credit_account_id=credit_account_id,
                 amount=100,
@@ -8005,6 +8449,8 @@ async def test_create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_op
     assert accounts[1].id == credit_account_id
     assert accounts[1].debits_posted == 0
     assert accounts[1].credits_posted == 0
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fails_async(client):
@@ -8057,6 +8503,8 @@ async def test_create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fai
     assert accounts[1].id == credit_account_id
     assert accounts[1].debits_posted == 0
     assert accounts[1].credits_posted == 0
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_an_id_reused_after_a_transient_failure_async(client):
@@ -8116,6 +8564,8 @@ async def test_create_transfers_rejects_an_id_reused_after_a_transient_failure_a
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.ID_ALREADY_FAILED
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 @async_test
 async def test_create_transfers_rejects_a_fractional_amount_async(client):
@@ -8135,11 +8585,12 @@ async def test_create_transfers_rejects_a_fractional_amount_async(client):
             ),
         ]
     )
+    transfer_id = tb.id()
     with pytest.raises(Exception):
         await client.create_transfers(
             [
                 tb.Transfer(
-                    id=tb.id(),
+                    id=transfer_id,
                     debit_account_id=debit_account_id,
                     credit_account_id=credit_account_id,
                     amount=1.5,
@@ -8148,6 +8599,8 @@ async def test_create_transfers_rejects_a_fractional_amount_async(client):
                 ),
             ]
         )
+    transfers = await client.lookup_transfers([transfer_id])
+    assert transfers == []
 
 # Suite: lookup_transfers
 
@@ -9588,6 +10041,51 @@ async def test_get_account_transfers_returns_no_transfers_without_the_debits_or_
             timestamp_max=0,
             limit=10,
             flags=tb.AccountFilterFlags.NONE,
+        )
+    )
+    assert transfers == []
+
+@async_test
+async def test_get_account_transfers_returns_no_transfers_for_reserved_filter_flags_async(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    await client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    await client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = await client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert transfers == []
@@ -11468,6 +11966,52 @@ async def test_get_account_balances_returns_no_balances_without_the_debits_or_cr
     assert balances == []
 
 @async_test
+async def test_get_account_balances_returns_no_balances_for_reserved_filter_flags_async(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    await client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    await client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    balances = await client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
+        )
+    )
+    assert balances == []
+
+@async_test
 async def test_get_account_balances_fails_when_the_limit_is_too_large_async(client):
     with pytest.raises(tb.TooMuchDataError):
         await client.get_account_balances(
@@ -12060,6 +12604,35 @@ async def test_query_accounts_returns_no_accounts_for_an_inverted_timestamp_rang
             timestamp_max=1,
             limit=10,
             flags=tb.QueryFilterFlags.NONE,
+        )
+    )
+    assert accounts == []
+
+@async_test
+async def test_query_accounts_returns_no_accounts_for_reserved_filter_flags_async(client):
+    account_id = tb.id()
+    user_data = tb.id()
+    await client.create_accounts(
+        [
+            tb.Account(
+                id=account_id,
+                user_data_128=user_data,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    accounts = await client.query_accounts(
+        tb.QueryFilter(
+            user_data_128=user_data,
+            user_data_64=0,
+            user_data_32=0,
+            ledger=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert accounts == []
@@ -12907,6 +13480,53 @@ async def test_query_transfers_returns_no_transfers_for_an_inverted_timestamp_ra
             timestamp_max=1,
             limit=10,
             flags=tb.QueryFilterFlags.NONE,
+        )
+    )
+    assert transfers == []
+
+@async_test
+async def test_query_transfers_returns_no_transfers_for_reserved_filter_flags_async(client):
+    debit_account_id = tb.id()
+    credit_account_id = tb.id()
+    user_data = tb.id()
+    await client.create_accounts(
+        [
+            tb.Account(
+                id=debit_account_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=credit_account_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    await client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                amount=10,
+                user_data_128=user_data,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = await client.query_transfers(
+        tb.QueryFilter(
+            user_data_128=user_data,
+            user_data_64=0,
+            user_data_32=0,
+            ledger=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=0xFFFF,
         )
     )
     assert transfers == []
