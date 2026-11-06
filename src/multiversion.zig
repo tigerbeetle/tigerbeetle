@@ -762,7 +762,17 @@ pub const MultiversionOS = struct {
             },
             else => @panic("unsupported platform"),
         };
-        errdefer allocator.free(target_path);
+        errdefer {
+            switch (builtin.target.os.tag) {
+                .linux => {},
+                .windows, .macos => std.Io.Dir.deleteFileAbsolute(
+                    io.io_std.?,
+                    target_path,
+                ) catch |e| log.err("deinit: deleting executable failed: {}", .{e}),
+                else => unreachable,
+            }
+            allocator.free(target_path);
+        }
 
         // Only Linux has a nice API for executing from an in-memory file. For macOS and Windows,
         // a standard named temporary file will be used instead.
@@ -857,6 +867,15 @@ pub const MultiversionOS = struct {
     pub fn deinit(self: *MultiversionOS, allocator: std.mem.Allocator) void {
         posix.close(self.target_fd);
         self.target_fd = IO.INVALID_FILE;
+
+        switch (builtin.target.os.tag) {
+            .linux => {},
+            .windows, .macos => std.Io.Dir.deleteFileAbsolute(
+                self.io.io_std.?,
+                self.target_path,
+            ) catch |e| log.err("deinit: deleting executable failed: {}", .{e}),
+            else => unreachable,
+        }
         allocator.free(self.target_path);
 
         allocator.free(self.source_buffer);
