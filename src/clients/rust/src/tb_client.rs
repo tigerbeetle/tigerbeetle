@@ -671,17 +671,6 @@ pub const TB_CLIENT_STATUS_TB_CLIENT_SUCCESS: TB_CLIENT_STATUS = 0;
 pub const TB_CLIENT_STATUS_TB_CLIENT_CLOSED: TB_CLIENT_STATUS = 1;
 pub const TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED: TB_CLIENT_STATUS = 2;
 
-pub type TB_REGISTER_LOG_CALLBACK_STATUS = i32;
-pub const TB_REGISTER_LOG_CALLBACK_STATUS_TB_REGISTER_LOG_CALLBACK_SUCCESS: TB_REGISTER_LOG_CALLBACK_STATUS = 0;
-pub const TB_REGISTER_LOG_CALLBACK_STATUS_TB_REGISTER_LOG_CALLBACK_ALREADY_REGISTERED: TB_REGISTER_LOG_CALLBACK_STATUS = 1;
-pub const TB_REGISTER_LOG_CALLBACK_STATUS_TB_REGISTER_LOG_CALLBACK_NOT_REGISTERED: TB_REGISTER_LOG_CALLBACK_STATUS = 2;
-
-pub type TB_LOG_LEVEL = i32;
-pub const TB_LOG_LEVEL_TB_LOG_ERR: TB_LOG_LEVEL = 0;
-pub const TB_LOG_LEVEL_TB_LOG_WARN: TB_LOG_LEVEL = 1;
-pub const TB_LOG_LEVEL_TB_LOG_INFO: TB_LOG_LEVEL = 2;
-pub const TB_LOG_LEVEL_TB_LOG_DEBUG: TB_LOG_LEVEL = 3;
-
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Reserved<const N: usize>([u8; N]);
@@ -733,16 +722,4 @@ extern "C" {
     pub fn tb_client_deinit(
         client: *mut tb_client_t,
     ) -> TB_CLIENT_STATUS;
-
-    // Registers or unregisters the application log callback.
-    pub fn register_log_callback(
-        callback: ::std::option::Option<
-            unsafe extern "C" fn(
-                TB_LOG_LEVEL,
-                *const u8,
-                u32,
-            ),
-        >,
-        debug: bool,
-    ) -> TB_REGISTER_LOG_CALLBACK_STATUS;
 }
