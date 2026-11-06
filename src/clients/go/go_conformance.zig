@@ -49,6 +49,7 @@ fn emit(printer: *Printer) !void {
     );
     printer.indent();
     try printer.write_indented("\"errors\"");
+    try printer.write_indented("\"os\"");
     try printer.write_indented("\"sync\"");
     try printer.write_indented("\"testing\"");
     try printer.write_indented("\"time\"");
@@ -59,7 +60,13 @@ fn emit(printer: *Printer) !void {
     try printer.write_empty_line();
     try printer.write_indented("func TestConformance(t *testing.T) {");
     printer.indent();
-    try printer.write_indented("port := startServer(t)");
+    try printer.write_indented("port := os.Getenv(\"TB_ADDRESS\")");
+    try printer.write_indented("if port == \"\" {");
+    printer.indent();
+    try printer.write_indented("port = \"3000\"");
+    printer.dedent();
+    try printer.write_indented("}");
+
     try printer.write_indented("client := newClient(t, port)");
     try printer.write_indented("defer client.Close()");
     try printer.write_empty_line();

@@ -7,6 +7,7 @@ package tigerbeetle_go
 
 import (
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +16,10 @@ import (
 )
 
 func TestConformance(t *testing.T) {
-	port := startServer(t)
+	port := os.Getenv("TB_ADDRESS")
+	if port == "" {
+		port = "3000"
+	}
 	client := newClient(t, port)
 	defer client.Close()
 
