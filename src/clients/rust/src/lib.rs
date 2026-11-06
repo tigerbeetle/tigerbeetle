@@ -248,6 +248,11 @@
 //! batching to batch events from multiple threads (or tasks), which can provide a
 //! performance advantage if your application doesn't naturally create large batches.
 //!
+//! Wakers are necessarily invoked on the internal I/O thread. They should therefore be cheap, must
+//! not block, must not poll the task inline (e.g. run it directly from inside `wake`), and must not
+//! try to execute new requests on the client directly. Instead, they should hand off the task to an
+//! executor. All reasonably implemented rust runtimes do this.
+//!
 //!
 //! [`Arc`]: `std::sync::Arc`
 //!
