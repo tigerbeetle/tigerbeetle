@@ -14,6 +14,7 @@ test {
 // Note that we don't promise any stability of these interfaces yet.
 pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
+pub const configs = @import("config.zig").configs;
 pub const message_buffer = @import("message_buffer.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
@@ -37,6 +38,7 @@ pub const lsm = .{
     .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
+    .StateCheckerType = @import("testing/cluster/state_checker.zig").StateCheckerType,
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = stdx.fuzz.random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
