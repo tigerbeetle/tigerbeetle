@@ -349,7 +349,7 @@ test "zipfian-distribution" {
     var prng = stdx.PRNG.from_seed(42);
     const zipf = ZipfianGenerator.init(max_number);
 
-    var distribution: [max_number]u32 = @splat(0);
+    var distribution: [max_number]u64 = @splat(0);
 
     for (0..1000) |_| {
         const n = zipf.next(&prng);
@@ -357,8 +357,20 @@ test "zipfian-distribution" {
     }
 
     try snap(@src(),
-        \\{ 333, 170, 125, 90, 59, 61, 43, 47, 38, 34 }
-    ).diff_fmt("{any}", .{distribution});
+        \\count (max 400)
+        \\|                   |
+        \\|▅                  |
+        \\|█                  |
+        \\|█                  |
+        \\|█ ▃                |
+        \\|█ █ ▄              |
+        \\|█ █ █ ▆ ▁ ▁        |
+        \\|█ █ █ █ █ █ ▆ ▇ ▆ ▅|
+        \\counts: { 333, 170, 125, 90, 59, 61, 43, 47, 38, 34 }
+    ).diff_fmt("{f}", .{stdx.Histogram{
+        .counts = &distribution,
+        .max_count = 400,
+    }});
 }
 
 test "shuffled-zipfian-distribution" {
@@ -367,7 +379,7 @@ test "shuffled-zipfian-distribution" {
     var prng = stdx.PRNG.from_seed(42);
     const zipf_shuffled = ZipfianShuffled.init(max_number, &prng);
 
-    var distribution: [max_number]u32 = @splat(0);
+    var distribution: [max_number]u64 = @splat(0);
 
     for (0..1000) |_| {
         const n = zipf_shuffled.next(&prng);
@@ -375,8 +387,20 @@ test "shuffled-zipfian-distribution" {
     }
 
     try snap(@src(),
-        \\{ 333, 34, 38, 47, 43, 61, 60, 89, 125, 170 }
-    ).diff_fmt("{any}", .{distribution});
+        \\count (max 400)
+        \\|                   |
+        \\|▅                  |
+        \\|█                  |
+        \\|█                  |
+        \\|█                 ▃|
+        \\|█               ▄ █|
+        \\|█         ▁ ▁ ▆ █ █|
+        \\|█ ▅ ▆ ▇ ▆ █ █ █ █ █|
+        \\counts: { 333, 34, 38, 47, 43, 61, 60, 89, 125, 170 }
+    ).diff_fmt("{f}", .{stdx.Histogram{
+        .counts = &distribution,
+        .max_count = 400,
+    }});
 }
 
 // Non-statistical smoke tests related to the shuffled hot items optimization.
