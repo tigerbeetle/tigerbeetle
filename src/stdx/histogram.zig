@@ -3,12 +3,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Histogram = @This();
-
 counts: []const u64,
 max_count: u64,
 height: u16 = 8,
 show_counts: bool = true,
+
+const Histogram = @This();
 
 pub fn format(self: Histogram, writer: *std.Io.Writer) !void {
     assert(self.counts.len > 0);
