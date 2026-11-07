@@ -40,7 +40,8 @@ overflow-checks = true
 Then, install the TigerBeetle client:
 
 ```console
-cargo add tigerbeetle
+# The client can be older than your TigerBeetle cluster, but must not be newer.
+cargo add tigerbeetle@=X.Y.Z
 ```
 
 Now, create `src/main.rs` and copy this into it:

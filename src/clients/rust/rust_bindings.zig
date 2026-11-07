@@ -62,12 +62,6 @@ const type_mappings = [_]TypeMapping{
     .{ .source = exports.tb_batch_status, .name = "TB_BATCH_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_init_status, .name = "TB_INIT_STATUS", .target = .enum_manual },
     .{ .source = exports.tb_client_status, .name = "TB_CLIENT_STATUS", .target = .enum_manual },
-    .{
-        .source = exports.tb_register_log_callback_status,
-        .name = "TB_REGISTER_LOG_CALLBACK_STATUS",
-        .target = .enum_manual,
-    },
-    .{ .source = exports.tb_log_level, .name = "TB_LOG_LEVEL", .target = .enum_manual },
 };
 
 fn resolve_rust_type(comptime Type: type) []const u8 {
@@ -541,18 +535,6 @@ pub fn main(init: std.process.Init) !void {
         \\    pub fn tb_client_deinit(
         \\        client: *mut tb_client_t,
         \\    ) -> TB_CLIENT_STATUS;
-        \\
-        \\    // Registers or unregisters the application log callback.
-        \\    pub fn register_log_callback(
-        \\        callback: ::std::option::Option<
-        \\            unsafe extern "C" fn(
-        \\                TB_LOG_LEVEL,
-        \\                *const u8,
-        \\                u32,
-        \\            ),
-        \\        >,
-        \\        debug: bool,
-        \\    ) -> TB_REGISTER_LOG_CALLBACK_STATUS;
         \\}}
     , .{});
 

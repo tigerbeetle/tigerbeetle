@@ -62,14 +62,14 @@ impl<Awaiting, Complete> CompletionCell<Awaiting, Complete> {
     }
 
     pub(crate) fn poll(&self, cx: &mut Context<'_>) -> Poll<Complete> {
+        // `waker.clone()` and `waker.drop()` is unknown user code, so we run it before locking.
+        let mut waker_new = cx.waker().clone();
         let mut state = self.state.lock().unwrap();
         match &mut *state {
             State::Awaiting { waker, .. } => {
-                if waker
-                    .as_ref()
-                    .map_or(true, |registered| !registered.will_wake(cx.waker()))
-                {
-                    *waker = Some(cx.waker().clone());
+                match waker.as_mut() {
+                    Some(waker_old) => std::mem::swap(waker_old, &mut waker_new),
+                    None => *waker = Some(waker_new),
                 }
                 Poll::Pending
             }

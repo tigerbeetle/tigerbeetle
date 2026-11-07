@@ -16,7 +16,8 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/rust/samples/zero-
 Then, install the TigerBeetle client:
 
 ```console
-cargo add tigerbeetle
+# The client can be older than your TigerBeetle cluster, but must not be newer.
+cargo add tigerbeetle@=X.Y.Z
 ```
 
 ## Start the TigerBeetle server
