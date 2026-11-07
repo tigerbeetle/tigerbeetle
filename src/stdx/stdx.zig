@@ -12,6 +12,7 @@ pub const BitSetType = @import("bit_set.zig").BitSetType;
 pub const IOPSType = @import("iops.zig").IOPSType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const PRNG = @import("prng.zig");
+pub const Histogram = @import("histogram.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const Bench = @import("benchmark/bench.zig");
 pub const perf = @import("benchmark/perf.zig");
@@ -1298,6 +1299,7 @@ comptime {
     _ = @import("net.zig");
     _ = @import("once.zig");
     _ = @import("prng.zig");
+    _ = @import("histogram.zig");
     _ = @import("queue.zig");
     _ = @import("radix.zig");
     _ = @import("radix_benchmark.zig");

@@ -150,13 +150,25 @@ fn next(prng: *PRNG) u64 {
 
 test next {
     var prng = from_seed(92);
-    var distribution: [8]u32 = @splat(0);
+    var distribution: [8]u64 = @splat(0);
     for (0..1000) |_| {
         distribution[prng.next() % 8] += 1;
     }
     try snap(@src(),
-        \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
-    ).diff_fmt("{any}", .{distribution});
+        \\count (max 160)
+        \\|               |
+        \\|▅ ▅       ▃ ▄  |
+        \\|█ █ ▆ █ ▆ █ █ ▇|
+        \\|█ █ █ █ █ █ █ █|
+        \\|█ █ █ █ █ █ █ █|
+        \\|█ █ █ █ █ █ █ █|
+        \\|█ █ █ █ █ █ █ █|
+        \\|█ █ █ █ █ █ █ █|
+        \\counts: { 134, 134, 117, 121, 117, 128, 131, 118 }
+    ).diff_fmt("{f}", .{stdx.Histogram{
+        .counts = &distribution,
+        .max_count = 160,
+    }});
 }
 
 pub fn fill(prng: *PRNG, target: []u8) void {
