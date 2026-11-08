@@ -1524,7 +1524,7 @@ pub const Simulator = struct {
 
     fn tick_crash_up(simulator: *Simulator, replica: *Cluster.Replica) void {
         const replica_storage = &simulator.cluster.storages[replica.replica];
-        const replica_writes = replica_storage.writes.count();
+        const replica_writes = replica_storage.writes.count;
 
         var crash_probability = simulator.options.replica_crash_probability;
         if (replica_writes > 0) crash_probability.numerator *= 10;

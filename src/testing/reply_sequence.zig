@@ -9,7 +9,7 @@ const constants = @import("../constants.zig");
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
-const PriorityQueue = std.PriorityQueue;
+const PriorityQueue = stdx.PriorityQueueType;
 
 /// Both messages belong to the ReplySequence's `MessagePool`.
 const PendingReply = struct {
@@ -19,13 +19,12 @@ const PendingReply = struct {
     reply: *Message.Reply,
 
     /// `PendingReply`s are ordered by ascending reply op.
-    fn compare(context: void, a: PendingReply, b: PendingReply) std.math.Order {
-        _ = context;
+    fn compare(a: PendingReply, b: PendingReply) std.math.Order {
         return std.math.order(a.reply.header.op, b.reply.header.op);
     }
 };
 
-const PendingReplyQueue = PriorityQueue(PendingReply, void, PendingReply.compare);
+const PendingReplyQueue = PriorityQueue(PendingReply, PendingReply.compare);
 
 pub const ReplySequence = struct {
     /// Reply messages (from cluster to client) may be reordered during transit.
@@ -49,9 +48,8 @@ pub const ReplySequence = struct {
         var message_pool = try MessagePool.init_capacity(allocator, stalled_queue_capacity * 2);
         errdefer message_pool.deinit(allocator);
 
-        var stalled_queue: PendingReplyQueue = .empty;
+        var stalled_queue = try PendingReplyQueue.init(allocator, stalled_queue_capacity);
         errdefer stalled_queue.deinit(allocator);
-        try stalled_queue.ensureTotalCapacity(allocator, stalled_queue_capacity);
 
         return ReplySequence{
             .allocator = allocator,
@@ -70,11 +68,11 @@ pub const ReplySequence = struct {
     }
 
     pub fn empty(sequence: *const ReplySequence) bool {
-        return sequence.stalled_queue.count() == 0;
+        return sequence.stalled_queue.count == 0;
     }
 
     pub fn free(sequence: ReplySequence) usize {
-        return stalled_queue_capacity - sequence.stalled_queue.count();
+        return stalled_queue_capacity - sequence.stalled_queue.count;
     }
 
     pub fn insert(
@@ -83,7 +81,7 @@ pub const ReplySequence = struct {
         prepare_message: *const Message.Prepare,
         reply_message: *const Message.Reply,
     ) void {
-        assert(sequence.stalled_queue.count() < stalled_queue_capacity);
+        assert(sequence.stalled_queue.count < stalled_queue_capacity);
 
         assert(prepare_message.header.invalid() == null);
         assert(prepare_message.header.command == .prepare);
@@ -103,11 +101,11 @@ pub const ReplySequence = struct {
             assert(reply_message.header.op != pending.reply.header.op);
         }
 
-        sequence.stalled_queue.push(sequence.allocator, .{
+        sequence.stalled_queue.push(.{
             .client_index = client_index,
             .prepare = sequence.clone_message(prepare_message.base_const()).into(.prepare).?,
             .reply = sequence.clone_message(reply_message.base_const()).into(.reply).?,
-        }) catch unreachable;
+        });
     }
 
     pub fn contains(sequence: *ReplySequence, reply: *const Message.Reply) bool {
@@ -123,9 +121,8 @@ pub const ReplySequence = struct {
         return false;
     }
 
-    // TODO(Zig): This type signature could be *const once std.PriorityQueue.peek() is updated.
-    pub fn peek(sequence: *ReplySequence, op: u64) ?PendingReply {
-        assert(sequence.stalled_queue.count() <= stalled_queue_capacity);
+    pub fn peek(sequence: *const ReplySequence, op: u64) ?PendingReply {
+        assert(sequence.stalled_queue.count <= stalled_queue_capacity);
 
         const commit = sequence.stalled_queue.peek() orelse return null;
         if (commit.reply.header.op == op) {

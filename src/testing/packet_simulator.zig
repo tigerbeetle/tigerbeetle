@@ -96,7 +96,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             ready_at: Instant,
             packet: Packet,
 
-            fn less_than(_: void, a: LinkPacket, b: LinkPacket) std.math.Order {
+            fn less_than(a: LinkPacket, b: LinkPacket) std.math.Order {
                 return std.math.order(a.ready_at.ns, b.ready_at.ns);
             }
         };
@@ -104,7 +104,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         pub const LinkDropPacketFn = *const fn (packet: Packet) bool;
 
         const Link = struct {
-            queue: std.PriorityQueue(LinkPacket, void, LinkPacket.less_than),
+            queue: stdx.PriorityQueueType(LinkPacket, LinkPacket.less_than),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
@@ -169,10 +169,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 errdefer for (links[0..i]) |*l| l.queue.deinit(allocator);
 
                 link.* = .{
-                    .queue = std.PriorityQueue(LinkPacket, void, LinkPacket.less_than)
-                        .initContext({}),
+                    .queue = try stdx.PriorityQueueType(LinkPacket, LinkPacket.less_than)
+                        .init(allocator, options.path_maximum_capacity),
                 };
-                try link.queue.ensureTotalCapacity(allocator, options.path_maximum_capacity);
             }
             errdefer for (links) |*link| link.queue.deinit(allocator);
 
@@ -205,7 +204,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn deinit(self: *PacketSimulator, allocator: std.mem.Allocator) void {
             for (self.links) |*link| {
-                for (link.queue.items) |link_packet| {
+                var link_packet_iterator = link.queue.iterator();
+                while (link_packet_iterator.next()) |link_packet| {
                     self.packet_deinit(link_packet.packet);
                 }
 
@@ -228,7 +228,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (link.queue.pop()) |link_packet| {
                 self.packet_deinit(link_packet.packet);
             }
-            assert(link.queue.count() == 0);
+            assert(link.queue.count == 0);
         }
 
         pub fn link_filter(self: *PacketSimulator, path: Path) *LinkFilter {
@@ -429,9 +429,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
-            const queue_count = queue.count();
+            const queue_count = queue.count;
             if (queue_count + 1 > self.options.path_maximum_capacity) {
-                const link_packet = queue.popIndex(self.prng.index(queue.items));
+                const link_packet = queue.pop_index(self.prng.index(queue.items[0..queue.count])).?;
                 defer self.packet_deinit(link_packet.packet);
 
                 log.warn("submit_packet: {} reached capacity, dropped packet: " ++ packet_fmt, .{
@@ -443,10 +443,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 });
             }
 
-            queue.push(self.allocator, .{
+            queue.push(.{
                 .ready_at = self.tick_instant().add(self.packet_delay(packet, path)),
                 .packet = packet,
-            }) catch unreachable;
+            });
 
             const command = self.packet_command(packet);
             const recording = self.links[self.path_index(path)].record.contains(command);

@@ -79,7 +79,11 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var message_pool = try MessagePool.init_capacity(gpa, 128);
     defer message_pool.deinit(gpa);
 
+    // Each bus has one accept completion and each connection has send/recv completions.
+    const connections_max = replica_count * (replica_count + @as(usize, clients_limit)) +
+        @as(usize, clients_count) * replica_count;
     var io = try IO.init(gpa, .{
+        .events_capacity = node_count + 2 * connections_max,
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .recv_error_probability = ratio(prng.range_inclusive(u64, 1, 2), 10),
@@ -426,9 +430,10 @@ const IO = struct {
     pub const NextTickSource = RealIO.NextTickSource;
     pub const socket_t = i32;
     pub const fd_t = i32;
-    const EventQueue = std.PriorityQueue(Event, void, Event.less_than);
+    const EventQueue = stdx.PriorityQueueType(Event, Event.less_than);
 
     pub const Options = struct {
+        events_capacity: usize,
         seed: u64 = 0,
         recv_partial_probability: Ratio,
         recv_error_probability: Ratio,
@@ -467,7 +472,7 @@ const IO = struct {
         ready_at: stdx.Instant,
         completion: *Completion,
 
-        fn less_than(_: void, a: Event, b: Event) std.math.Order {
+        fn less_than(a: Event, b: Event) std.math.Order {
             return std.math.order(a.ready_at.ns, b.ready_at.ns);
         }
     };
@@ -497,7 +502,7 @@ const IO = struct {
     };
 
     pub fn init(gpa: std.mem.Allocator, options: Options) !IO {
-        var events = EventQueue.initContext({});
+        var events = try EventQueue.init(gpa, options.events_capacity);
         errdefer events.deinit(gpa);
 
         return .{
@@ -925,10 +930,10 @@ const IO = struct {
 
         const jitter_mean = 1_000;
         const jitter = fuzz.random_int_exponential(&io.prng, u64, jitter_mean);
-        io.events.push(io.gpa, .{
+        io.events.push(.{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = (nanoseconds -| jitter_mean) + jitter }),
-        }) catch @panic("OOM");
+        });
     }
 
     pub const NextTickResult = void;
@@ -947,10 +952,10 @@ const IO = struct {
             .callback = .{ .next_tick = callback },
             .operation = .next_tick,
         };
-        io.events.push(io.gpa, .{
+        io.events.push(.{
             .completion = completion,
             .ready_at = io.tick_instant(),
-        }) catch @panic("OOM");
+        });
     }
 
     fn tick_instant(io: *const IO) stdx.Instant {
@@ -960,9 +965,9 @@ const IO = struct {
     fn enqueue(io: *IO, completion: *Completion) void {
         const tick_ns = constants.tick_ms * std.time.ns_per_ms;
         const delay_ns = fuzz.random_int_exponential(&io.prng, u64, 10 * tick_ns);
-        io.events.push(io.gpa, .{
+        io.events.push(.{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = delay_ns }),
-        }) catch @panic("OOM");
+        });
     }
 };
