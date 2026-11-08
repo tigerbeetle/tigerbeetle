@@ -222,7 +222,9 @@ test "PriorityQueue: fuzz" {
         );
         const action_weights = prng.enum_weights(Actions);
 
-        for (0..1000) |_| {
+        var iterations: stdx.PRNG.FuzzIterations = .{};
+
+        while (iterations.more()) {
             switch (prng.enum_weighted(Actions, action_weights)) {
                 .pop => {
                     const actual = priority_queue.pop();
