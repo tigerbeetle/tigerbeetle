@@ -817,8 +817,7 @@ const IO = struct {
         fd: fd_t,
     ) void {
         // There are no pending operations on this socket.
-        var events = io.events.iterator();
-        while (events.next()) |event| {
+        for (io.events.items) |event| {
             switch (event.completion.operation) {
                 inline .accept, .connect, .recv, .send => |data| assert(data.socket != fd),
                 .close => |data| assert(data.fd != fd),

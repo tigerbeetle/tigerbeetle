@@ -204,8 +204,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn deinit(self: *PacketSimulator, allocator: std.mem.Allocator) void {
             for (self.links) |*link| {
-                var link_packet_iterator = link.queue.iterator();
-                while (link_packet_iterator.next()) |link_packet| {
+                for (link.queue.items) |link_packet| {
                     self.packet_deinit(link_packet.packet);
                 }
 
@@ -228,7 +227,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (link.queue.pop()) |link_packet| {
                 self.packet_deinit(link_packet.packet);
             }
-            assert(link.queue.count == 0);
+            assert(link.queue.items.len == 0);
         }
 
         pub fn link_filter(self: *PacketSimulator, path: Path) *LinkFilter {
@@ -429,9 +428,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
-            const queue_count = queue.count;
+            const queue_count = queue.items.len;
             if (queue_count + 1 > self.options.path_maximum_capacity) {
-                const link_packet = queue.pop_index(self.prng.index(queue.items[0..queue.count])).?;
+                const link_packet = queue.pop_index(self.prng.index(queue.items)).?;
                 defer self.packet_deinit(link_packet.packet);
 
                 log.warn("submit_packet: {} reached capacity, dropped packet: " ++ packet_fmt, .{

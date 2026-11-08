@@ -68,11 +68,11 @@ pub const ReplySequence = struct {
     }
 
     pub fn empty(sequence: *const ReplySequence) bool {
-        return sequence.stalled_queue.count == 0;
+        return sequence.stalled_queue.items.len == 0;
     }
 
     pub fn free(sequence: ReplySequence) usize {
-        return stalled_queue_capacity - sequence.stalled_queue.count;
+        return stalled_queue_capacity - sequence.stalled_queue.items.len;
     }
 
     pub fn insert(
@@ -81,7 +81,7 @@ pub const ReplySequence = struct {
         prepare_message: *const Message.Prepare,
         reply_message: *const Message.Reply,
     ) void {
-        assert(sequence.stalled_queue.count < stalled_queue_capacity);
+        assert(sequence.stalled_queue.items.len < stalled_queue_capacity);
 
         assert(prepare_message.header.invalid() == null);
         assert(prepare_message.header.command == .prepare);
@@ -96,8 +96,7 @@ pub const ReplySequence = struct {
         assert(reply_message.header.operation == prepare_message.header.operation);
         assert(reply_message.header.op == prepare_message.header.op);
 
-        var pending_replies = sequence.stalled_queue.iterator();
-        while (pending_replies.next()) |pending| {
+        for (sequence.stalled_queue.items) |pending| {
             assert(reply_message.header.op != pending.reply.header.op);
         }
 
@@ -111,8 +110,7 @@ pub const ReplySequence = struct {
     pub fn contains(sequence: *ReplySequence, reply: *const Message.Reply) bool {
         assert(reply.header.command == .reply);
 
-        var pending_replies = sequence.stalled_queue.iterator();
-        while (pending_replies.next()) |pending| {
+        for (sequence.stalled_queue.items) |pending| {
             if (reply.header.op == pending.reply.header.op) {
                 assert(reply.header.checksum == pending.reply.header.checksum);
                 return true;
@@ -122,7 +120,7 @@ pub const ReplySequence = struct {
     }
 
     pub fn peek(sequence: *const ReplySequence, op: u64) ?PendingReply {
-        assert(sequence.stalled_queue.count <= stalled_queue_capacity);
+        assert(sequence.stalled_queue.items.len <= stalled_queue_capacity);
 
         const commit = sequence.stalled_queue.peek() orelse return null;
         if (commit.reply.header.op == op) {

@@ -746,7 +746,7 @@ pub const AccountingAuditor = struct {
                         .transfer_timestamp = timestamp,
                         .expires_at = timestamp + transfer.timeout_ns(),
                     });
-                    assert(self.pending_expiries.count <= self.options.transfers_pending_max);
+                    assert(self.pending_expiries.items.len <= self.options.transfers_pending_max);
                 }
                 dr.debits_pending += transfer.amount;
                 cr.credits_pending += transfer.amount;

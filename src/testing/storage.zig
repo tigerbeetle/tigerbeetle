@@ -270,8 +270,8 @@ pub const Storage = struct {
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
         log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
-            storage.reads.count,
-            storage.writes.count,
+            storage.reads.items.len,
+            storage.writes.items.len,
             storage.next_tick_queue.count(),
         });
         while (storage.writes.pop()) |write| {
@@ -285,8 +285,8 @@ pub const Storage = struct {
         while (storage.reads.pop()) |_| {}
         storage.next_tick_queue.reset();
 
-        assert(storage.writes.count == 0);
-        assert(storage.reads.count == 0);
+        assert(storage.writes.items.len == 0);
+        assert(storage.reads.items.len == 0);
         assert(storage.next_tick_queue.count() == 0);
     }
 
@@ -344,15 +344,13 @@ pub const Storage = struct {
         storage.faults.toggleSet(storage.faults);
         storage.faults.toggleSet(origin.faults);
 
-        storage.reads.count = 0;
-        var read_iterator = origin.reads.iterator();
-        while (read_iterator.next()) |read| {
+        storage.reads.items.len = 0;
+        for (origin.reads.items) |read| {
             storage.reads.push(read);
         }
 
-        storage.writes.count = 0;
-        var write_iterator = origin.writes.iterator();
-        while (write_iterator.next()) |write| {
+        storage.writes.items.len = 0;
+        for (origin.writes.items) |write| {
             storage.writes.push(write);
         }
     }
@@ -585,8 +583,7 @@ pub const Storage = struct {
         maybe(zone == .grid_padding); // Padding is zeroed during format.
 
         // Verify that there are no concurrent overlapping writes.
-        var other_iterator = storage.writes.iterator();
-        while (other_iterator.next()) |other| {
+        for (storage.writes.items) |other| {
             if (other.zone != zone) continue;
             assert(offset_in_zone + buffer.len <= other.offset or
                 other.offset + other.buffer.len <= offset_in_zone);
@@ -883,12 +880,10 @@ pub const Storage = struct {
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
-        var read_iterator = storage.reads.iterator();
-        while (read_iterator.next()) |read| {
+        for (storage.reads.items) |read| {
             log.debug("Pending read: {} {}\n{f}", .{ read.offset, read.zone, read.stack_trace });
         }
-        var write_iterator = storage.writes.iterator();
-        while (write_iterator.next()) |write| {
+        for (storage.writes.items) |write| {
             log.debug("Pending write: {} {}\n{f}", .{
                 write.offset,
                 write.zone,
@@ -900,9 +895,7 @@ pub const Storage = struct {
     pub fn assert_no_pending_reads(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
-        var read_iterator = storage.reads.iterator();
-
-        while (read_iterator.next()) |read| {
+        for (storage.reads.items) |read| {
             if (read.zone == zone) {
                 log.err("Pending read: {} {}\n{f}", .{ read.offset, read.zone, read.stack_trace });
                 assert_failed = true;
@@ -917,9 +910,7 @@ pub const Storage = struct {
     pub fn assert_no_pending_writes(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
-        const writes = storage.writes;
-        var write_iterator = writes.iterator();
-        while (write_iterator.next()) |write| {
+        for (storage.writes.items) |write| {
             if (write.zone == zone) {
                 log.err("Pending write: {} {}\n{f}", .{
                     write.offset,
