@@ -36,9 +36,8 @@ public final class Main {
 
     byte[] clusterID = UInt128.asBytes(Long.parseLong(args[0]));
 
-    var replicaAddressesArg = args[1];
-    String[] replicaAddresses = replicaAddressesArg.split(",");
-    if (replicaAddresses.length == 0) {
+    var replicaAddresses = args[1];
+    if (replicaAddresses.length() == 0) {
       throw new IllegalArgumentException(
           "REPLICAS must list at least one address (comma-separated)");
     }
