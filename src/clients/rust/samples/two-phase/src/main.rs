@@ -8,17 +8,20 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let port = std::env::var("TB_ADDRESS").unwrap_or_else(|_| "3000".to_string());
     let client = tb::Client::new(0, &port)?;
 
-    // Create two accounts
+    // Create accounts.
+    let account_dr_id = tb::id();
+    let account_cr_id = tb::id();
+
     let account_results = client
         .create_accounts(&[
             tb::Account {
-                id: 1,
+                id: account_dr_id,
                 ledger: 1,
                 code: 1,
                 ..Default::default()
             },
             tb::Account {
-                id: 2,
+                id: account_cr_id,
                 ledger: 1,
                 code: 1,
                 ..Default::default()
@@ -30,15 +33,16 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(account_results[0].status == tb::CreateAccountStatus::Created);
     assert!(account_results[1].status == tb::CreateAccountStatus::Created);
 
-    // Start a pending transfer
+    // Create pending transfer.
+    let transfer_pending_id = tb::id();
     let transfer_results = client
         .create_transfers(&[tb::Transfer {
-            id: 1,
-            debit_account_id: 1,
-            credit_account_id: 2,
-            amount: 500,
+            id: transfer_pending_id,
+            debit_account_id: account_dr_id,
+            credit_account_id: account_cr_id,
             ledger: 1,
             code: 1,
+            amount: 500,
             flags: tb::TransferFlags::Pending,
             ..Default::default()
         }])
@@ -47,54 +51,52 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(transfer_results.len() == 1);
     assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
-    // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-    let accounts = client.lookup_accounts(&[1, 2]).await?;
+    // Fetch and validate pending account balances.
+    let accounts = client
+        .lookup_accounts(&[account_dr_id, account_cr_id])
+        .await?;
     assert_eq!(accounts.len(), 2);
 
     for account in &accounts {
-        if account.id == 1 {
-            assert_eq!(account.debits_posted, 0, "account 1 debits, before posted");
-            assert_eq!(
-                account.credits_posted, 0,
-                "account 1 credits, before posted"
-            );
+        if account.id == account_dr_id {
+            assert_eq!(account.debits_posted, 0, "DR debits, before posted");
+            assert_eq!(account.credits_posted, 0, "DR credits, before posted");
             assert_eq!(
                 account.debits_pending, 500,
-                "account 1 debits pending, before posted"
+                "DR debits pending, before posted"
             );
             assert_eq!(
                 account.credits_pending, 0,
-                "account 1 credits pending, before posted"
+                "DR credits pending, before posted"
             );
-        } else if account.id == 2 {
-            assert_eq!(account.debits_posted, 0, "account 2 debits, before posted");
-            assert_eq!(
-                account.credits_posted, 0,
-                "account 2 credits, before posted"
-            );
+        } else if account.id == account_cr_id {
+            assert_eq!(account.debits_posted, 0, "CR debits, before posted");
+            assert_eq!(account.credits_posted, 0, "CR credits, before posted");
             assert_eq!(
                 account.debits_pending, 0,
-                "account 2 debits pending, before posted"
+                "CR debits pending, before posted"
             );
             assert_eq!(
                 account.credits_pending, 500,
-                "account 2 credits pending, before posted"
+                "CR credits pending, before posted"
             );
         } else {
             panic!("Unexpected account: {}", account.id);
         }
     }
 
-    // Create a second transfer simply posting the first transfer
+    // Post pending transfer.
     let transfer_results = client
         .create_transfers(&[tb::Transfer {
-            id: 2,
-            debit_account_id: 1,
-            credit_account_id: 2,
-            amount: 500,
-            pending_id: 1,
+            id: tb::id(),
+            debit_account_id: account_dr_id,
+            credit_account_id: account_cr_id,
+            pending_id: transfer_pending_id,
             ledger: 1,
             code: 1,
+            // You can post any amount between zero and the pending transfer amount,
+            // or void the two-phase transfer using the `VoidPendingTransfer` flag.
+            amount: 500,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
         }])
@@ -103,49 +105,23 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(transfer_results.len() == 1);
     assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
-    // Validate the contents of all transfers
-    let transfers = client.lookup_transfers(&[1, 2]).await?;
-    assert_eq!(transfers.len(), 2);
-
-    for transfer in &transfers {
-        if transfer.id == 1 {
-            assert!(
-                transfer.flags.0 & tb::TransferFlags::Pending.0 != 0,
-                "transfer 1 pending"
-            );
-            assert!(
-                transfer.flags.0 & tb::TransferFlags::PostPendingTransfer.0 == 0,
-                "transfer 1 post_pending_transfer"
-            );
-        } else if transfer.id == 2 {
-            assert!(
-                transfer.flags.0 & tb::TransferFlags::Pending.0 == 0,
-                "transfer 2 pending"
-            );
-            assert!(
-                transfer.flags.0 & tb::TransferFlags::PostPendingTransfer.0 != 0,
-                "transfer 2 post_pending_transfer"
-            );
-        } else {
-            panic!("Unknown transfer: {}", transfer.id);
-        }
-    }
-
-    // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-    let accounts = client.lookup_accounts(&[1, 2]).await?;
+    // Fetch and validate final account balances.
+    let accounts = client
+        .lookup_accounts(&[account_dr_id, account_cr_id])
+        .await?;
     assert_eq!(accounts.len(), 2);
 
     for account in &accounts {
-        if account.id == 1 {
-            assert_eq!(account.debits_posted, 500, "account 1 debits");
-            assert_eq!(account.credits_posted, 0, "account 1 credits");
-            assert_eq!(account.debits_pending, 0, "account 1 debits pending");
-            assert_eq!(account.credits_pending, 0, "account 1 credits pending");
-        } else if account.id == 2 {
-            assert_eq!(account.debits_posted, 0, "account 2 debits");
-            assert_eq!(account.credits_posted, 500, "account 2 credits");
-            assert_eq!(account.debits_pending, 0, "account 2 debits pending");
-            assert_eq!(account.credits_pending, 0, "account 2 credits pending");
+        if account.id == account_dr_id {
+            assert_eq!(account.debits_posted, 500, "DR debits");
+            assert_eq!(account.credits_posted, 0, "DR credits");
+            assert_eq!(account.debits_pending, 0, "DR debits pending");
+            assert_eq!(account.credits_pending, 0, "DR credits pending");
+        } else if account.id == account_cr_id {
+            assert_eq!(account.debits_posted, 0, "CR debits");
+            assert_eq!(account.credits_posted, 500, "CR credits");
+            assert_eq!(account.debits_pending, 0, "CR debits pending");
+            assert_eq!(account.credits_pending, 0, "CR credits pending");
         } else {
             panic!("Unexpected account: {}", account.id);
         }

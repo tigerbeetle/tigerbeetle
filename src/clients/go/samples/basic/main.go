@@ -26,15 +26,18 @@ func main() {
 	}
 	defer client.Close()
 
-	// Create two accounts
+	// Create accounts.
+	accountDRID := ID()
+	accountCRID := ID()
+
 	accountResults, err := client.CreateAccounts([]Account{
 		{
-			ID:     ToUint128(1),
+			ID:     accountDRID,
 			Ledger: 1,
 			Code:   1,
 		},
 		{
-			ID:     ToUint128(2),
+			ID:     accountCRID,
 			Ledger: 1,
 			Code:   1,
 		},
@@ -52,11 +55,12 @@ func main() {
 		}
 	}
 
+	// Create a transfer.
 	transferResults, err := client.CreateTransfers([]Transfer{
 		{
-			ID:              ToUint128(1),
-			DebitAccountID:  ToUint128(1),
-			CreditAccountID: ToUint128(2),
+			ID:              ID(),
+			DebitAccountID:  accountDRID,
+			CreditAccountID: accountCRID,
 			Amount:          ToUint128(10),
 			Ledger:          1,
 			Code:            1,
@@ -75,21 +79,22 @@ func main() {
 		}
 	}
 
-	// Check the sums for both accounts
-	accounts, err := client.LookupAccounts([]Uint128{ToUint128(1), ToUint128(2)})
+	// Fetch and validate account balances.
+	accounts, err := client.LookupAccounts([]Uint128{accountDRID, accountDRID})
 	if err != nil {
 		log.Fatalf("Could not fetch accounts: %s", err)
 	}
 	assert(len(accounts), 2, "accounts")
 
 	for _, account := range accounts {
-		if account.ID == ToUint128(1) {
+		switch account.ID {
+		case accountDRID:
 			assert(account.DebitsPosted, ToUint128(10), "account 1 debits")
 			assert(account.CreditsPosted, ToUint128(0), "account 1 credits")
-		} else if account.ID == ToUint128(2) {
+		case accountCRID:
 			assert(account.DebitsPosted, ToUint128(0), "account 2 debits")
 			assert(account.CreditsPosted, ToUint128(10), "account 2 credits")
-		} else {
+		default:
 			log.Fatalf("Unexpected account")
 		}
 	}

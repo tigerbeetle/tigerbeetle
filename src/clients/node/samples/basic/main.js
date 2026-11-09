@@ -3,6 +3,7 @@ const process = require("process");
 
 const {
     createClient,
+    id,
     CreateAccountStatus,
     CreateTransferStatus,
 } = require("tigerbeetle-node");
@@ -13,9 +14,13 @@ const client = createClient({
 });
 
 async function main() {
+  // Create accounts.
+  const accountDrId = id();
+  const accountCrId = id();
+
   let accountResults = await client.createAccounts([
     {
-      id: 1n,
+      id: accountDrId,
       debits_pending: 0n,
       debits_posted: 0n,
       credits_pending: 0n,
@@ -30,7 +35,7 @@ async function main() {
       timestamp: 0n,
     },
     {
-      id: 2n,
+      id: accountCrId,
       debits_pending: 0n,
       debits_posted: 0n,
       credits_pending: 0n,
@@ -49,11 +54,12 @@ async function main() {
   assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
   assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
+  // Create a transfer.
   let transferResults = await client.createTransfers([
     {
-      id: 1n,
-      debit_account_id: 1n,
-      credit_account_id: 2n,
+      id: id(),
+      debit_account_id: accountDrId,
+      credit_account_id: accountCrId,
       amount: 10n,
       pending_id: 0n,
       user_data_128: 0n,
@@ -69,13 +75,14 @@ async function main() {
   assert.strictEqual(transferResults.length, 1);
   assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
-  let accounts = await client.lookupAccounts([1n, 2n]);
+  // Fetch and validate account balances.
+  let accounts = await client.lookupAccounts([accountDrId, accountCrId]);
   assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
-    if (account.id === 1n) {
+    if (account.id === accountDrId) {
       assert.strictEqual(account.debits_posted, 10n);
       assert.strictEqual(account.credits_posted, 0n);
-    } else if (account.id === 2n) {
+    } else if (account.id === accountCrId) {
       assert.strictEqual(account.debits_posted, 0n);
       assert.strictEqual(account.credits_posted, 10n);
     } else {

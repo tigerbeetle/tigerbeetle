@@ -16,15 +16,18 @@ public final class Main {
         byte[] clusterID = UInt128.asBytes(0);
         String replicaAddresses = replicaAddress == null ? "3000" : replicaAddress;
         try (var client = new Client(clusterID, replicaAddresses)) {
-            // Create two accounts
+            // Create accounts.
+            final var accountDrId = UInt128.id();
+            final var accountCrId = UInt128.id();
+
             AccountBatch accounts = new AccountBatch(2);
             accounts.add();
-            accounts.setId(1);
+            accounts.setId(accountDrId);
             accounts.setLedger(1);
             accounts.setCode(1);
 
             accounts.add();
-            accounts.setId(2);
+            accounts.setId(accountCrId);
             accounts.setLedger(1);
             accounts.setCode(1);
 
@@ -40,12 +43,13 @@ public final class Main {
                 }
             }
 
-            // Start a pending transfer
+            // Create pending transfer.
             TransferBatch transfers = new TransferBatch(1);
+            final var transferPendingId = UInt128.id();
             transfers.add();
-            transfers.setId(1);
-            transfers.setDebitAccountId(1);
-            transfers.setCreditAccountId(2);
+            transfers.setId(transferPendingId);
+            transfers.setDebitAccountId(accountDrId);
+            transfers.setCreditAccountId(accountCrId);
             transfers.setLedger(1);
             transfers.setCode(1);
             transfers.setAmount(500);
@@ -65,23 +69,20 @@ public final class Main {
                 }
             }
 
-            // Validate accounts pending and posted debits/credits before finishing the
-            // two-phase transfer
+            // Fetch and validate pending account balances.
             IdBatch ids = new IdBatch(2);
-            ids.add(1);
-            ids.add(2);
+            ids.add(accountDrId);
+            ids.add(accountCrId);
             accounts = client.lookupAccounts(ids);
             assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
-                if (accounts.getId(UInt128.LeastSignificant) == 1
-                        && accounts.getId(UInt128.MostSignificant) == 0) {
+                if (Arrays.equals(accounts.getId(), accountDrId)) {
                     assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
                     assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
                     assertTrue(accounts.getDebitsPending().intValueExact() == 500);
                     assertTrue(accounts.getCreditsPending().intValueExact() == 0);
-                } else if (accounts.getId(UInt128.LeastSignificant) == 2
-                        && accounts.getId(UInt128.MostSignificant) == 0) {
+                } else if (Arrays.equals(accounts.getId(), accountCrId)) {
                     assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
                     assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
                     assertTrue(accounts.getDebitsPending().intValueExact() == 0);
@@ -92,15 +93,17 @@ public final class Main {
                 }
             }
 
-            // Create a second transfer simply posting the first transfer
+            // Post pending transfer.
             transfers = new TransferBatch(1);
             transfers.add();
-            transfers.setId(2);
-            transfers.setPendingId(1);
-            transfers.setDebitAccountId(1);
-            transfers.setCreditAccountId(2);
+            transfers.setId(UInt128.id());
+            transfers.setPendingId(transferPendingId);
+            transfers.setDebitAccountId(accountDrId);
+            transfers.setCreditAccountId(accountCrId);
             transfers.setLedger(1);
             transfers.setCode(1);
+            // You can post any amount between zero and the pending transfer amount,
+            // or void the two-phase transfer using the `VOID_PENDING_TRANSFER` flag.
             transfers.setAmount(500);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
@@ -118,23 +121,20 @@ public final class Main {
                 }
             }
 
-            // Validate accounts pending and posted debits/credits after finishing the
-            // two-phase transfer
+            // Fetch and validate final account balances.
             ids = new IdBatch(2);
-            ids.add(1);
-            ids.add(2);
+            ids.add(accountDrId);
+            ids.add(accountCrId);
             accounts = client.lookupAccounts(ids);
             assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
-                if (accounts.getId(UInt128.LeastSignificant) == 1
-                        && accounts.getId(UInt128.MostSignificant) == 0) {
+                if (Arrays.equals(accounts.getId(), accountDrId)) {
                     assertTrue(accounts.getDebitsPosted().intValueExact() == 500);
                     assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
                     assertTrue(accounts.getDebitsPending().intValueExact() == 0);
                     assertTrue(accounts.getCreditsPending().intValueExact() == 0);
-                } else if (accounts.getId(UInt128.LeastSignificant) == 2
-                        && accounts.getId(UInt128.MostSignificant) == 0) {
+                } else if (Arrays.equals(accounts.getId(), accountCrId)) {
                     assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
                     assertTrue(accounts.getCreditsPosted().intValueExact() == 500);
                     assertTrue(accounts.getDebitsPending().intValueExact() == 0);

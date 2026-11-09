@@ -9,18 +9,20 @@ using (var client = new Client(
        addresses: tbAddress != null ? tbAddress : "3000"
        ))
 {
+    // Create accounts.
+    var accountDrId = ID.Create();
+    var accountCrId = ID.Create();
 
-    // Create two accounts
     var accounts = new[] {
     new Account
     {
-        Id = 1,
+        Id = accountDrId,
         Ledger= 1,
         Code = 1,
     },
     new Account
     {
-        Id = 2,
+        Id = accountCrId,
         Ledger = 1,
         Code = 1,
     },
@@ -31,13 +33,14 @@ using (var client = new Client(
     Debug.Assert(accountResults[0].Status == CreateAccountStatus.Created);
     Debug.Assert(accountResults[1].Status == CreateAccountStatus.Created);
 
-    // Start a pending transfer
+    // Create pending transfer.
+    var transferPendingId = ID.Create();
     var transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
-        Id = 1,
-        DebitAccountId = 1,
-        CreditAccountId = 2,
+        Id = transferPendingId,
+        DebitAccountId = accountDrId,
+        CreditAccountId = accountCrId,
         Amount = 500,
         Ledger = 1,
         Code = 1,
@@ -47,19 +50,19 @@ using (var client = new Client(
     Debug.Assert(transferResults.Length == 1);
     Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
-    // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
+    // Fetch and validate pending account balances.
+    accounts = client.LookupAccounts(new UInt128[] { accountDrId, accountCrId });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
-        if (account.Id == 1)
+        if (account.Id == accountDrId)
         {
             Debug.Assert(account.DebitsPosted == 0);
             Debug.Assert(account.CreditsPosted == 0);
             Debug.Assert(account.DebitsPending == 500);
             Debug.Assert(account.CreditsPending == 0);
         }
-        else if (account.Id == 2)
+        else if (account.Id == accountCrId)
         {
             Debug.Assert(account.DebitsPosted == 0);
             Debug.Assert(account.CreditsPosted == 0);
@@ -72,16 +75,18 @@ using (var client = new Client(
         }
     }
 
-    // Create a second transfer simply posting the first transfer
+    // Post pending transfer.
     transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
-        Id = 2,
-        PendingId = 1,
-        DebitAccountId = 1,
-        CreditAccountId = 2,
+        Id = ID.Create(),
+        PendingId = transferPendingId,
+        DebitAccountId = accountDrId,
+        CreditAccountId = accountCrId,
         Ledger = 1,
         Code = 1,
+        // You can post any amount between zero and the pending transfer amount,
+        // or void the two-phase transfer using the `VoidPendingTransfer` flag.
         Amount = 500,
         Flags = TransferFlags.PostPendingTransfer,
     }
@@ -89,38 +94,19 @@ using (var client = new Client(
     Debug.Assert(transferResults.Length == 1);
     Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
-    // Validate the contents of all transfers
-    var transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
-    Debug.Assert(transfers.Length == 2);
-    foreach (var transfer in transfers)
-    {
-        if (transfer.Id == 1)
-        {
-            Debug.Assert(transfer.Flags.HasFlag(TransferFlags.Pending));
-        }
-        else if (transfer.Id == 2)
-        {
-            Debug.Assert(transfer.Flags.HasFlag(TransferFlags.PostPendingTransfer));
-        }
-        else
-        {
-            throw new Exception("Unexpected transfer");
-        }
-    }
-
-    // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
+    // Fetch and validate final account balances.
+    accounts = client.LookupAccounts(new UInt128[] { accountDrId, accountCrId });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
-        if (account.Id == 1)
+        if (account.Id == accountDrId)
         {
             Debug.Assert(account.DebitsPosted == 500);
             Debug.Assert(account.CreditsPosted == 0);
             Debug.Assert(account.DebitsPending == 0);
             Debug.Assert(account.CreditsPending == 0);
         }
-        else if (account.Id == 2)
+        else if (account.Id == accountCrId)
         {
             Debug.Assert(account.DebitsPosted == 0);
             Debug.Assert(account.CreditsPosted == 500);
