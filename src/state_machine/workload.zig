@@ -35,8 +35,6 @@ const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 const fuzz = stdx.fuzz;
 
-const PriorityQueue = stdx.PriorityQueueType;
-
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.
     /// For example, a single-phase transfer between valid accounts without balance limits.
@@ -86,21 +84,148 @@ const TransferTemplate = struct {
     result: accounting_auditor.CreateTransferStatusSet,
 };
 
-const TransferBatchQueue = PriorityQueue(TransferBatch, struct {
-    /// Ascending order.
-    fn compare(a: TransferBatch, b: TransferBatch) std.math.Order {
-        assert(a.min != b.min);
-        assert(a.max != b.max);
-        return std.math.order(a.min, b.min);
-    }
-}.compare);
-
 const TransferBatch = struct {
     /// Index of the first transfer in the batch.
     min: usize,
     /// Index of the last transfer in the batch.
     max: usize,
 };
+
+/// Completed transfer indices, represented by a prefix and sorted, disjoint ranges.
+/// Adjacent batches are merged so a delayed request cannot cause unbounded accumulation.
+const TransferRanges = struct {
+    /// All indices below this index have completed.
+    prefix: usize = 0,
+    ranges: std.ArrayList(TransferBatch),
+
+    fn init(allocator: std.mem.Allocator, client_count: usize) !TransferRanges {
+        assert(client_count > 0);
+        return .{ .ranges = try .initCapacity(allocator, client_count + 1) };
+    }
+
+    fn deinit(self: *TransferRanges, allocator: std.mem.Allocator) void {
+        self.ranges.deinit(allocator);
+    }
+
+    fn insert(self: *TransferRanges, batch: TransferBatch) void {
+        assert(batch.min <= batch.max);
+        assert(batch.min >= self.prefix);
+        assert(batch.max < std.math.maxInt(usize));
+
+        var index: usize = 0;
+        while (index < self.ranges.items.len and self.ranges.items[index].min < batch.min) {
+            index += 1;
+        }
+
+        if (index > 0) assert(self.ranges.items[index - 1].max < batch.min);
+        if (index < self.ranges.items.len) assert(batch.max < self.ranges.items[index].min);
+
+        const merge_a = index > 0 and self.ranges.items[index - 1].max + 1 == batch.min;
+        const merge_b = index < self.ranges.items.len and
+            batch.max + 1 == self.ranges.items[index].min;
+
+        if (merge_a) {
+            self.ranges.items[index - 1].max = batch.max;
+            if (merge_b) {
+                self.ranges.items[index - 1].max = self.ranges.items[index].max;
+                _ = self.ranges.orderedRemove(index);
+            }
+        } else if (merge_b) {
+            self.ranges.items[index].min = batch.min;
+        } else {
+            self.ranges.insertAssumeCapacity(index, batch);
+        }
+
+        if (self.ranges.items[0].min == self.prefix) {
+            self.prefix = self.ranges.orderedRemove(0).max + 1;
+        }
+
+        if (self.ranges.items.len > 0) assert(self.ranges.items[0].min > self.prefix);
+    }
+
+    fn contains(self: *const TransferRanges, index: usize) bool {
+        if (index < self.prefix) return true;
+
+        for (self.ranges.items) |range| {
+            if (index < range.min) return false;
+            if (index <= range.max) return true;
+        }
+        return false;
+    }
+};
+
+test "TransferRanges: delayed and evicted clients" {
+    var delivered = try TransferRanges.init(std.testing.allocator, 3);
+    defer delivered.deinit(std.testing.allocator);
+
+    delivered.insert(.{ .min = 2, .max = 3 });
+    for (6..1000) |index| {
+        delivered.insert(.{ .min = index, .max = index });
+        try std.testing.expectEqual(0, delivered.prefix);
+        try std.testing.expectEqual(2, delivered.ranges.items.len);
+        try std.testing.expect(!delivered.contains(0));
+        try std.testing.expect(!delivered.contains(4));
+        try std.testing.expect(delivered.contains(index));
+        try std.testing.expect(!delivered.contains(index + 1));
+    }
+
+    delivered.insert(.{ .min = 4, .max = 4 });
+    delivered.insert(.{ .min = 5, .max = 5 });
+    try std.testing.expectEqual(1, delivered.ranges.items.len);
+    try std.testing.expectEqual(2, delivered.ranges.items[0].min);
+    try std.testing.expectEqual(999, delivered.ranges.items[0].max);
+
+    delivered.insert(.{ .min = 0, .max = 0 });
+    try std.testing.expectEqual(1, delivered.prefix);
+    delivered.insert(.{ .min = 1, .max = 1 });
+    try std.testing.expectEqual(1000, delivered.prefix);
+    try std.testing.expectEqual(0, delivered.ranges.items.len);
+}
+
+test "TransferRanges: completion order" {
+    var prng = stdx.PRNG.from_seed_testing();
+    var delivered = try TransferRanges.init(std.testing.allocator, 32);
+    defer delivered.deinit(std.testing.allocator);
+
+    var iterations: stdx.PRNG.FuzzIterations = .{};
+    while (iterations.more()) {
+        delivered.prefix = 0;
+        delivered.ranges.clearRetainingCapacity();
+
+        var pending: [32]usize = std.simd.iota(u32, 32);
+        var pending_count: usize = pending.len;
+
+        var completed: [32]bool = @splat(false);
+        while (pending_count > 0) {
+            const choice = prng.index(pending[0..pending_count]);
+            const batch = pending[choice];
+
+            pending_count -= 1;
+            pending[choice] = pending[pending_count];
+            delivered.insert(.{ .min = batch * 3, .max = batch * 3 + 2 });
+            completed[batch] = true;
+
+            var prefix: usize = 0;
+            while (prefix < completed.len and completed[prefix]) : (prefix += 1) {}
+            try std.testing.expectEqual(prefix * 3, delivered.prefix);
+
+            for (completed, 0..) |complete, index| {
+                for (0..3) |offset| {
+                    try std.testing.expectEqual(complete, delivered.contains(index * 3 + offset));
+                }
+            }
+            try std.testing.expect(!delivered.contains(completed.len * 3));
+
+            for (delivered.ranges.items, 0..) |range, index| {
+                try std.testing.expect(range.min > delivered.prefix);
+                if (index > 0) {
+                    try std.testing.expect(delivered.ranges.items[index - 1].max + 1 < range.min);
+                }
+            }
+        }
+        try std.testing.expectEqual(0, delivered.ranges.items.len);
+    }
+}
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
@@ -244,14 +369,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// The index of the next transfer to send.
         transfers_sent: usize = 0,
 
-        /// All transfers below this index have been delivered.
-        /// Any transfers above this index that have been delivered are stored in
-        /// `transfers_delivered_recently`.
-        transfers_delivered_past: usize = 0,
-
-        /// Track index ranges of `create_transfers` batches that have committed but are greater
-        /// than or equal to `transfers_delivered_past` (which is still in-flight).
-        transfers_delivered_recently: TransferBatchQueue,
+        transfers_delivered: TransferRanges,
 
         /// Track the number of pending transfers that have been sent but not committed.
         transfers_pending_in_flight: usize = 0,
@@ -278,11 +396,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             var auditor = try Auditor.init(allocator, prng, options.auditor_options);
             errdefer auditor.deinit(allocator);
 
-            var transfers_delivered_recently = try TransferBatchQueue.init(
+            // Each client has at most one request in flight. At a prefix of commit order,
+            // each missing range therefore belongs to a different client: sending another
+            // request requires a reply to the previous one, which must already have committed.
+            // An evicted client is never replaced and can leave at most one permanent gap.
+            var transfers_delivered = try TransferRanges.init(
                 allocator,
-                options.auditor_options.client_count * constants.client_request_queue_max,
+                options.auditor_options.client_count,
             );
-            errdefer transfers_delivered_recently.deinit(allocator);
+            errdefer transfers_delivered.deinit(allocator);
 
             for (auditor.accounts, 0..) |*account, i| {
                 const query_intersection =
@@ -323,7 +445,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .auditor = auditor,
                 .options = options,
                 .transfer_plan_seed = prng.int(u64),
-                .transfers_delivered_recently = transfers_delivered_recently,
+                .transfers_delivered = transfers_delivered,
                 .transfers_retry_failed = transfers_retry_failed,
                 .transfers_retry_exists = transfers_retry_exists,
             };
@@ -331,17 +453,17 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub fn deinit(self: *Workload, allocator: std.mem.Allocator) void {
             self.auditor.deinit(allocator);
-            self.transfers_delivered_recently.deinit(allocator);
+            self.transfers_delivered.deinit(allocator);
             self.transfers_retry_failed.deinit(allocator);
             self.transfers_retry_exists.deinit(allocator);
         }
 
         pub fn done(self: *const Workload) bool {
-            if (self.transfers_delivered_recently.items.len != 0) return false;
+            if (self.transfers_delivered.ranges.items.len != 0) return false;
             return self.auditor.done();
         }
 
-        /// A client may build multiple requests to queue up while another is in-flight.
+        /// Each client may have only one request in flight. Evicted clients must not be reused.
         pub fn build_request(
             self: *Workload,
             client_index: usize,
@@ -848,7 +970,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(results.len >= transfers.len);
 
             // Neither the first nor the last id can regress to preserve the
-            // `transfers_delivered_recently` and `transfers_delivered_past` logic.
+            // `transfers_delivered` logic.
             // So we must insert retries in the middle of the batch.
             if (transfers.len <= 1) return;
             for (1..transfers.len - 1) |i| {
@@ -903,7 +1025,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn build_lookup_transfers(self: *const Workload, lookup_ids: []u128) usize {
-            const delivered = self.transfers_delivered_past;
+            const delivered = self.transfers_delivered.prefix;
             const lookup_window = self.prng.enum_weighted(Lookup, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
                 .delivered => self.prng.int_inclusive(usize, delivered),
@@ -1429,20 +1551,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
 
-            self.transfers_delivered_recently.push(.{
+            self.transfers_delivered.insert(.{
                 .min = transfer_index_min,
                 .max = transfer_index_max,
             });
-
-            while (self.transfers_delivered_recently.peek()) |delivered| {
-                if (self.transfers_delivered_past == delivered.min) {
-                    self.transfers_delivered_past = delivered.max + 1;
-                    _ = self.transfers_delivered_recently.pop();
-                } else {
-                    assert(self.transfers_delivered_past < delivered.min);
-                    break;
-                }
-            }
 
             var iterator: ResultsSparseIteratorType(tb.CreateTransferErrorResult) = .init(
                 results_sparse,
@@ -1499,20 +1611,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
 
-            self.transfers_delivered_recently.push(.{
+            self.transfers_delivered.insert(.{
                 .min = transfer_index_min,
                 .max = transfer_index_max,
             });
-
-            while (self.transfers_delivered_recently.peek()) |delivered| {
-                if (self.transfers_delivered_past == delivered.min) {
-                    self.transfers_delivered_past = delivered.max + 1;
-                    _ = self.transfers_delivered_recently.pop();
-                } else {
-                    assert(self.transfers_delivered_past < delivered.min);
-                    break;
-                }
-            }
 
             for (transfers, results) |*transfer, *result| {
                 assert(result.reserved == 0);
@@ -1572,22 +1674,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 switch (transfer_outcome) {
                     .success => {
-                        if (transfer_index < self.transfers_delivered_past) {
+                        if (self.transfers_delivered.contains(transfer_index)) {
                             // The transfer was delivered; it must exist.
                             assert(result != null);
                         } else {
-                            for (self.transfers_delivered_recently.items) |delivered| {
-                                if (transfer_index >= delivered.min and
-                                    transfer_index <= delivered.max)
-                                {
-                                    // The transfer was delivered recently; it must exist.
-                                    assert(result != null);
-                                    break;
-                                }
-                            } else {
-                                // The `create_transfers` has not committed (it may be in-flight).
-                                assert(result == null);
-                            }
+                            // The `create_transfers` has not committed (it may be in-flight).
+                            assert(result == null);
                         }
                     },
                     // An invalid transfer is never persisted.
