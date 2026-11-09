@@ -70,8 +70,8 @@ pub fn storage_format(
         release: vsr.Release = vsr.Release.minimum,
     },
 ) !void {
-    assert(storage.reads.count() == 0);
-    assert(storage.writes.count() == 0);
+    assert(storage.reads.items.len == 0);
+    assert(storage.writes.items.len == 0);
 
     var superblock = try init_superblock(gpa, storage, .{});
     defer superblock.deinit(gpa);
@@ -98,8 +98,8 @@ pub fn storage_format(
         if (context.done) break;
         storage.run();
     } else @panic("superblock format loop stuck");
-    assert(storage.reads.count() == 0);
-    assert(storage.writes.count() == 0);
+    assert(storage.reads.items.len == 0);
+    assert(storage.writes.items.len == 0);
 }
 
 pub fn init_superblock(gpa: std.mem.Allocator, storage: *Storage, options: struct {
@@ -129,10 +129,10 @@ pub fn init_grid(gpa: std.mem.Allocator, trace: *Tracer, superblock: *SuperBlock
 
 pub fn open_superblock(superblock: *SuperBlock) void {
     const storage: *Storage = superblock.storage;
-    assert(storage.reads.count() == 0);
-    assert(storage.writes.count() == 0);
-    defer assert(storage.reads.count() == 0);
-    defer assert(storage.writes.count() == 0);
+    assert(storage.reads.items.len == 0);
+    assert(storage.writes.items.len == 0);
+    defer assert(storage.reads.items.len == 0);
+    defer assert(storage.writes.items.len == 0);
 
     const Context = struct {
         superblock_context: SuperBlock.Context = undefined,
@@ -156,10 +156,10 @@ pub fn open_superblock(superblock: *SuperBlock) void {
 
 pub fn open_grid(grid: *Grid) void {
     const storage: *Storage = grid.superblock.storage;
-    assert(storage.reads.count() == 0);
-    assert(storage.writes.count() == 0);
-    defer assert(storage.reads.count() == 0);
-    defer assert(storage.writes.count() == 0);
+    assert(storage.reads.items.len == 0);
+    assert(storage.writes.items.len == 0);
+    defer assert(storage.reads.items.len == 0);
+    defer assert(storage.writes.items.len == 0);
 
     const Context = struct {
         pending: bool = false,

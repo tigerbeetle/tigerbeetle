@@ -106,7 +106,7 @@ pub const Storage = struct {
         ready_at: Instant,
         stack_trace: StackTrace,
 
-        fn less_than(_: void, a: *Read, b: *Read) math.Order {
+        fn less_than(a: *Read, b: *Read) math.Order {
             return math.order(a.ready_at.ns, b.ready_at.ns);
         }
     };
@@ -120,7 +120,7 @@ pub const Storage = struct {
         ready_at: Instant,
         stack_trace: StackTrace,
 
-        fn less_than(_: void, a: *Write, b: *Write) math.Order {
+        fn less_than(a: *Write, b: *Write) math.Order {
             return math.order(a.ready_at.ns, b.ready_at.ns);
         }
     };
@@ -191,8 +191,8 @@ pub const Storage = struct {
     /// This is used to disable faults during the replica's first startup.
     faulty: bool = true,
 
-    reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
-    writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
+    reads: stdx.PriorityQueueType(*Storage.Read, Storage.Read.less_than),
+    writes: stdx.PriorityQueueType(*Storage.Write, Storage.Write.less_than),
     unflushed: u64 = 0,
 
     ticks: u64 = 0,
@@ -231,17 +231,13 @@ pub const Storage = struct {
         const overlay_buffers = std.mem.bytesAsValue(OverlayBuffers, overlay_buffers_alloc);
         errdefer allocator.destroy(overlay_buffers);
 
-        var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than)
-            .initContext({});
+        var reads = try stdx.PriorityQueueType(*Storage.Read, Storage.Read.less_than)
+            .init(allocator, options.iops_read_max);
         errdefer reads.deinit(allocator);
 
-        try reads.ensureTotalCapacity(allocator, options.iops_read_max);
-
-        var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than)
-            .initContext({});
+        var writes = try stdx.PriorityQueueType(*Storage.Write, Storage.Write.less_than)
+            .init(allocator, options.iops_write_max);
         errdefer writes.deinit(allocator);
-
-        try writes.ensureTotalCapacity(allocator, options.iops_write_max);
 
         return Storage{
             .allocator = allocator,
@@ -274,8 +270,8 @@ pub const Storage = struct {
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
         log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
-            storage.reads.count(),
-            storage.writes.count(),
+            storage.reads.items.len,
+            storage.writes.items.len,
             storage.next_tick_queue.count(),
         });
         while (storage.writes.pop()) |write| {
@@ -289,8 +285,8 @@ pub const Storage = struct {
         while (storage.reads.pop()) |_| {}
         storage.next_tick_queue.reset();
 
-        assert(storage.writes.count() == 0);
-        assert(storage.reads.count() == 0);
+        assert(storage.writes.items.len == 0);
+        assert(storage.reads.items.len == 0);
         assert(storage.next_tick_queue.count() == 0);
     }
 
@@ -350,12 +346,12 @@ pub const Storage = struct {
 
         storage.reads.items.len = 0;
         for (origin.reads.items) |read| {
-            storage.reads.push(storage.allocator, read) catch unreachable;
+            storage.reads.push(read);
         }
 
         storage.writes.items.len = 0;
         for (origin.writes.items) |write| {
-            storage.writes.push(storage.allocator, write) catch unreachable;
+            storage.writes.push(write);
         }
     }
 
@@ -459,7 +455,7 @@ pub const Storage = struct {
         };
 
         // We ensure the capacity is sufficient for constants.iops_read_max in init()
-        storage.reads.push(storage.allocator, read) catch unreachable;
+        storage.reads.push(read);
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
@@ -604,7 +600,7 @@ pub const Storage = struct {
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
         storage.unflushed += 1;
-        storage.writes.push(storage.allocator, write) catch unreachable;
+        storage.writes.push(write);
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
@@ -914,8 +910,7 @@ pub const Storage = struct {
     pub fn assert_no_pending_writes(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
-        const writes = storage.writes;
-        for (writes.items) |write| {
+        for (storage.writes.items) |write| {
             if (write.zone == zone) {
                 log.err("Pending write: {} {}\n{f}", .{
                     write.offset,

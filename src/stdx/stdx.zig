@@ -43,6 +43,7 @@ pub const IOEpoll = io.IOEpoll;
 pub const IOTest = io.IOTest;
 pub const DirectIO = io.DirectIO;
 pub const buffer_limit = io.buffer_limit;
+pub const PriorityQueueType = @import("priority_queue.zig").PriorityQueueType;
 pub const QueueType = @import("queue.zig").QueueType;
 pub const StackType = @import("stack.zig").StackType;
 
@@ -1299,6 +1300,7 @@ comptime {
     _ = @import("net.zig");
     _ = @import("once.zig");
     _ = @import("prng.zig");
+    _ = @import("priority_queue.zig");
     _ = @import("histogram.zig");
     _ = @import("queue.zig");
     _ = @import("radix.zig");

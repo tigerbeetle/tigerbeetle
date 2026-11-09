@@ -35,7 +35,7 @@ const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 const fuzz = stdx.fuzz;
 
-const PriorityQueue = std.PriorityQueue;
+const PriorityQueue = stdx.PriorityQueueType;
 
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.
@@ -86,9 +86,9 @@ const TransferTemplate = struct {
     result: accounting_auditor.CreateTransferStatusSet,
 };
 
-const TransferBatchQueue = PriorityQueue(TransferBatch, void, struct {
+const TransferBatchQueue = PriorityQueue(TransferBatch, struct {
     /// Ascending order.
-    fn compare(_: void, a: TransferBatch, b: TransferBatch) std.math.Order {
+    fn compare(a: TransferBatch, b: TransferBatch) std.math.Order {
         assert(a.min != b.min);
         assert(a.max != b.max);
         return std.math.order(a.min, b.min);
@@ -278,12 +278,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             var auditor = try Auditor.init(allocator, prng, options.auditor_options);
             errdefer auditor.deinit(allocator);
 
-            var transfers_delivered_recently: TransferBatchQueue = .empty;
-            errdefer transfers_delivered_recently.deinit(allocator);
-            try transfers_delivered_recently.ensureTotalCapacity(
+            var transfers_delivered_recently = try TransferBatchQueue.init(
                 allocator,
                 options.auditor_options.client_count * constants.client_request_queue_max,
             );
+            errdefer transfers_delivered_recently.deinit(allocator);
 
             for (auditor.accounts, 0..) |*account, i| {
                 const query_intersection =
@@ -1191,7 +1190,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const method = method: {
                 const default = transfer_plan.method;
                 if (default == .pending and
-                    self.auditor.pending_expiries.count() + self.transfers_pending_in_flight ==
+                    self.auditor.pending_expiries.items.len + self.transfers_pending_in_flight ==
                         self.auditor.options.transfers_pending_max)
                 {
                     break :method .single_phase;
@@ -1430,10 +1429,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
 
-            self.transfers_delivered_recently.push(self.auditor.gpa, .{
+            self.transfers_delivered_recently.push(.{
                 .min = transfer_index_min,
                 .max = transfer_index_max,
-            }) catch unreachable;
+            });
 
             while (self.transfers_delivered_recently.peek()) |delivered| {
                 if (self.transfers_delivered_past == delivered.min) {
@@ -1500,10 +1499,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
 
-            self.transfers_delivered_recently.push(self.auditor.gpa, .{
+            self.transfers_delivered_recently.push(.{
                 .min = transfer_index_min,
                 .max = transfer_index_max,
-            }) catch unreachable;
+            });
 
             while (self.transfers_delivered_recently.peek()) |delivered| {
                 if (self.transfers_delivered_past == delivered.min) {
@@ -1577,8 +1576,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             // The transfer was delivered; it must exist.
                             assert(result != null);
                         } else {
-                            var it = self.transfers_delivered_recently.iterator();
-                            while (it.next()) |delivered| {
+                            for (self.transfers_delivered_recently.items) |delivered| {
                                 if (transfer_index >= delivered.min and
                                     transfer_index <= delivered.max)
                                 {

@@ -12,7 +12,7 @@ const tb = @import("../tigerbeetle.zig");
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 
-const PriorityQueue = std.PriorityQueue;
+const PriorityQueue = stdx.PriorityQueueType;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
@@ -53,9 +53,9 @@ const PendingExpiry = struct {
     expires_at: u64,
 };
 
-const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
+const PendingExpiryQueue = PriorityQueue(PendingExpiry, struct {
     /// Order by ascending expiration date and then by transfer's timestamp.
-    fn compare(_: void, a: PendingExpiry, b: PendingExpiry) std.math.Order {
+    fn compare(a: PendingExpiry, b: PendingExpiry) std.math.Order {
         const order = switch (std.math.order(a.expires_at, b.expires_at)) {
             .eq => std.math.order(a.transfer_timestamp, b.transfer_timestamp),
             else => |order| order,
@@ -372,9 +372,8 @@ pub const AccountingAuditor = struct {
             @intCast(options.transfers_pending_max),
         );
 
-        var pending_expiries: PendingExpiryQueue = .empty;
+        var pending_expiries = try PendingExpiryQueue.init(gpa, options.transfers_pending_max);
         errdefer pending_expiries.deinit(gpa);
-        try pending_expiries.ensureTotalCapacity(gpa, options.transfers_pending_max);
 
         var in_flight = InFlightQueue{};
         errdefer in_flight.deinit(gpa);
@@ -742,14 +741,12 @@ pub const AccountingAuditor = struct {
                         .credit_account_index = cr_index,
                         .query_intersection_index = transfer.code - 1,
                     });
-                    self.pending_expiries.push(self.gpa, .{
+                    self.pending_expiries.push(.{
                         .transfer_id = transfer.id,
                         .transfer_timestamp = timestamp,
                         .expires_at = timestamp + transfer.timeout_ns(),
-                    }) catch unreachable;
-                    // PriorityQueue lacks an "unmanaged" API, so verify that the workload
-                    // hasn't created more pending transfers than permitted.
-                    assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
+                    });
+                    assert(self.pending_expiries.items.len <= self.options.transfers_pending_max);
                 }
                 dr.debits_pending += transfer.amount;
                 cr.credits_pending += transfer.amount;
