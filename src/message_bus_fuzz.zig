@@ -789,8 +789,8 @@ const IO = struct {
         if (io.prng.chance(io.options.shutdown_error_probability)) {
             return io.prng.error_uniform(posix.ShutdownError);
         } else {
-            if (how == .both or how == .recv) io.connections.getPtr(socket).?.shutdown_recv = false;
-            if (how == .both or how == .send) io.connections.getPtr(socket).?.shutdown_send = false;
+            if (how == .both or how == .recv) io.connections.getPtr(socket).?.shutdown_recv = true;
+            if (how == .both or how == .send) io.connections.getPtr(socket).?.shutdown_send = true;
         }
     }
 
