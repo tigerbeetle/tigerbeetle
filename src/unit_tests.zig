@@ -36,6 +36,7 @@ comptime {
     _ = @import("repl/terminal.zig");
     _ = @import("scripts/changelog.zig");
     _ = @import("state_machine.zig");
+    _ = @import("state_machine/workload.zig");
     _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine_tests.zig");
     _ = @import("testing/exhaustigen.zig");
