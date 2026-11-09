@@ -135,9 +135,6 @@ src/clients/dotnet/dotnet_conformance.zig
 src/clients/dotnet/samples/basic/Basic.csproj
 src/clients/dotnet/samples/basic/Program.cs
 src/clients/dotnet/samples/basic/README.md
-src/clients/dotnet/samples/two-phase-many/Program.cs
-src/clients/dotnet/samples/two-phase-many/README.md
-src/clients/dotnet/samples/two-phase-many/TwoPhaseMany.csproj
 src/clients/dotnet/samples/two-phase/Program.cs
 src/clients/dotnet/samples/two-phase/README.md
 src/clients/dotnet/samples/two-phase/TwoPhase.csproj
@@ -162,9 +159,6 @@ src/clients/go/native/tb_client.h
 src/clients/go/samples/basic/README.md
 src/clients/go/samples/basic/go.mod
 src/clients/go/samples/basic/main.go
-src/clients/go/samples/two-phase-many/README.md
-src/clients/go/samples/two-phase-many/go.mod
-src/clients/go/samples/two-phase-many/main.go
 src/clients/go/samples/two-phase/.gitignore
 src/clients/go/samples/two-phase/README.md
 src/clients/go/samples/two-phase/go.mod
@@ -189,9 +183,6 @@ src/clients/java/pom.xml
 src/clients/java/samples/basic/README.md
 src/clients/java/samples/basic/pom.xml
 src/clients/java/samples/basic/src/main/java/Main.java
-src/clients/java/samples/two-phase-many/README.md
-src/clients/java/samples/two-phase-many/pom.xml
-src/clients/java/samples/two-phase-many/src/main/java/Main.java
 src/clients/java/samples/two-phase/README.md
 src/clients/java/samples/two-phase/pom.xml
 src/clients/java/samples/two-phase/src/main/java/Main.java
@@ -272,10 +263,6 @@ src/clients/node/samples/basic/README.md
 src/clients/node/samples/basic/main.js
 src/clients/node/samples/basic/package-lock.json
 src/clients/node/samples/basic/package.json
-src/clients/node/samples/two-phase-many/README.md
-src/clients/node/samples/two-phase-many/main.js
-src/clients/node/samples/two-phase-many/package-lock.json
-src/clients/node/samples/two-phase-many/package.json
 src/clients/node/samples/two-phase/README.md
 src/clients/node/samples/two-phase/main.js
 src/clients/node/samples/two-phase/package-lock.json
@@ -300,8 +287,6 @@ src/clients/python/python_bindings.zig
 src/clients/python/python_conformance.zig
 src/clients/python/samples/basic/README.md
 src/clients/python/samples/basic/main.py
-src/clients/python/samples/two-phase-many/README.md
-src/clients/python/samples/two-phase-many/main.py
 src/clients/python/samples/two-phase/README.md
 src/clients/python/samples/two-phase/main.py
 src/clients/python/samples/walkthrough/README.md
@@ -327,8 +312,6 @@ src/clients/ruby/ruby_bindings.zig
 src/clients/ruby/ruby_conformance.zig
 src/clients/ruby/samples/basic/README.md
 src/clients/ruby/samples/basic/main.rb
-src/clients/ruby/samples/two-phase-many/README.md
-src/clients/ruby/samples/two-phase-many/main.rb
 src/clients/ruby/samples/two-phase/README.md
 src/clients/ruby/samples/two-phase/main.rb
 src/clients/ruby/samples/walkthrough/main.rb
@@ -368,9 +351,6 @@ src/clients/rust/rust_bindings.zig
 src/clients/rust/samples/basic/Cargo.toml
 src/clients/rust/samples/basic/README.md
 src/clients/rust/samples/basic/src/main.rs
-src/clients/rust/samples/two-phase-many/Cargo.toml
-src/clients/rust/samples/two-phase-many/README.md
-src/clients/rust/samples/two-phase-many/src/main.rs
 src/clients/rust/samples/two-phase/Cargo.toml
 src/clients/rust/samples/two-phase/README.md
 src/clients/rust/samples/two-phase/src/main.rs
