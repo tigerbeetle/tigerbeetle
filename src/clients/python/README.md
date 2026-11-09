@@ -48,11 +48,8 @@ This document is primarily a reference guide to
 the client. Below are various sample projects demonstrating
 features of TigerBeetle.
 
-* [Basic](/src/clients/python/samples/basic/): Create two accounts and transfer an amount between them.
-* [Two-Phase Transfer](/src/clients/python/samples/two-phase/): Create two accounts and start a pending transfer between
-them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/python/samples/two-phase-many/): Create two accounts and start a number of pending transfers
-between them, posting and voiding alternating transfers.
+* [Basic](/src/clients/python/samples/basic/): Shows how to move amounts between two accounts.
+* [Two-Phase Transfer](/src/clients/python/samples/two-phase/): Shows how to start a two-phase pending transfer and complete it.
 
 ## Creating a Client
 

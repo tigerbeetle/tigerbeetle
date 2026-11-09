@@ -43,20 +43,21 @@ Here's what this project does.
 
 ## 1. Create accounts
 
-This project starts by creating two accounts (`1` and `2`).
+This project starts by creating the debit account `DR`
+and the credit account `CR`.
 
 ## 2. Create a transfer
 
-Then it transfers `10` of an amount from account `1` to
-account `2`.
+Then it creates a transfer that debits the amount of `10` from
+account `DR` and credits account `CR`.
 
 ## 3. Fetch and validate account balances
 
-Then it fetches both accounts, checks they both exist, and
-checks that **account `1`** has:
+Then it fetches both accounts, checks that they both exist, and
+verifies that **account `DR`** has:
  * `debits_posted = 10`
- * and `credits_posted = 0`
+ * `credits_posted = 0`
 
-And that **account `2`** has:
- * `debits_posted= 0`
- * and `credits_posted = 10`
+And that **account `CR`** has:
+ * `debits_posted = 0`
+ * `credits_posted = 10`
