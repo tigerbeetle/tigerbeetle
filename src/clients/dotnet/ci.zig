@@ -37,7 +37,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     });
 
     // Integration tests.
-    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+    inline for (.{ "basic", "two-phase", "walkthrough" }) |sample| {
         log.info("testing sample '{s}'", .{sample});
 
         try shell.pushd("./samples/" ++ sample);

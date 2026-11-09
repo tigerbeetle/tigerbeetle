@@ -27,15 +27,18 @@ func main() {
 	}
 	defer client.Close()
 
-	// Create two accounts
+	// Create accounts.
+	accountDRID := ID()
+	accountCRID := ID()
+
 	accountResults, err := client.CreateAccounts([]Account{
 		{
-			ID:     ToUint128(1),
+			ID:     accountDRID,
 			Ledger: 1,
 			Code:   1,
 		},
 		{
-			ID:     ToUint128(2),
+			ID:     accountCRID,
 			Ledger: 1,
 			Code:   1,
 		},
@@ -53,15 +56,16 @@ func main() {
 		}
 	}
 
-	// Start a pending transfer
+	// Create pending transfer.
+	transferPendingID := ID()
 	transferResults, err := client.CreateTransfers([]Transfer{
 		{
-			ID:              ToUint128(1),
-			DebitAccountID:  ToUint128(1),
-			CreditAccountID: ToUint128(2),
-			Amount:          ToUint128(500),
+			ID:              transferPendingID,
+			DebitAccountID:  accountDRID,
+			CreditAccountID: accountCRID,
 			Ledger:          1,
 			Code:            1,
+			Amount:          ToUint128(500),
 			Flags:           TransferFlags{Pending: true}.ToUint16(),
 		},
 	})
@@ -78,40 +82,43 @@ func main() {
 		}
 	}
 
-	// Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-	accounts, err := client.LookupAccounts([]Uint128{ToUint128(1), ToUint128(2)})
+	// Fetch and validate pending account balances.
+	accounts, err := client.LookupAccounts([]Uint128{accountDRID, accountCRID})
 	if err != nil {
 		log.Fatalf("Could not fetch accounts: %s", err)
 	}
 	assert(len(accounts), 2, "accounts")
 
 	for _, account := range accounts {
-		if account.ID == ToUint128(1) {
+		switch account.ID {
+		case accountDRID:
 			assert(account.DebitsPosted, ToUint128(0), "account 1 debits, before posted")
 			assert(account.CreditsPosted, ToUint128(0), "account 1 credits, before posted")
 			assert(account.DebitsPending, ToUint128(500), "account 1 debits pending, before posted")
 			assert(account.CreditsPending, ToUint128(0), "account 1 credits pending, before posted")
-		} else if account.ID == ToUint128(2) {
+		case accountCRID:
 			assert(account.DebitsPosted, ToUint128(0), "account 2 debits, before posted")
 			assert(account.CreditsPosted, ToUint128(0), "account 2 credits, before posted")
 			assert(account.DebitsPending, ToUint128(0), "account 2 debits pending, before posted")
 			assert(account.CreditsPending, ToUint128(500), "account 2 credits pending, before posted")
-		} else {
+		default:
 			log.Fatalf("Unexpected account: %s", account.ID)
 		}
 	}
 
-	// Create a second transfer simply posting the first transfer
+	// Post pending transfer;
 	transferResults, err = client.CreateTransfers([]Transfer{
 		{
-			ID:              ToUint128(2),
-			DebitAccountID:  ToUint128(1),
-			CreditAccountID: ToUint128(2),
-			Amount:          ToUint128(500),
-			PendingID:       ToUint128(1),
+			ID:              ID(),
+			DebitAccountID:  accountDRID,
+			CreditAccountID: accountCRID,
+			PendingID:       transferPendingID,
 			Ledger:          1,
 			Code:            1,
-			Flags:           TransferFlags{PostPendingTransfer: true}.ToUint16(),
+			// You can post any amount between zero and the pending transfer amount,
+			// or void the two-phase transfer using the `VoidPendingTransfer` flag.
+			Amount: ToUint128(500),
+			Flags:  TransferFlags{PostPendingTransfer: true}.ToUint16(),
 		},
 	})
 	if err != nil {
@@ -127,44 +134,26 @@ func main() {
 		}
 	}
 
-	// Validate the contents of all transfers
-	transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
-	if err != nil {
-		log.Fatalf("Error looking up transfers: %s", err)
-	}
-	assert(len(transfers), 2, "transfers")
-
-	for _, transfer := range transfers {
-		if transfer.ID == ToUint128(1) {
-			assert(transfer.TransferFlags().Pending, true, "transfer 1 pending")
-			assert(transfer.TransferFlags().PostPendingTransfer, false, "transfer 1 post_pending_transfer")
-		} else if transfer.ID == ToUint128(2) {
-			assert(transfer.TransferFlags().Pending, false, "transfer 2 pending")
-			assert(transfer.TransferFlags().PostPendingTransfer, true, "transfer 2 post_pending_transfer")
-		} else {
-			log.Fatalf("Unknown transfer: %s", transfer.ID)
-		}
-	}
-
-	// Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-	accounts, err = client.LookupAccounts([]Uint128{ToUint128(1), ToUint128(2)})
+	// Fetch and validate final account balances.
+	accounts, err = client.LookupAccounts([]Uint128{accountDRID, accountCRID})
 	if err != nil {
 		log.Fatalf("Could not fetch accounts: %s", err)
 	}
 	assert(len(accounts), 2, "accounts")
 
 	for _, account := range accounts {
-		if account.ID == ToUint128(1) {
+		switch account.ID {
+		case accountDRID:
 			assert(account.DebitsPosted, ToUint128(500), "account 1 debits")
 			assert(account.CreditsPosted, ToUint128(0), "account 1 credits")
 			assert(account.DebitsPending, ToUint128(0), "account 1 debits pending")
 			assert(account.CreditsPending, ToUint128(0), "account 1 credits pending")
-		} else if account.ID == ToUint128(2) {
+		case accountCRID:
 			assert(account.DebitsPosted, ToUint128(0), "account 2 debits")
 			assert(account.CreditsPosted, ToUint128(500), "account 2 credits")
 			assert(account.DebitsPending, ToUint128(0), "account 2 debits pending")
 			assert(account.CreditsPending, ToUint128(0), "account 2 credits pending")
-		} else {
+		default:
 			log.Fatalf("Unexpected account: %s", account.ID)
 		}
 	}

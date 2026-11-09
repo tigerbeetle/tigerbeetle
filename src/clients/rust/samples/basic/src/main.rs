@@ -8,17 +8,20 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let port = std::env::var("TB_ADDRESS").unwrap_or_else(|_| "3000".to_string());
     let client = tb::Client::new(0, &port)?;
 
-    // Create two accounts
+    // Create accounts.
+    let account_dr_id = tb::id();
+    let account_cr_id = tb::id();
+
     let account_results = client
         .create_accounts(&[
             tb::Account {
-                id: 1,
+                id: account_dr_id,
                 ledger: 1,
                 code: 1,
                 ..Default::default()
             },
             tb::Account {
-                id: 2,
+                id: account_cr_id,
                 ledger: 1,
                 code: 1,
                 ..Default::default()
@@ -30,11 +33,12 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(account_results[0].status == tb::CreateAccountStatus::Created);
     assert!(account_results[1].status == tb::CreateAccountStatus::Created);
 
+    // Create a transfer.
     let transfer_results = client
         .create_transfers(&[tb::Transfer {
-            id: 1,
-            debit_account_id: 1,
-            credit_account_id: 2,
+            id: tb::id(),
+            debit_account_id: account_dr_id,
+            credit_account_id: account_cr_id,
             amount: 10,
             ledger: 1,
             code: 1,
@@ -45,15 +49,17 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(transfer_results.len() == 1);
     assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
-    // Check the sums for both accounts
-    let accounts = client.lookup_accounts(&[1, 2]).await?;
+    // Fetch and validate account balances;
+    let accounts = client
+        .lookup_accounts(&[account_dr_id, account_cr_id])
+        .await?;
     assert_eq!(accounts.len(), 2);
 
     for account in accounts {
-        if account.id == 1 {
+        if account.id == account_dr_id {
             assert_eq!(account.debits_posted, 10);
             assert_eq!(account.credits_posted, 0);
-        } else if account.id == 2 {
+        } else if account.id == account_cr_id {
             assert_eq!(account.debits_posted, 0);
             assert_eq!(account.credits_posted, 10);
         } else {

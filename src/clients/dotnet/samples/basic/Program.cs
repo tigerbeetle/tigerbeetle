@@ -9,18 +9,20 @@ using (var client = new Client(
        addresses: tbAddress != null ? tbAddress : "3000"
        ))
 {
+    // Create accounts.
+    var accountDrId = ID.Create();
+    var accountCrId = ID.Create();
 
-    // Create two accounts
     var accounts = new[] {
     new Account
     {
-        Id = 1,
+        Id = accountDrId,
         Ledger= 1,
         Code = 1,
     },
     new Account
     {
-        Id = 2,
+        Id = accountCrId,
         Ledger = 1,
         Code = 1,
     },
@@ -31,12 +33,13 @@ using (var client = new Client(
     Debug.Assert(accountResults[0].Status == CreateAccountStatus.Created);
     Debug.Assert(accountResults[1].Status == CreateAccountStatus.Created);
 
+    // Create a transfer.
     var transfers = new[] {
     new Transfer
     {
-        Id = 1,
-        DebitAccountId = 1,
-        CreditAccountId = 2,
+        Id = ID.Create(),
+        DebitAccountId = accountDrId,
+        CreditAccountId = accountCrId,
         Ledger = 1,
         Code = 1,
         Amount = 10,
@@ -47,16 +50,17 @@ using (var client = new Client(
     Debug.Assert(transferResults.Length == 1);
     Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
-    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
+    // Fetch and validate account balances.
+    accounts = client.LookupAccounts(new UInt128[] { accountDrId, accountCrId });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
-        if (account.Id == 1)
+        if (account.Id == accountDrId)
         {
             Debug.Assert(account.DebitsPosted == 10);
             Debug.Assert(account.CreditsPosted == 0);
         }
-        else if (account.Id == 2)
+        else if (account.Id == accountCrId)
         {
             Debug.Assert(account.DebitsPosted == 0);
             Debug.Assert(account.CreditsPosted == 10);

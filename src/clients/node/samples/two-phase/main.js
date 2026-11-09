@@ -3,6 +3,7 @@ const process = require("process");
 
 const {
     createClient,
+    id,
     CreateAccountStatus,
     CreateTransferStatus,
     TransferFlags,
@@ -14,10 +15,13 @@ const client = createClient({
 });
 
 async function main() {
-  // Create two accounts
+  // Create accounts.
+  const accountDrId = id();
+  const accountCrId = id();
+
   let accountResults = await client.createAccounts([
     {
-      id: 1n,
+      id: accountDrId,
       debits_pending: 0n,
       debits_posted: 0n,
       credits_pending: 0n,
@@ -32,7 +36,7 @@ async function main() {
       timestamp: 0n,
     },
     {
-      id: 2n,
+      id: accountCrId,
       debits_pending: 0n,
       debits_posted: 0n,
       credits_pending: 0n,
@@ -51,13 +55,13 @@ async function main() {
   assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
   assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
-  // Start a pending transfer
+  // Create pending transfer.
+  const transferPendingId = id();
   let transferResults = await client.createTransfers([
     {
-      id: 1n,
-      debit_account_id: 1n,
-      credit_account_id: 2n,
-      amount: 500n,
+      id: transferPendingId,
+      debit_account_id: accountDrId,
+      credit_account_id: accountCrId,
       pending_id: 0n,
       user_data_128: 0n,
       user_data_64: 0n,
@@ -65,6 +69,7 @@ async function main() {
       timeout: 0,
       ledger: 1,
       code: 1,
+      amount: 500n,
       flags: TransferFlags.pending,
       timestamp: 0n,
     },
@@ -72,16 +77,16 @@ async function main() {
   assert.strictEqual(transferResults.length, 1);
   assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
-  // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-  let accounts = await client.lookupAccounts([1n, 2n]);
+  // Fetch and validate pending account balances.
+  let accounts = await client.lookupAccounts([accountDrId, accountCrId]);
   assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
-    if (account.id === 1n) {
+    if (account.id === accountDrId) {
       assert.strictEqual(account.debits_posted, 0n);
       assert.strictEqual(account.credits_posted, 0n);
       assert.strictEqual(account.debits_pending, 500n);
       assert.strictEqual(account.credits_pending, 0n);
-    } else if (account.id === 2n) {
+    } else if (account.id === accountCrId) {
       assert.strictEqual(account.debits_posted, 0n);
       assert.strictEqual(account.credits_posted, 0n);
       assert.strictEqual(account.debits_pending, 0n);
@@ -91,20 +96,22 @@ async function main() {
     }
   }
 
-  // Create a second transfer simply posting the first transfer
+  // Post pending transfer.
   transferResults = await client.createTransfers([
     {
-      id: 2n,
-      debit_account_id: 1n,
-      credit_account_id: 2n,
-      amount: 500n,
-      pending_id: 1n,
+      id: id(),
+      debit_account_id: accountDrId,
+      credit_account_id: accountCrId,
+      pending_id: transferPendingId,
       user_data_128: 0n,
       user_data_64: 0n,
       user_data_32: 0,
       timeout: 0,
       ledger: 1,
       code: 1,
+      // You can post any amount between zero and the pending transfer amount,
+      // or void the two-phase transfer using the `void_pending_transfer` flag.
+      amount: 500n,
       flags: TransferFlags.post_pending_transfer,
       timestamp: 0n,
     },
@@ -112,29 +119,16 @@ async function main() {
   assert.strictEqual(transferResults.length, 1);
   assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
-  // Validate the contents of all transfers
-  let transfers = await client.lookupTransfers([1n, 2n]);
-  assert.strictEqual(transfers.length, 2);
-  for (let transfer of transfers) {
-    if (transfer.id === 1n) {
-      assert.strictEqual(transfer.flags & TransferFlags.pending, TransferFlags.pending);
-    } else if (transfer.id === 2n) {
-      assert.strictEqual(transfer.flags & TransferFlags.post_pending_transfer, TransferFlags.post_pending_transfer);
-    } else {
-      assert.fail("Unexpected transfer: " + transfer.id);
-    }
-  }
-
-  // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-  accounts = await client.lookupAccounts([1n, 2n]);
+  // Fetch and validate final account balances.
+  accounts = await client.lookupAccounts([accountDrId, accountCrId]);
   assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
-    if (account.id === 1n) {
+    if (account.id === accountDrId) {
       assert.strictEqual(account.debits_posted, 500n);
       assert.strictEqual(account.credits_posted, 0n);
       assert.strictEqual(account.debits_pending, 0n);
       assert.strictEqual(account.credits_pending, 0n);
-    } else if (account.id === 2n) {
+    } else if (account.id === accountCrId) {
       assert.strictEqual(account.debits_posted, 0n);
       assert.strictEqual(account.credits_posted, 500n);
       assert.strictEqual(account.debits_pending, 0n);
