@@ -553,6 +553,7 @@ src/stdx/net.zig
 src/stdx/once.zig
 src/stdx/os.zig
 src/stdx/posix.zig
+src/stdx/priority_queue.zig
 src/stdx/prng.zig
 src/stdx/process.zig
 src/stdx/queue.zig
