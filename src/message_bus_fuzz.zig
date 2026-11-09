@@ -83,7 +83,9 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const connections_max = replica_count * (replica_count + @as(usize, clients_limit)) +
         @as(usize, clients_count) * replica_count;
     var io = try IO.init(gpa, .{
-        .events_capacity = node_count + 2 * connections_max,
+        // Each node has an `accept_completion` and a `next_tick_resume_completion`.
+        // In addition, each connection has a `recv` completion and a `send` completion.
+        .completions_max = node_count * 2 + 2 * connections_max,
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .recv_error_probability = ratio(prng.range_inclusive(u64, 1, 2), 10),
@@ -433,7 +435,7 @@ const IO = struct {
     const EventQueue = stdx.PriorityQueueType(Event, Event.less_than);
 
     pub const Options = struct {
-        events_capacity: usize,
+        completions_max: usize,
         seed: u64 = 0,
         recv_partial_probability: Ratio,
         recv_error_probability: Ratio,
@@ -502,7 +504,7 @@ const IO = struct {
     };
 
     pub fn init(gpa: std.mem.Allocator, options: Options) !IO {
-        var events = try EventQueue.init(gpa, options.events_capacity);
+        var events = try EventQueue.init(gpa, options.completions_max);
         errdefer events.deinit(gpa);
 
         return .{
