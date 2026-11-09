@@ -39,6 +39,7 @@ comptime {
     _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine_tests.zig");
     _ = @import("testing/exhaustigen.zig");
+    _ = @import("testing/files.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
     _ = @import("testing/table.zig");
