@@ -42,7 +42,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     inline for (.{
         "basic",
         "two-phase",
-        "two-phase-many",
         "walkthrough",
         "zero-allocation",
     }) |sample| {

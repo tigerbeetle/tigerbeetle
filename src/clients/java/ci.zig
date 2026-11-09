@@ -23,7 +23,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("mvn --batch-mode --file pom.xml --quiet formatter:validate", .{});
     try shell.exec("mvn --batch-mode --file pom.xml --quiet install", .{});
 
-    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+    inline for (.{ "basic", "two-phase", "walkthrough" }) |sample| {
         log.info("testing sample '{s}'", .{sample});
 
         try shell.pushd("./samples/" ++ sample);

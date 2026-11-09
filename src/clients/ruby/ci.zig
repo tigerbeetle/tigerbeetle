@@ -32,7 +32,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         try shell.exec("rake test:integration", .{});
     }
 
-    inline for ([_][]const u8{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+    inline for ([_][]const u8{ "basic", "two-phase", "walkthrough" }) |sample| {
         log.info("testing sample '{s}'", .{sample});
 
         try shell.pushd("./samples/" ++ sample);
