@@ -148,32 +148,18 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
-    const url = "https://central.sonatype.com/api/internal/browse/component/versions?" ++
-        "sortField=normalizedVersion&sortDirection=desc&page=0&size=1&" ++
-        "filter=namespace%3Acom.tigerbeetle%2Cname%3Atigerbeetle-java";
+    const url =
+        "https://repo.maven.apache.org/maven2/com/tigerbeetle/tigerbeetle-java/maven-metadata.xml";
 
     const response_body = try shell.http_get(url, .{});
 
-    const MavenSearch = struct {
-        const Component = struct {
-            namespace: []const u8,
-            name: []const u8,
-            version: []const u8,
-        };
-        components: []Component,
-    };
+    assert(std.mem.indexOf(u8, response_body, "<groupId>com.tigerbeetle</groupId>") != null);
+    assert(std.mem.indexOf(u8, response_body, "<artifactId>tigerbeetle-java</artifactId>") != null);
 
-    const maven_search_results = try std.json.parseFromSliceLeaky(
-        MavenSearch,
-        shell.arena.allocator(),
-        response_body,
-        .{ .ignore_unknown_fields = true },
-    );
+    _, const release_rest = stdx.cut(response_body, "<release>") orelse
+        return error.InvalidMavenMetadata;
+    const release, _ = stdx.cut(release_rest, "</release>") orelse
+        return error.InvalidMavenMetadata;
 
-    assert(maven_search_results.components.len == 1);
-
-    assert(std.mem.eql(u8, maven_search_results.components[0].namespace, "com.tigerbeetle"));
-    assert(std.mem.eql(u8, maven_search_results.components[0].name, "tigerbeetle-java"));
-
-    return maven_search_results.components[0].version;
+    return release;
 }
