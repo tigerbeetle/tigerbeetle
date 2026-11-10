@@ -21,7 +21,7 @@ test "files" {
 
     var process = try stdx.Process.init(gpa, io_std, &environment, .{
         .working_directory = cwd,
-        .spawn_size_exta = 4 * KiB,
+        .spawn_size_extra = 4 * KiB,
     });
     defer process.deinit(gpa);
 
