@@ -200,10 +200,10 @@ pub fn init(
         /// This parameter accounts for memory required to hold the command line
         /// and any environmental modifications. There's no universal default here.
         /// Use 4 * KiB if you are absolutely unsure, and increase if necessary.
-        spawn_size_exta: u32,
+        spawn_size_extra: u32,
     },
 ) !Process {
-    const spawn_size = spawn_size_minimal(parent_environment) + options.spawn_size_exta;
+    const spawn_size = spawn_size_minimal(parent_environment) + options.spawn_size_extra;
     const spawn_buffer = try gpa.alloc(u8, spawn_size);
     errdefer gpa.free(spawn_buffer);
 
