@@ -66,10 +66,11 @@ Tests can optionally specify requirements. In case an emitter sets a requirement
 // Reason: requires unbounded integers
 ```
 
-There are currently two defined requirements:
+There are currently three defined requirements:
 
-- `requires_unbounded_integers`: `true` for languages where integers outside the u128 range can be represented
 - `requires_fractional_amounts`: `true` for languages where a float can be passed where an integer is expected
+- `requires_unbounded_integers`: `true` for languages where integers outside the u128 range can be represented
+- `requires_use_after_close`: `true` for languages where a client can still be used after it is closed
 
 #### Rules for using requirements
 
@@ -79,22 +80,24 @@ There are currently two defined requirements:
   ```zig
   fn satisfies(requirement: ast.Case.Requirement) bool {
       return switch (requirement) {
-          .requires_unbounded_integers => false,
           .requires_fractional_amounts => false,
+          .requires_unbounded_integers => false,
+          .requires_use_after_close => true,
       };
   }
   ```
 
 #### Emitter support
 
-| language | unbounded integers | fractional amounts |
-|----------|--------------------|--------------------|
-| .NET     | no                 | no                 |
-| Go       | no                 | no                 |
-| Java     | no                 | no                 |
-| Node     | yes                | no                 |
-| Python   | yes                | yes                |
-| Ruby     | yes                | yes                |
+| language | fractional amounts | unbounded integers | use after close |
+|----------|--------------------|--------------------|-----------------|
+| .NET     | no                 | no                 | yes             |
+| Go       | no                 | no                 | yes             |
+| Java     | no                 | no                 | yes             |
+| Node     | no                 | yes                | yes             |
+| Python   | yes                | yes                | yes             |
+| Ruby     | yes                | yes                | yes             |
+| Rust     | no                 | no                 | no              |
 
 ### Assertions
 

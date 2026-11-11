@@ -2,6 +2,7 @@ const std = @import("std");
 
 const conformance = @import("conformance");
 
+const ast = conformance.ast;
 const Arena = conformance.Arena;
 const Printer = conformance.Printer;
 
@@ -19,6 +20,14 @@ pub fn main(init: std.process.Init) !void {
 
     try emit(&printer);
     try stdout_writer.flush();
+}
+
+fn satisfies(requirement: ast.Case.Requirement) bool {
+    return switch (requirement) {
+        .requires_fractional_amounts => false,
+        .requires_unbounded_integers => false,
+        .requires_use_after_close => false,
+    };
 }
 
 fn emit(printer: *Printer) !void {

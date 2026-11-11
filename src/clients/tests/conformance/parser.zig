@@ -137,13 +137,13 @@ const Parser = struct {
 
         var buffer: [2]std.zig.Ast.Node.Index = undefined;
         var statements = tree.blockStatements(&buffer, block).?;
-        // NOTE: We only support a single requirement or isolated client and it needs to come first.
+        // NOTE: We support a single optional requirement followed by an optional isolated client.
         const requirement: ?ast.Case.Requirement = if (statements.len > 0)
             try parser.parse_requirement(statements[0])
         else
             null;
         if (requirement != null) statements = statements[1..];
-        const isolated_client = requirement == null and statements.len > 0 and
+        const isolated_client = statements.len > 0 and
             try parser.parse_isolated_client(statements[0]);
         if (isolated_client) statements = statements[1..];
         const steps = try parser.arena.alloc(ast.Step, statements.len);
