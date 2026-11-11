@@ -120,19 +120,20 @@ A number of prime examples of this are:
   the payments they process.[^3]
 
 [^1]:
-    Singla, A., & Wu, S. (2020, October 2). _Revolutionizing Money Movements at Scale with Strong
-    Data Consistency_. Uber Blog.
-    [https://www.uber.com/blog/money-scale-strong-data](https://www.uber.com/blog/money-scale-strong-data).
+    Singla, A., & Wu, S. (2020, October 2).
+    [Revolutionizing Money Movements at Scale with Strong Data Consistency][uber].
 
 [^2]:
-    Liang, A. (2017, March 16). _Tracking the Money — Scaling Financial Reporting at Airbnb_. The
-    Airbnb Tech Blog.
-    [https://medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040](https://medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040).
+    Liang, A. (2017, March 16).
+    [Tracking the Money — Scaling Financial Reporting at Airbnb][airbnb]. The Airbnb Tech Blog.
 
 [^3]:
-    Ganelin, I. (2024, February 16). _Ledger: Stripe’s system for tracking and validating money
-    movement_. Stripe Blog.
-    [https://stripe.com/blog/ledger-stripe-system-for-tracking-and-validating-money-movement](https://stripe.com/blog/ledger-stripe-system-for-tracking-and-validating-money-movement).
+    Ganelin, I. (2024, February 16).
+    [Ledger: Stripe’s system for tracking and validating money movement][stripe]. Stripe Blog.
+
+[uber]: https://www.uber.com/us/en/blog/money-scale-strong-data/
+[airbnb]: https://medium.com/airbnb-engineering/tracking-the-money-scaling-financial-reporting-at-airbnb-6d742b80f040
+[stripe]: https://stripe.com/blog/ledger-stripe-system-for-tracking-and-validating-money-movement
 
 ## Standardized, Simple, and Scalable
 
