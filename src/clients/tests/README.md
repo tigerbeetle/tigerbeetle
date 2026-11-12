@@ -39,8 +39,10 @@
 
 - `const client = ct.default_client;` at the top level registers that name as a client binding. The name can be anything. Without this line, calls on `client` fail with "unknown binding". This was added so `client` isn't just magically available in every test.
 - The emitted name for the default client is always `client` (or `@client` in Ruby). It's recommended to use the same name in the Zig suites.
-- The test harness uses a new client for every test, but all cases share one server. Isolation therefore depends on `ct.generate_id()`. Hard-coded ids can collide across cases. The only literal ids in the suites are `0` and out-of-range values, which test rejection.
+- All cases share one client and one server. Isolation therefore depends on `ct.generate_id()`. Hard-coded ids can collide across cases. The only literal ids in the suites are `0` and out-of-range values, which test rejection.
 - `create_client` cases (the `client_create` suite) do not use the default client.
+- `ct.use_isolated_client()` gives the case a client that the test harness creates for it alone, in place of the shared client. It is used for cases that close the client. It comes after the optional requirement.
+- `ct.run_exclusively()` marks a case that must not run while other cases run, for example imports with explicit timestamps. It comes after the optional requirement and the optional `ct.use_isolated_client()`. Runners that run cases in parallel must run these cases alone; runners that run cases one after another can ignore it.
 
 ### Restrictions on bindings and values
 
@@ -133,6 +135,8 @@ const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "imports a transfer with an explicit timestamp" {
+    ct.run_exclusively();
+
     const reference_results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
     });

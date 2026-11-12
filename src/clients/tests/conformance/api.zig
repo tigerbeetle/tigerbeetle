@@ -58,6 +58,12 @@ pub fn use_isolated_client() void {
     @compileError(ct_compile_error);
 }
 
+/// Runs the case while no other case runs. Used for cases that should run in isolation, e.g.
+/// imports with explicit timestamps.
+pub fn run_exclusively() void {
+    @compileError(ct_compile_error);
+}
+
 /// Used for client construction tests. Creates a client and closes it again.
 pub fn create_client(arguments: struct {
     cluster_id: u128,

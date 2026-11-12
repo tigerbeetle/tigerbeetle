@@ -137,15 +137,19 @@ const Parser = struct {
 
         var buffer: [2]std.zig.Ast.Node.Index = undefined;
         var statements = tree.blockStatements(&buffer, block).?;
-        // NOTE: We support a single optional requirement followed by an optional isolated client.
+        // NOTE: We support a single optional requirement, followed by an optional isolated client,
+        // followed by an optional exclusive run.
         const requirement: ?ast.Case.Requirement = if (statements.len > 0)
             try parser.parse_requirement(statements[0])
         else
             null;
         if (requirement != null) statements = statements[1..];
         const isolated_client = statements.len > 0 and
-            try parser.parse_isolated_client(statements[0]);
+            try parser.parse_case_options(statements[0], "use_isolated_client");
         if (isolated_client) statements = statements[1..];
+        const exclusive = statements.len > 0 and
+            try parser.parse_case_options(statements[0], "run_exclusively");
+        if (exclusive) statements = statements[1..];
         const steps = try parser.arena.alloc(ast.Step, statements.len);
         for (statements, 0..) |statement, index| {
             steps[index] = try parser.parse_step(statement);
@@ -156,15 +160,20 @@ const Parser = struct {
             .steps = steps,
             .requirement = requirement,
             .isolated_client = isolated_client,
+            .exclusive = exclusive,
         };
     }
 
-    fn parse_isolated_client(parser: *Parser, node: std.zig.Ast.Node.Index) !bool {
+    fn parse_case_options(
+        parser: *Parser,
+        node: std.zig.Ast.Node.Index,
+        expected: []const u8,
+    ) !bool {
         const tree = &parser.tree;
         var buffer: [1]std.zig.Ast.Node.Index = undefined;
         const call = tree.fullCall(&buffer, node) orelse return false;
         const name = parser.parse_api_name(call.ast.fn_expr) orelse return false;
-        if (!std.mem.eql(u8, name, "use_isolated_client")) return false;
+        if (!std.mem.eql(u8, name, expected)) return false;
         try parser.assert_zero_arguments(call);
         return true;
     }

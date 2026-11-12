@@ -2,6 +2,8 @@ const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "imports a transfer with an explicit timestamp" {
+    ct.run_exclusively();
+
     const reference_results = client.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
     });
