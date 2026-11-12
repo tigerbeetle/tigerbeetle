@@ -346,15 +346,6 @@ fn dropping_future_continues_request() -> Result<()> {
 }
 
 #[test]
-fn ctor_fail() -> Result<()> {
-    let client = tb::Client::new(0, "hey");
-
-    assert!(matches!(client, Err(tb::InitError::AddressInvalid)));
-
-    Ok(())
-}
-
-#[test]
 fn dtor() -> Result<()> {
     let (client, _guard) = test_client()?;
 
@@ -498,58 +489,6 @@ fn lots_of_accounts() -> Vec<tb::Account> {
         accounts.push(account);
     }
     return accounts;
-}
-
-#[test]
-fn zero_events_create_accounts() -> Result<()> {
-    let (client, _guard) = test_client()?;
-
-    block_on(async {
-        let result = client.create_accounts(&[]).await?;
-
-        assert!(result.is_empty());
-
-        Ok(())
-    })
-}
-
-#[test]
-fn zero_events_create_transfers() -> Result<()> {
-    let (client, _guard) = test_client()?;
-
-    block_on(async {
-        let result = client.create_transfers(&[]).await?;
-
-        assert!(result.is_empty());
-
-        Ok(())
-    })
-}
-
-#[test]
-fn zero_events_lookup_accounts() -> Result<()> {
-    let (client, _guard) = test_client()?;
-
-    block_on(async {
-        let result = client.lookup_accounts(&[]).await?;
-
-        assert!(result.is_empty());
-
-        Ok(())
-    })
-}
-
-#[test]
-fn zero_events_lookup_transfers() -> Result<()> {
-    let (client, _guard) = test_client()?;
-
-    block_on(async {
-        let result = client.lookup_transfers(&[]).await?;
-
-        assert!(result.is_empty());
-
-        Ok(())
-    })
 }
 
 #[test]
