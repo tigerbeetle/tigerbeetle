@@ -207,7 +207,15 @@ fn emit_struct_format(buffer: *Buffer, comptime Type: type) void {
         if (comptime std.mem.eql(u8, field.name, "reserved")) {
             buffer.print("{d}x", .{@sizeOf(field.type)});
         } else {
-            // TODO: Assert that int types are unsigned?
+            comptime switch (@typeInfo(field.type)) {
+                .int => |info| assert(info.signedness == .unsigned),
+                .@"enum" => |info| assert(@typeInfo(info.tag_type).int.signedness == .unsigned),
+                .@"struct" => |info| {
+                    assert(info.layout == .@"packed");
+                    assert(@typeInfo(info.backing_integer.?).int.signedness == .unsigned);
+                },
+                else => @compileError("Unhandled type: " ++ @typeName(field.type)),
+            };
             buffer.print("{s}", .{switch (@bitSizeOf(field.type)) {
                 8 => "B",
                 16 => "H",
