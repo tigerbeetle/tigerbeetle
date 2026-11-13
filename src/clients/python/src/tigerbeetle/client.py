@@ -163,8 +163,7 @@ class Client:
         batch.operation = operation
         batch.status = bindings.BatchStatus.OK
 
-        operations_array_type = c_event_type * len(operations)
-        operations_array = operations_array_type(*map(c_event_type.from_param, operations))
+        operations_array = c_event_type.pack_many(operations)
 
         batch.data_size = ctypes.sizeof(operations_array)
         batch.data = ctypes.cast(operations_array, ctypes.c_void_p)
@@ -199,13 +198,7 @@ class Client:
             # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
             # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
             # dataclass.
-            results_slice = ctypes.cast(
-                bytes_ptr,
-                ctypes.POINTER(c_result_type)
-            )[0:(len_ // ctypes.sizeof(c_result_type))]
-            results = [result.to_python() for result in results_slice]
-
-            inflight_batch.response = results
+            inflight_batch.response = c_result_type.unpack_many(ctypes.string_at(bytes_ptr, len_))
 
         elif batch[0].status == bindings.BatchStatus.TOO_MUCH_DATA.value:
             inflight_batch.response = TooMuchDataError()

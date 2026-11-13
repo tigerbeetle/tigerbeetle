@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import ctypes
 import platform
+import struct
 import sys
 from pathlib import Path
 from typing import Any
@@ -77,8 +80,20 @@ class c_uint128(ctypes.Structure):  # noqa: N801
         validate_uint(bits=128, name=name, number=obj)
         return cls(_high=obj >> 64, _low=obj & 0xFFFFFFFFFFFFFFFF)
 
-    def to_python(self) -> int:
-        return int(self._high << 64 | self._low)
+    _struct = struct.Struct("<QQ")
+
+    @classmethod
+    def pack_many(cls, objs: list[int]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(buffer, offset, obj & 0xFFFFFFFFFFFFFFFF, obj >> 64)
+            except (struct.error, TypeError) as error:
+                validate_uint(bits=128, name="u128", number=obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
 def tb_assert(value: Any) -> None:
     """
