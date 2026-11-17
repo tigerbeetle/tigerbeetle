@@ -102,25 +102,31 @@ In the REPL, let's create two empty accounts:
 ```json
 {
   "id": "1",
-  "user_data": "0",
+  "debits_pending": "0",
+  "debits_posted": "0",
+  "credits_pending": "0",
+  "credits_posted": "0",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
   "ledger": "700",
   "code": "10",
   "flags": [],
-  "debits_pending": "0",
-  "debits_posted": "0",
-  "credits_pending": "0",
-  "credits_posted": "0"
+  "timestamp": "1794889303685272682"
 }
 {
   "id": "2",
-  "user_data": "0",
-  "ledger": "700",
-  "code": "10",
-  "flags": "",
   "debits_pending": "0",
   "debits_posted": "0",
   "credits_pending": "0",
-  "credits_posted": "0"
+  "credits_posted": "0",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "timestamp": "1794889303685272683"
 }
 ```
 
@@ -134,30 +140,36 @@ Now, create our first transfer and inspect the state of accounts afterwards:
 ```json
 {
   "id": "1",
-  "user_data": "0",
-  "ledger": "700",
-  "code": "10",
-  "flags": [],
   "debits_pending": "0",
   "debits_posted": "10",
   "credits_pending": "0",
-  "credits_posted": "0"
+  "credits_posted": "0",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "timestamp": "1794889303685272682"
 }
 {
   "id": "2",
-  "user_data": "0",
-  "ledger": "700",
-  "code": "10",
-  "flags": "",
   "debits_pending": "0",
   "debits_posted": "0",
   "credits_pending": "0",
-  "credits_posted": "10"
+  "credits_posted": "10",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "timestamp": "1794889303685272683"
 }
 ```
 
 Note how the transfer amount is added to both the credits and debits. That the sum of debits
-and credits stays equal, no matter what, is a powerful invariant of a double-entry bookkeeping 
+and credits stays equal, no matter what, is a powerful invariant of a double-entry bookkeeping
 system.
 
 ## Conclusion
@@ -184,6 +196,6 @@ If you want to keep up to speed with recent TigerBeetle developments:
   as well as talks from the Systems Distributed conference. We also stream on
   [Twitch](https://www.twitch.tv/tigerbeetle), with recordings duplicated to YouTube.
 - [𝕏](https://twitter.com/TigerBeetleDB) is good for smaller updates, and word-of-mouth historical
-  trivia you won't learn elsewhere! Or [Bluesky](https://bsky.app/profile/tigerbeetle.com), if that's 
+  trivia you won't learn elsewhere! Or [Bluesky](https://bsky.app/profile/tigerbeetle.com), if that's
   your preference.
 - [GitHub](https://github.com/tigerbeetle/tigerbeetle) to stay close to the source!
