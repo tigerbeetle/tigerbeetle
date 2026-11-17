@@ -600,8 +600,6 @@ public class ConformanceTest {
         assertEquals(9999999999L, accounts.getUserData64());
         assertEquals(12345, accounts.getUserData32());
         assertEquals(AccountFlags.HISTORY, accounts.getFlags());
-        accounts.beforeFirst();
-        assertTrue(accounts.next());
         assertTrue(accounts.getTimestamp() > 0L);
     }
 
@@ -757,11 +755,8 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Exists, results.getStatus());
-        assertTrue(createdResults.next());
-        final var createdResultTimestamp = createdResults.getTimestamp();
-        results.beforeFirst();
-        assertTrue(results.next());
-        assertEquals(createdResultTimestamp, results.getTimestamp());
+        createdResults.setPosition(0);
+        assertEquals(createdResults.getTimestamp(), results.getTimestamp());
     }
 
     @Test
@@ -1884,8 +1879,6 @@ public class ConformanceTest {
         assertArrayEquals(userData128, transfers.getUserData128());
         assertEquals(8888888888L, transfers.getUserData64());
         assertEquals(54321, transfers.getUserData32());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
         assertTrue(transfers.getTimestamp() > 0L);
     }
 
@@ -2003,15 +1996,12 @@ public class ConformanceTest {
         assertArrayEquals(transfer1Id, transfers.getId());
         assertTrue(transfers.next());
         assertArrayEquals(transfer2Id, transfers.getId());
-        assertTrue(transferResults.next());
-        final var transferResult1Timestamp = transferResults.getTimestamp();
-        assertTrue(transferResults.next());
-        final var transferResult2Timestamp = transferResults.getTimestamp();
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        assertEquals(transferResult1Timestamp, transfers.getTimestamp());
-        assertTrue(transfers.next());
-        assertEquals(transferResult2Timestamp, transfers.getTimestamp());
+        transferResults.setPosition(0);
+        transfers.setPosition(0);
+        assertEquals(transferResults.getTimestamp(), transfers.getTimestamp());
+        transferResults.setPosition(1);
+        transfers.setPosition(1);
+        assertEquals(transferResults.getTimestamp(), transfers.getTimestamp());
     }
 
     @Test
@@ -2491,9 +2481,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -2509,8 +2496,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer3Id, page2.getId());
         assertEquals(BigInteger.valueOf(30L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -2587,9 +2572,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -2606,8 +2588,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer1Id, page2.getId());
         assertEquals(BigInteger.valueOf(10L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -2741,7 +2721,7 @@ public class ConformanceTest {
             accountFilter.setCredits(true);
             matched = client.getAccountTransfers(accountFilter);
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var transferTimestamp = matched.getTimestamp();
         final TransferBatch transfers;
         {
@@ -3134,24 +3114,18 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(60L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(2);
+        balances.setPosition(2);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(3);
+        balances.setPosition(3);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3239,16 +3213,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3336,16 +3306,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(60L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3435,16 +3401,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3534,16 +3496,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3702,24 +3660,18 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(2);
+        balances.setPosition(2);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(3);
+        balances.setPosition(3);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -3781,9 +3733,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBalanceBatch page2;
         {
@@ -3799,8 +3748,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertEquals(BigInteger.valueOf(40L), page2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page2.getCreditsPosted());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBalanceBatch page3;
         {
@@ -3891,17 +3838,13 @@ public class ConformanceTest {
         assertTrue(balancesPage1.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage1.getCreditsPosted());
-        transfersPage1.beforeFirst();
-        assertTrue(transfersPage1.next());
-        final var transfer1Timestamp = transfersPage1.getTimestamp();
-        assertTrue(transfersPage1.next());
+        transfersPage1.setPosition(0);
+        balancesPage1.setPosition(0);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
+        transfersPage1.setPosition(1);
+        balancesPage1.setPosition(1);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
         final var cursor1 = transfersPage1.getTimestamp();
-        final var transfer2Timestamp = transfersPage1.getTimestamp();
-        balancesPage1.beforeFirst();
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer1Timestamp, balancesPage1.getTimestamp());
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer2Timestamp, balancesPage1.getTimestamp());
         final TransferBatch transfersPage2;
         {
             final var accountFilter = new AccountFilter();
@@ -3929,13 +3872,8 @@ public class ConformanceTest {
         assertTrue(balancesPage2.next());
         assertEquals(BigInteger.valueOf(40L), balancesPage2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage2.getCreditsPosted());
-        transfersPage2.beforeFirst();
-        assertTrue(transfersPage2.next());
+        assertEquals(transfersPage2.getTimestamp(), balancesPage2.getTimestamp());
         final var cursor2 = transfersPage2.getTimestamp();
-        final var transfer3Timestamp = transfersPage2.getTimestamp();
-        balancesPage2.beforeFirst();
-        assertTrue(balancesPage2.next());
-        assertEquals(transfer3Timestamp, balancesPage2.getTimestamp());
         final TransferBatch transfersPage3;
         {
             final var accountFilter = new AccountFilter();
@@ -4020,9 +3958,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBalanceBatch page2;
         {
@@ -4039,8 +3974,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertEquals(BigInteger.valueOf(10L), page2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), page2.getCreditsPosted());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBalanceBatch page3;
         {
@@ -4134,17 +4067,13 @@ public class ConformanceTest {
         assertTrue(balancesPage1.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage1.getCreditsPosted());
-        transfersPage1.beforeFirst();
-        assertTrue(transfersPage1.next());
-        final var transfer3Timestamp = transfersPage1.getTimestamp();
-        assertTrue(transfersPage1.next());
+        transfersPage1.setPosition(0);
+        balancesPage1.setPosition(0);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
+        transfersPage1.setPosition(1);
+        balancesPage1.setPosition(1);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
         final var cursor1 = transfersPage1.getTimestamp();
-        final var transfer2Timestamp = transfersPage1.getTimestamp();
-        balancesPage1.beforeFirst();
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer3Timestamp, balancesPage1.getTimestamp());
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer2Timestamp, balancesPage1.getTimestamp());
         final TransferBatch transfersPage2;
         {
             final var accountFilter = new AccountFilter();
@@ -4174,13 +4103,8 @@ public class ConformanceTest {
         assertTrue(balancesPage2.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balancesPage2.getCreditsPosted());
-        transfersPage2.beforeFirst();
-        assertTrue(transfersPage2.next());
+        assertEquals(transfersPage2.getTimestamp(), balancesPage2.getTimestamp());
         final var cursor2 = transfersPage2.getTimestamp();
-        final var transfer1Timestamp = transfersPage2.getTimestamp();
-        balancesPage2.beforeFirst();
-        assertTrue(balancesPage2.next());
-        assertEquals(transfer1Timestamp, balancesPage2.getTimestamp());
         final TransferBatch transfersPage3;
         {
             final var accountFilter = new AccountFilter();
@@ -4377,7 +4301,7 @@ public class ConformanceTest {
             accountFilter.setCredits(true);
             matched = client.getAccountBalances(accountFilter);
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var balanceTimestamp = matched.getTimestamp();
         final AccountBalanceBatch balances;
         {
@@ -4798,10 +4722,9 @@ public class ConformanceTest {
             accountBatch.setCode(999);
             results = client.createAccounts(accountBatch);
         }
-        assertTrue(results.next());
+        results.setPosition(0);
         final var timestampFirst = results.getTimestamp();
-        assertTrue(results.next());
-        assertTrue(results.next());
+        results.setPosition(2);
         final var timestampLast = results.getTimestamp();
         final AccountBatch accounts;
         {
@@ -4895,9 +4818,6 @@ public class ConformanceTest {
         assertArrayEquals(account3Id, page1.getId());
         assertTrue(page1.next());
         assertArrayEquals(account2Id, page1.getId());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBatch page2;
         {
@@ -4911,8 +4831,6 @@ public class ConformanceTest {
         assertEquals(1, page2.getLength());
         assertTrue(page2.next());
         assertArrayEquals(account1Id, page2.getId());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBatch page3;
         {
@@ -5029,7 +4947,7 @@ public class ConformanceTest {
             queryFilter.setLimit(10);
             matched = client.queryAccounts(queryFilter);
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var accountTimestamp = matched.getTimestamp();
         final AccountBatch accounts;
         {
@@ -5455,10 +5373,9 @@ public class ConformanceTest {
             transferBatch.setCode(999);
             results = client.createTransfers(transferBatch);
         }
-        assertTrue(results.next());
+        results.setPosition(0);
         final var timestampFirst = results.getTimestamp();
-        assertTrue(results.next());
-        assertTrue(results.next());
+        results.setPosition(2);
         final var timestampLast = results.getTimestamp();
         final TransferBatch transfers;
         {
@@ -5601,9 +5518,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -5618,8 +5532,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer1Id, page2.getId());
         assertEquals(BigInteger.valueOf(10L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -5788,7 +5700,7 @@ public class ConformanceTest {
             queryFilter.setLimit(10);
             matched = client.queryTransfers(queryFilter);
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var transferTimestamp = matched.getTimestamp();
         final TransferBatch transfers;
         {
@@ -5874,7 +5786,7 @@ public class ConformanceTest {
             accountBatch.setCode(718);
             accountResults1 = client.createAccounts(accountBatch);
         }
-        assertTrue(accountResults1.next());
+        accountResults1.setPosition(0);
         assertEquals(CreateAccountStatus.Created, accountResults1.getStatus());
         assertTrue(accountResults1.getTimestamp() > 0L);
         final CreateAccountResultBatch accountResults2;
@@ -5890,10 +5802,10 @@ public class ConformanceTest {
             accountBatch.setCode(719);
             accountResults2 = client.createAccounts(accountBatch);
         }
-        assertTrue(accountResults2.next());
+        accountResults2.setPosition(0);
         assertEquals(CreateAccountStatus.Exists, accountResults2.getStatus());
         assertTrue(accountResults2.getTimestamp() > 0L);
-        assertTrue(accountResults2.next());
+        accountResults2.setPosition(1);
         assertEquals(CreateAccountStatus.Created, accountResults2.getStatus());
         assertTrue(accountResults2.getTimestamp() > 0L);
         final CreateTransferResultBatch transferResults1;
@@ -5908,7 +5820,7 @@ public class ConformanceTest {
             transferBatch.setCode(1);
             transferResults1 = client.createTransfers(transferBatch);
         }
-        assertTrue(transferResults1.next());
+        transferResults1.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults1.getStatus());
         assertTrue(transferResults1.getTimestamp() > 0L);
         final AccountBatch accounts1;
@@ -5946,10 +5858,9 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults2 = client.createTransfers(transferBatch);
         }
-        assertTrue(transferResults2.next());
+        transferResults2.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults2.getStatus());
         assertTrue(transferResults2.getTimestamp() > 0L);
-        final var transferResult2Timestamp = transferResults2.getTimestamp();
         final AccountBatch accounts2;
         {
             final var idBatch = new IdBatch(2);
@@ -5976,11 +5887,7 @@ public class ConformanceTest {
             idBatch.add(transfer2Id);
             transfers1 = client.lookupTransfers(idBatch);
         }
-        assertTrue(transfers1.next());
-        assertTrue(transfers1.getTimeout() > 0);
-        assertEquals(transferResult2Timestamp, transfers1.getTimestamp());
         assertEquals(1, transfers1.getLength());
-        transfers1.beforeFirst();
         assertTrue(transfers1.next());
         assertArrayEquals(transfer2Id, transfers1.getId());
         assertArrayEquals(accountBId, transfers1.getDebitAccountId());
@@ -5991,6 +5898,8 @@ public class ConformanceTest {
         assertEquals(0, transfers1.getUserData32());
         assertEquals(1, transfers1.getCode());
         assertEquals(TransferFlags.PENDING, transfers1.getFlags());
+        assertTrue(transfers1.getTimeout() > 0);
+        assertEquals(transferResults2.getTimestamp(), transfers1.getTimestamp());
         final CreateTransferResultBatch commitResults;
         {
             final var transferBatch = new TransferBatch(1);
@@ -6003,7 +5912,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.POST_PENDING_TRANSFER);
             commitResults = client.createTransfers(transferBatch);
         }
-        assertTrue(commitResults.next());
+        commitResults.setPosition(0);
         assertEquals(CreateTransferStatus.Created, commitResults.getStatus());
         assertTrue(commitResults.getTimestamp() > 0L);
         final AccountBatch accounts3;
@@ -6041,7 +5950,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults3 = client.createTransfers(transferBatch);
         }
-        assertTrue(transferResults3.next());
+        transferResults3.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults3.getStatus());
         assertTrue(transferResults3.getTimestamp() > 0L);
         final CreateTransferResultBatch rejectResults;
@@ -6055,7 +5964,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
             rejectResults = client.createTransfers(transferBatch);
         }
-        assertTrue(rejectResults.next());
+        rejectResults.setPosition(0);
         assertEquals(CreateTransferStatus.Created, rejectResults.getStatus());
         assertTrue(rejectResults.getTimestamp() > 0L);
         final AccountBatch accounts4;
@@ -6093,7 +6002,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults4 = client.createTransfers(transferBatch);
         }
-        assertTrue(transferResults4.next());
+        transferResults4.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults4.getStatus());
         assertTrue(transferResults4.getTimestamp() > 0L);
         final AccountBatch accounts5;
@@ -6148,7 +6057,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
             expiredResults = client.createTransfers(transferBatch);
         }
-        assertTrue(expiredResults.next());
+        expiredResults.setPosition(0);
         assertEquals(CreateTransferStatus.PendingTransferExpired, expiredResults.getStatus());
     }
 
@@ -6288,7 +6197,7 @@ public class ConformanceTest {
             accountBatch.setCode(1);
             referenceResults = client.createAccounts(accountBatch);
         }
-        assertTrue(referenceResults.next());
+        referenceResults.setPosition(0);
         final var reference = referenceResults.getTimestamp();
         Thread.sleep(10);
         final var account1Id = UInt128.id();
@@ -6329,18 +6238,16 @@ public class ConformanceTest {
         assertTrue(accounts.next());
         assertArrayEquals(account2Id, accounts.getId());
         assertEquals(AccountFlags.IMPORTED, accounts.getFlags());
-        results.beforeFirst();
-        assertTrue(results.next());
+        results.setPosition(0);
         assertEquals(reference + 1L, results.getTimestamp());
-        final var result1Timestamp = results.getTimestamp();
-        assertTrue(results.next());
+        results.setPosition(1);
         assertEquals(reference + 2L, results.getTimestamp());
-        final var result2Timestamp = results.getTimestamp();
-        accounts.beforeFirst();
-        assertTrue(accounts.next());
-        assertEquals(result1Timestamp, accounts.getTimestamp());
-        assertTrue(accounts.next());
-        assertEquals(result2Timestamp, accounts.getTimestamp());
+        results.setPosition(0);
+        accounts.setPosition(0);
+        assertEquals(results.getTimestamp(), accounts.getTimestamp());
+        results.setPosition(1);
+        accounts.setPosition(1);
+        assertEquals(results.getTimestamp(), accounts.getTimestamp());
     }
 
     // Suite: import_transfers
@@ -6357,7 +6264,7 @@ public class ConformanceTest {
             accountBatch.setCode(1);
             referenceResults = client.createAccounts(accountBatch);
         }
-        assertTrue(referenceResults.next());
+        referenceResults.setPosition(0);
         final var reference = referenceResults.getTimestamp();
         Thread.sleep(10);
         final var debitAccountId = UInt128.id();
@@ -6407,13 +6314,8 @@ public class ConformanceTest {
         assertArrayEquals(transferId, transfers.getId());
         assertEquals(BigInteger.valueOf(100L), transfers.getAmount());
         assertEquals(TransferFlags.IMPORTED, transfers.getFlags());
-        results.beforeFirst();
-        assertTrue(results.next());
         assertEquals(reference + 3L, results.getTimestamp());
-        final var resultTimestamp = results.getTimestamp();
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        assertEquals(resultTimestamp, transfers.getTimestamp());
+        assertEquals(results.getTimestamp(), transfers.getTimestamp());
     }
 
     // Suite: uint128_range
@@ -7227,8 +7129,6 @@ public class ConformanceTest {
         assertEquals(9999999999L, accounts.getUserData64());
         assertEquals(12345, accounts.getUserData32());
         assertEquals(AccountFlags.HISTORY, accounts.getFlags());
-        accounts.beforeFirst();
-        assertTrue(accounts.next());
         assertTrue(accounts.getTimestamp() > 0L);
     }
 
@@ -7384,11 +7284,8 @@ public class ConformanceTest {
         assertEquals(1, results.getLength());
         assertTrue(results.next());
         assertEquals(CreateTransferStatus.Exists, results.getStatus());
-        assertTrue(createdResults.next());
-        final var createdResultTimestamp = createdResults.getTimestamp();
-        results.beforeFirst();
-        assertTrue(results.next());
-        assertEquals(createdResultTimestamp, results.getTimestamp());
+        createdResults.setPosition(0);
+        assertEquals(createdResults.getTimestamp(), results.getTimestamp());
     }
 
     @Test
@@ -8511,8 +8408,6 @@ public class ConformanceTest {
         assertArrayEquals(userData128, transfers.getUserData128());
         assertEquals(8888888888L, transfers.getUserData64());
         assertEquals(54321, transfers.getUserData32());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
         assertTrue(transfers.getTimestamp() > 0L);
     }
 
@@ -8630,15 +8525,12 @@ public class ConformanceTest {
         assertArrayEquals(transfer1Id, transfers.getId());
         assertTrue(transfers.next());
         assertArrayEquals(transfer2Id, transfers.getId());
-        assertTrue(transferResults.next());
-        final var transferResult1Timestamp = transferResults.getTimestamp();
-        assertTrue(transferResults.next());
-        final var transferResult2Timestamp = transferResults.getTimestamp();
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        assertEquals(transferResult1Timestamp, transfers.getTimestamp());
-        assertTrue(transfers.next());
-        assertEquals(transferResult2Timestamp, transfers.getTimestamp());
+        transferResults.setPosition(0);
+        transfers.setPosition(0);
+        assertEquals(transferResults.getTimestamp(), transfers.getTimestamp());
+        transferResults.setPosition(1);
+        transfers.setPosition(1);
+        assertEquals(transferResults.getTimestamp(), transfers.getTimestamp());
     }
 
     @Test
@@ -9118,9 +9010,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -9136,8 +9025,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer3Id, page2.getId());
         assertEquals(BigInteger.valueOf(30L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -9214,9 +9101,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -9233,8 +9117,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer1Id, page2.getId());
         assertEquals(BigInteger.valueOf(10L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -9368,7 +9250,7 @@ public class ConformanceTest {
             accountFilter.setCredits(true);
             matched = client.getAccountTransfersAsync(accountFilter).get();
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var transferTimestamp = matched.getTimestamp();
         final TransferBatch transfers;
         {
@@ -9767,24 +9649,18 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(60L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(2);
+        balances.setPosition(2);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(3);
+        balances.setPosition(3);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -9872,16 +9748,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -9969,16 +9841,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(40L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(60L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -10068,16 +9936,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -10167,16 +10031,12 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -10335,24 +10195,18 @@ public class ConformanceTest {
         assertTrue(balances.next());
         assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balances.getCreditsPosted());
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        final var transfer4Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer3Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer2Timestamp = transfers.getTimestamp();
-        assertTrue(transfers.next());
-        final var transfer1Timestamp = transfers.getTimestamp();
-        balances.beforeFirst();
-        assertTrue(balances.next());
-        assertEquals(transfer4Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer3Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer2Timestamp, balances.getTimestamp());
-        assertTrue(balances.next());
-        assertEquals(transfer1Timestamp, balances.getTimestamp());
+        transfers.setPosition(0);
+        balances.setPosition(0);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(1);
+        balances.setPosition(1);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(2);
+        balances.setPosition(2);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
+        transfers.setPosition(3);
+        balances.setPosition(3);
+        assertEquals(transfers.getTimestamp(), balances.getTimestamp());
     }
 
     @Test
@@ -10414,9 +10268,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBalanceBatch page2;
         {
@@ -10432,8 +10283,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertEquals(BigInteger.valueOf(40L), page2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page2.getCreditsPosted());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBalanceBatch page3;
         {
@@ -10524,17 +10373,13 @@ public class ConformanceTest {
         assertTrue(balancesPage1.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage1.getCreditsPosted());
-        transfersPage1.beforeFirst();
-        assertTrue(transfersPage1.next());
-        final var transfer1Timestamp = transfersPage1.getTimestamp();
-        assertTrue(transfersPage1.next());
+        transfersPage1.setPosition(0);
+        balancesPage1.setPosition(0);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
+        transfersPage1.setPosition(1);
+        balancesPage1.setPosition(1);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
         final var cursor1 = transfersPage1.getTimestamp();
-        final var transfer2Timestamp = transfersPage1.getTimestamp();
-        balancesPage1.beforeFirst();
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer1Timestamp, balancesPage1.getTimestamp());
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer2Timestamp, balancesPage1.getTimestamp());
         final TransferBatch transfersPage2;
         {
             final var accountFilter = new AccountFilter();
@@ -10562,13 +10407,8 @@ public class ConformanceTest {
         assertTrue(balancesPage2.next());
         assertEquals(BigInteger.valueOf(40L), balancesPage2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage2.getCreditsPosted());
-        transfersPage2.beforeFirst();
-        assertTrue(transfersPage2.next());
+        assertEquals(transfersPage2.getTimestamp(), balancesPage2.getTimestamp());
         final var cursor2 = transfersPage2.getTimestamp();
-        final var transfer3Timestamp = transfersPage2.getTimestamp();
-        balancesPage2.beforeFirst();
-        assertTrue(balancesPage2.next());
-        assertEquals(transfer3Timestamp, balancesPage2.getTimestamp());
         final TransferBatch transfersPage3;
         {
             final var accountFilter = new AccountFilter();
@@ -10653,9 +10493,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBalanceBatch page2;
         {
@@ -10672,8 +10509,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertEquals(BigInteger.valueOf(10L), page2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), page2.getCreditsPosted());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBalanceBatch page3;
         {
@@ -10767,17 +10602,13 @@ public class ConformanceTest {
         assertTrue(balancesPage1.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage1.getDebitsPosted());
         assertEquals(BigInteger.valueOf(20L), balancesPage1.getCreditsPosted());
-        transfersPage1.beforeFirst();
-        assertTrue(transfersPage1.next());
-        final var transfer3Timestamp = transfersPage1.getTimestamp();
-        assertTrue(transfersPage1.next());
+        transfersPage1.setPosition(0);
+        balancesPage1.setPosition(0);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
+        transfersPage1.setPosition(1);
+        balancesPage1.setPosition(1);
+        assertEquals(transfersPage1.getTimestamp(), balancesPage1.getTimestamp());
         final var cursor1 = transfersPage1.getTimestamp();
-        final var transfer2Timestamp = transfersPage1.getTimestamp();
-        balancesPage1.beforeFirst();
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer3Timestamp, balancesPage1.getTimestamp());
-        assertTrue(balancesPage1.next());
-        assertEquals(transfer2Timestamp, balancesPage1.getTimestamp());
         final TransferBatch transfersPage2;
         {
             final var accountFilter = new AccountFilter();
@@ -10807,13 +10638,8 @@ public class ConformanceTest {
         assertTrue(balancesPage2.next());
         assertEquals(BigInteger.valueOf(10L), balancesPage2.getDebitsPosted());
         assertEquals(BigInteger.valueOf(0L), balancesPage2.getCreditsPosted());
-        transfersPage2.beforeFirst();
-        assertTrue(transfersPage2.next());
+        assertEquals(transfersPage2.getTimestamp(), balancesPage2.getTimestamp());
         final var cursor2 = transfersPage2.getTimestamp();
-        final var transfer1Timestamp = transfersPage2.getTimestamp();
-        balancesPage2.beforeFirst();
-        assertTrue(balancesPage2.next());
-        assertEquals(transfer1Timestamp, balancesPage2.getTimestamp());
         final TransferBatch transfersPage3;
         {
             final var accountFilter = new AccountFilter();
@@ -11010,7 +10836,7 @@ public class ConformanceTest {
             accountFilter.setCredits(true);
             matched = client.getAccountBalancesAsync(accountFilter).get();
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var balanceTimestamp = matched.getTimestamp();
         final AccountBalanceBatch balances;
         {
@@ -11437,10 +11263,9 @@ public class ConformanceTest {
             accountBatch.setCode(999);
             results = client.createAccountsAsync(accountBatch).get();
         }
-        assertTrue(results.next());
+        results.setPosition(0);
         final var timestampFirst = results.getTimestamp();
-        assertTrue(results.next());
-        assertTrue(results.next());
+        results.setPosition(2);
         final var timestampLast = results.getTimestamp();
         final AccountBatch accounts;
         {
@@ -11534,9 +11359,6 @@ public class ConformanceTest {
         assertArrayEquals(account3Id, page1.getId());
         assertTrue(page1.next());
         assertArrayEquals(account2Id, page1.getId());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final AccountBatch page2;
         {
@@ -11550,8 +11372,6 @@ public class ConformanceTest {
         assertEquals(1, page2.getLength());
         assertTrue(page2.next());
         assertArrayEquals(account1Id, page2.getId());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final AccountBatch page3;
         {
@@ -11668,7 +11488,7 @@ public class ConformanceTest {
             queryFilter.setLimit(10);
             matched = client.queryAccountsAsync(queryFilter).get();
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var accountTimestamp = matched.getTimestamp();
         final AccountBatch accounts;
         {
@@ -12100,10 +11920,9 @@ public class ConformanceTest {
             transferBatch.setCode(999);
             results = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(results.next());
+        results.setPosition(0);
         final var timestampFirst = results.getTimestamp();
-        assertTrue(results.next());
-        assertTrue(results.next());
+        results.setPosition(2);
         final var timestampLast = results.getTimestamp();
         final TransferBatch transfers;
         {
@@ -12246,9 +12065,6 @@ public class ConformanceTest {
         assertTrue(page1.next());
         assertArrayEquals(transfer2Id, page1.getId());
         assertEquals(BigInteger.valueOf(20L), page1.getAmount());
-        page1.beforeFirst();
-        assertTrue(page1.next());
-        assertTrue(page1.next());
         final var cursor1 = page1.getTimestamp();
         final TransferBatch page2;
         {
@@ -12263,8 +12079,6 @@ public class ConformanceTest {
         assertTrue(page2.next());
         assertArrayEquals(transfer1Id, page2.getId());
         assertEquals(BigInteger.valueOf(10L), page2.getAmount());
-        page2.beforeFirst();
-        assertTrue(page2.next());
         final var cursor2 = page2.getTimestamp();
         final TransferBatch page3;
         {
@@ -12433,7 +12247,7 @@ public class ConformanceTest {
             queryFilter.setLimit(10);
             matched = client.queryTransfersAsync(queryFilter).get();
         }
-        assertTrue(matched.next());
+        matched.setPosition(0);
         final var transferTimestamp = matched.getTimestamp();
         final TransferBatch transfers;
         {
@@ -12525,7 +12339,7 @@ public class ConformanceTest {
             accountBatch.setCode(718);
             accountResults1 = client.createAccountsAsync(accountBatch).get();
         }
-        assertTrue(accountResults1.next());
+        accountResults1.setPosition(0);
         assertEquals(CreateAccountStatus.Created, accountResults1.getStatus());
         assertTrue(accountResults1.getTimestamp() > 0L);
         final CreateAccountResultBatch accountResults2;
@@ -12541,10 +12355,10 @@ public class ConformanceTest {
             accountBatch.setCode(719);
             accountResults2 = client.createAccountsAsync(accountBatch).get();
         }
-        assertTrue(accountResults2.next());
+        accountResults2.setPosition(0);
         assertEquals(CreateAccountStatus.Exists, accountResults2.getStatus());
         assertTrue(accountResults2.getTimestamp() > 0L);
-        assertTrue(accountResults2.next());
+        accountResults2.setPosition(1);
         assertEquals(CreateAccountStatus.Created, accountResults2.getStatus());
         assertTrue(accountResults2.getTimestamp() > 0L);
         final CreateTransferResultBatch transferResults1;
@@ -12559,7 +12373,7 @@ public class ConformanceTest {
             transferBatch.setCode(1);
             transferResults1 = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(transferResults1.next());
+        transferResults1.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults1.getStatus());
         assertTrue(transferResults1.getTimestamp() > 0L);
         final AccountBatch accounts1;
@@ -12597,10 +12411,9 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults2 = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(transferResults2.next());
+        transferResults2.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults2.getStatus());
         assertTrue(transferResults2.getTimestamp() > 0L);
-        final var transferResult2Timestamp = transferResults2.getTimestamp();
         final AccountBatch accounts2;
         {
             final var idBatch = new IdBatch(2);
@@ -12627,11 +12440,7 @@ public class ConformanceTest {
             idBatch.add(transfer2Id);
             transfers1 = client.lookupTransfersAsync(idBatch).get();
         }
-        assertTrue(transfers1.next());
-        assertTrue(transfers1.getTimeout() > 0);
-        assertEquals(transferResult2Timestamp, transfers1.getTimestamp());
         assertEquals(1, transfers1.getLength());
-        transfers1.beforeFirst();
         assertTrue(transfers1.next());
         assertArrayEquals(transfer2Id, transfers1.getId());
         assertArrayEquals(accountBId, transfers1.getDebitAccountId());
@@ -12642,6 +12451,8 @@ public class ConformanceTest {
         assertEquals(0, transfers1.getUserData32());
         assertEquals(1, transfers1.getCode());
         assertEquals(TransferFlags.PENDING, transfers1.getFlags());
+        assertTrue(transfers1.getTimeout() > 0);
+        assertEquals(transferResults2.getTimestamp(), transfers1.getTimestamp());
         final CreateTransferResultBatch commitResults;
         {
             final var transferBatch = new TransferBatch(1);
@@ -12654,7 +12465,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.POST_PENDING_TRANSFER);
             commitResults = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(commitResults.next());
+        commitResults.setPosition(0);
         assertEquals(CreateTransferStatus.Created, commitResults.getStatus());
         assertTrue(commitResults.getTimestamp() > 0L);
         final AccountBatch accounts3;
@@ -12692,7 +12503,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults3 = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(transferResults3.next());
+        transferResults3.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults3.getStatus());
         assertTrue(transferResults3.getTimestamp() > 0L);
         final CreateTransferResultBatch rejectResults;
@@ -12706,7 +12517,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
             rejectResults = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(rejectResults.next());
+        rejectResults.setPosition(0);
         assertEquals(CreateTransferStatus.Created, rejectResults.getStatus());
         assertTrue(rejectResults.getTimestamp() > 0L);
         final AccountBatch accounts4;
@@ -12744,7 +12555,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.PENDING);
             transferResults4 = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(transferResults4.next());
+        transferResults4.setPosition(0);
         assertEquals(CreateTransferStatus.Created, transferResults4.getStatus());
         assertTrue(transferResults4.getTimestamp() > 0L);
         final AccountBatch accounts5;
@@ -12799,7 +12610,7 @@ public class ConformanceTest {
             transferBatch.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
             expiredResults = client.createTransfersAsync(transferBatch).get();
         }
-        assertTrue(expiredResults.next());
+        expiredResults.setPosition(0);
         assertEquals(CreateTransferStatus.PendingTransferExpired, expiredResults.getStatus());
     }
 
@@ -12939,7 +12750,7 @@ public class ConformanceTest {
             accountBatch.setCode(1);
             referenceResults = client.createAccountsAsync(accountBatch).get();
         }
-        assertTrue(referenceResults.next());
+        referenceResults.setPosition(0);
         final var reference = referenceResults.getTimestamp();
         Thread.sleep(10);
         final var account1Id = UInt128.id();
@@ -12980,18 +12791,16 @@ public class ConformanceTest {
         assertTrue(accounts.next());
         assertArrayEquals(account2Id, accounts.getId());
         assertEquals(AccountFlags.IMPORTED, accounts.getFlags());
-        results.beforeFirst();
-        assertTrue(results.next());
+        results.setPosition(0);
         assertEquals(reference + 1L, results.getTimestamp());
-        final var result1Timestamp = results.getTimestamp();
-        assertTrue(results.next());
+        results.setPosition(1);
         assertEquals(reference + 2L, results.getTimestamp());
-        final var result2Timestamp = results.getTimestamp();
-        accounts.beforeFirst();
-        assertTrue(accounts.next());
-        assertEquals(result1Timestamp, accounts.getTimestamp());
-        assertTrue(accounts.next());
-        assertEquals(result2Timestamp, accounts.getTimestamp());
+        results.setPosition(0);
+        accounts.setPosition(0);
+        assertEquals(results.getTimestamp(), accounts.getTimestamp());
+        results.setPosition(1);
+        accounts.setPosition(1);
+        assertEquals(results.getTimestamp(), accounts.getTimestamp());
     }
 
     // Suite: import_transfers
@@ -13008,7 +12817,7 @@ public class ConformanceTest {
             accountBatch.setCode(1);
             referenceResults = client.createAccountsAsync(accountBatch).get();
         }
-        assertTrue(referenceResults.next());
+        referenceResults.setPosition(0);
         final var reference = referenceResults.getTimestamp();
         Thread.sleep(10);
         final var debitAccountId = UInt128.id();
@@ -13058,13 +12867,8 @@ public class ConformanceTest {
         assertArrayEquals(transferId, transfers.getId());
         assertEquals(BigInteger.valueOf(100L), transfers.getAmount());
         assertEquals(TransferFlags.IMPORTED, transfers.getFlags());
-        results.beforeFirst();
-        assertTrue(results.next());
         assertEquals(reference + 3L, results.getTimestamp());
-        final var resultTimestamp = results.getTimestamp();
-        transfers.beforeFirst();
-        assertTrue(transfers.next());
-        assertEquals(resultTimestamp, transfers.getTimestamp());
+        assertEquals(results.getTimestamp(), transfers.getTimestamp());
     }
 
     // Suite: uint128_range
