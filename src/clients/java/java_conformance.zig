@@ -157,21 +157,19 @@ fn emit(printer: *Printer) !void {
 const Scope = struct {
     // The set of binding names that hold id arrays.
     id_arrays: std.StringHashMap(void),
-    // The set of batch names that were already walked.
-    walked: std.StringHashMap(void),
+    // Rows bound with `const row = batch[i]`.
+    rows: std.StringHashMap(Row),
+    // Cursor position of each batch that was moved, null after a call to `next()`.
+    positions: std.StringHashMap(?u32),
+
+    const Row = struct { batch: []const u8, index: u32 };
 
     fn init(allocator: std.mem.Allocator) Scope {
         return .{
             .id_arrays = std.StringHashMap(void).init(allocator),
-            .walked = std.StringHashMap(void).init(allocator),
+            .rows = std.StringHashMap(Row).init(allocator),
+            .positions = std.StringHashMap(?u32).init(allocator),
         };
-    }
-
-    // Returns whether `batch` was walked before. A batch is a cursor, so a
-    // second pass over one has to rewind first.
-    fn walk(scope: *Scope, batch: []const u8) !bool {
-        const entry = try scope.walked.getOrPut(batch);
-        return entry.found_existing;
     }
 };
 
@@ -181,206 +179,33 @@ fn emit_case(
     variant: ClientVariant,
 ) !void {
     var scope = Scope.init(printer.arena.allocator());
-    const consumed = try printer.arena.allocator().alloc(bool, case.steps.len);
-    @memset(consumed, false);
-    for (case.steps, 0..) |step, index| {
-        if (consumed[index]) continue;
-        if (step == .binding and step.binding.value == .index and
-            !scope.id_arrays.contains(step.binding.value.index.reference))
-        {
-            try emit_row_group(printer, &scope, case.steps, index, consumed);
-        } else {
-            try emit_step(printer, &scope, step, variant);
-        }
+    for (case.steps) |step| {
+        try emit_step(printer, &scope, step, variant);
     }
 }
 
-// A Java result batch is a cursor, not a list of rows, so indexed bindings
-// never become locals. Each row is reached with `next()`, and its assertions
-// follow it, like in `IntegrationTest`.
-//
-//     // Suite test:
-//     const first = results[0];
-//     const second = results[1];
-//     ct.assert_equal(first.status, .exists);
-//     ct.assert_equal(second.status, .created);
-//
-//     // Generated Java:
-//     assertTrue(results.next());
-//     assertEquals(CreateAccountStatus.Exists, results.getStatus());
-//     assertTrue(results.next());
-//     assertEquals(CreateAccountStatus.Created, results.getStatus());
-fn emit_row_group(
-    printer: *Printer,
-    scope: *Scope,
-    steps: []const ast.Step,
-    start: usize,
-    consumed: []bool,
-) !void {
-    const origin = steps[start].binding.value.index;
-    const batch = try printer.to_case_alloc(.camel_case, origin.reference);
-
-    const Row = struct { name: []const u8, index: u32 };
-    var rows: std.ArrayList(Row) = .empty;
-    for (steps[start..], start..) |step, index| {
-        if (step != .binding or step.binding.value != .index) continue;
-        if (!std.mem.eql(u8, step.binding.value.index.reference, origin.reference)) continue;
-        if (rows.getLastOrNull()) |last| assert(step.binding.value.index.index > last.index);
-        try rows.append(printer.arena.allocator(), .{
-            .name = step.binding.name,
-            .index = step.binding.value.index.index,
-        });
-        consumed[index] = true;
-    }
-
-    if (try scope.walk(batch)) {
-        try printer.print_indented("{s}.beforeFirst();", .{batch});
-    }
-    var position: u32 = 0;
-    for (rows.items) |entry| {
-        const row = entry.name;
-        while (position <= entry.index) : (position += 1) {
-            try printer.print_indented("assertTrue({s}.next());", .{batch});
-        }
-        try emit_row_captures(printer, steps, row, batch, consumed);
-        for (steps, 0..) |step, index| {
-            if (step != .assertion) continue;
-            var comparison: ast.Assertion.FieldComparison = undefined;
-            var greater_than = false;
-            switch (step.assertion) {
-                .equal_field => |value| comparison = value,
-                .greater_than => |value| {
-                    comparison = value;
-                    greater_than = true;
-                },
-                else => continue,
-            }
-            if (comparison.expected == .field_reference) {
-                try emit_row_equal_field(printer, steps, .{
-                    .comparison = comparison,
-                    .row = row,
-                    .batch = batch,
-                    .consumed = &consumed[index],
-                });
-                continue;
-            }
-            if (!std.mem.eql(u8, comparison.actual.reference, row)) continue;
-            consumed[index] = true;
-
-            const property = try printer.to_case_alloc(.pascal_case, comparison.actual.field.name);
-            const value = try render_typed_value(
-                printer,
-                comparison.actual.field,
-                comparison.expected.expression,
-            );
-            try printer.write_indent();
-            if (greater_than) {
-                try printer.print("assertTrue({s}.get{s}() > {s});\n", .{ batch, property, value });
-            } else {
-                try printer.print("{s}({s}, {s}.get{s}());\n", .{
-                    assert_function(comparison.actual.field),
-                    value,
-                    batch,
-                    property,
-                });
-            }
-        }
-    }
+// Moves the cursor of `batch` to `index`, unless it is there already.
+fn emit_position(printer: *Printer, scope: *Scope, batch: []const u8, index: u32) !void {
+    const entry = try scope.positions.getOrPut(batch);
+    if (entry.found_existing and entry.value_ptr.* == index) return;
+    entry.value_ptr.* = index;
+    try printer.print_indented("{s}.setPosition({d});", .{ batch, index });
 }
 
-// Fields are bound from a row when the cursor is on it.
-//
-//     // Suite test:
-//     const result = results[0];
-//     const timestamp = result.timestamp;
-//
-//     // Generated Java:
-//     assertTrue(results.next());
-// final var timestamp = results.getTimestamp();
-fn emit_row_captures(
-    printer: *Printer,
-    steps: []const ast.Step,
-    row: []const u8,
-    batch: []const u8,
-    consumed: []bool,
-) !void {
-    for (steps, 0..) |step, index| {
-        if (step != .binding or step.binding.value != .field_access) continue;
-        const access = step.binding.value.field_access;
-        if (!std.mem.eql(u8, access.reference, row)) continue;
-        consumed[index] = true;
-        try printer.print_indented("final var {s} = {s}.get{s}();", .{
-            try printer.to_case_alloc(.camel_case, step.binding.name),
-            batch,
-            try printer.to_case_alloc(.pascal_case, access.field.name),
-        });
-    }
+// Rewinds `batch` before a walk with `next()`, if its cursor was moved.
+fn emit_rewind(printer: *Printer, scope: *Scope, batch: []const u8) !void {
+    const entry = try scope.positions.getOrPut(batch);
+    if (entry.found_existing) try printer.print_indented("{s}.beforeFirst();", .{batch});
+    entry.value_ptr.* = null;
 }
 
-// Compares two row fields while the cursor is on `row`.
-//
-//     // Suite test:
-//     const created_result = created_results[0];
-//     const result = results[0];
-//     ct.assert_equal(result.timestamp, created_result.timestamp);
-//
-//     // Generated Java:
-//     assertTrue(createdResults.next());
-//     final var createdResultTimestamp = createdResults.getTimestamp();
-//     results.beforeFirst();
-//     assertTrue(results.next());
-//     assertEquals(createdResultTimestamp, results.getTimestamp());
-fn emit_row_equal_field(
-    printer: *Printer,
-    steps: []const ast.Step,
-    options: struct {
-        comparison: ast.Assertion.FieldComparison,
-        row: []const u8,
-        batch: []const u8,
-        consumed: *bool,
-    },
-) !void {
-    const actual = options.comparison.actual;
-    const expected = options.comparison.expected.field_reference;
-    const walks_actual = std.mem.eql(u8, actual.reference, options.row);
-    const walks_expected = std.mem.eql(u8, expected.reference, options.row);
-    if (!walks_actual and !walks_expected) return;
-
-    const assertion = assert_function(actual.field);
-    if (walks_actual and walks_expected) {
-        options.consumed.* = true;
-        try printer.print_indented("{s}({s}.get{s}(), {s}.get{s}());", .{
-            assertion,
-            options.batch,
-            try printer.to_case_alloc(.pascal_case, expected.field.name),
-            options.batch,
-            try printer.to_case_alloc(.pascal_case, actual.field.name),
-        });
-        return;
-    }
-
-    const here = if (walks_actual) actual else expected;
-    const there = if (walks_actual) expected else actual;
-    const property = try printer.to_case_alloc(.pascal_case, here.field.name);
-    if (walks_before(steps, options.row, there.reference)) {
-        try printer.print_indented("final var {s} = {s}.get{s}();", .{
-            try capture_name(printer, here),
-            options.batch,
-            property,
-        });
-        return;
-    }
-
-    options.consumed.* = true;
-    const captured = try capture_name(printer, there);
-    const walked = try printer.string_alloc("{s}.get{s}()", .{
-        options.batch,
-        property,
-    });
-    try printer.print_indented("{s}({s}, {s});", .{
-        assertion,
-        if (walks_actual) captured else walked,
-        if (walks_actual) walked else captured,
+// Moves the cursor to the row and returns the getter for the field.
+fn emit_row_field(printer: *Printer, scope: *Scope, reference: ast.FieldReference) ![]const u8 {
+    const row = scope.rows.get(reference.reference).?;
+    try emit_position(printer, scope, row.batch, row.index);
+    return printer.string_alloc("{s}.get{s}()", .{
+        row.batch,
+        try printer.to_case_alloc(.pascal_case, reference.field.name),
     });
 }
 
@@ -389,29 +214,6 @@ fn capture_name(printer: *Printer, reference: ast.FieldReference) ![]const u8 {
         try printer.to_case_alloc(.camel_case, reference.reference),
         try printer.to_case_alloc(.pascal_case, reference.field.name),
     });
-}
-
-fn walks_before(steps: []const ast.Step, row: []const u8, other: []const u8) bool {
-    const first = row_position(steps, row);
-    const second = row_position(steps, other);
-    if (first.batch != second.batch) return first.batch < second.batch;
-    return first.row < second.row;
-}
-
-fn row_position(steps: []const ast.Step, row: []const u8) struct { batch: usize, row: usize } {
-    for (steps, 0..) |step, index| {
-        if (step != .binding or step.binding.value != .index) continue;
-        if (!std.mem.eql(u8, step.binding.name, row)) continue;
-        const reference = step.binding.value.index.reference;
-        for (steps, 0..) |batch_step, batch_index| {
-            if (batch_step != .binding or batch_step.binding.value != .index) continue;
-            if (std.mem.eql(u8, batch_step.binding.value.index.reference, reference)) {
-                return .{ .batch = batch_index, .row = index };
-            }
-        }
-        unreachable;
-    }
-    unreachable;
 }
 
 fn emit_step(printer: *Printer, scope: *Scope, step: ast.Step, variant: ClientVariant) !void {
@@ -570,9 +372,17 @@ fn emit_binding(
         },
         .index => |index| {
             const reference = try printer.to_case_alloc(.camel_case, index.reference);
+            if (!scope.id_arrays.contains(index.reference)) {
+                try scope.rows.put(binding.name, .{ .batch = reference, .index = index.index });
+                return;
+            }
             try printer.print_indented("final var {s} = {s}[{d}];", .{
                 name, reference, index.index,
             });
+        },
+        .field_access => |access| {
+            const getter = try emit_row_field(printer, scope, access);
+            try printer.print_indented("final var {s} = {s};", .{ name, getter });
         },
         .call => |call| try emit_call(printer, call, variant, .{ .binding = name }),
         .integer,
@@ -580,7 +390,6 @@ fn emit_binding(
         .enum_literal,
         .record,
         .reference,
-        .field_access,
         .increment,
         .decrement,
         => unreachable,
@@ -799,15 +608,15 @@ fn emit_assertion(
                 equal.expected.len,
                 actual,
             });
-            if (try scope.walk(actual)) {
-                try printer.print_indented("{s}.beforeFirst();", .{actual});
-            }
+            try emit_rewind(printer, scope, actual);
             for (equal.expected) |record| {
                 try printer.print_indented("assertTrue({s}.next());", .{actual});
                 for (record.fields) |field| {
                     try emit_field_equal(printer, field, actual);
                 }
             }
+            // Recording where the walk ended lets `emit_position` skip `setPosition` for it.
+            try scope.positions.put(actual, @intCast(equal.expected.len - 1));
         },
         .empty => |actual| {
             try printer.print_indented("assertEquals(0, {s}.getLength());", .{
@@ -838,17 +647,29 @@ fn emit_assertion(
                     comparison.actual.field,
                     expression,
                 ),
-                .field_reference => |field| try render_field_access(printer, field),
+                .field_reference => |field| expected: {
+                    const getter = try emit_row_field(printer, scope, field);
+                    const expected_row = scope.rows.get(field.reference).?;
+                    const actual_row = scope.rows.get(comparison.actual.reference).?;
+                    if (!std.mem.eql(u8, expected_row.batch, actual_row.batch) or
+                        expected_row.index == actual_row.index)
+                    {
+                        break :expected getter;
+                    }
+                    const capture = try capture_name(printer, field);
+                    try printer.print_indented("final var {s} = {s};", .{ capture, getter });
+                    break :expected capture;
+                },
             };
             try printer.print_indented("{s}({s}, {s});", .{
                 assert_function(comparison.actual.field),
                 expected,
-                try render_field_access(printer, comparison.actual),
+                try emit_row_field(printer, scope, comparison.actual),
             });
         },
         .greater_than => |comparison| {
             try printer.print_indented("assertTrue({s} > {s});", .{
-                try render_field_access(printer, comparison.actual),
+                try emit_row_field(printer, scope, comparison.actual),
                 try render_typed_value(
                     printer,
                     comparison.actual.field,
@@ -858,9 +679,7 @@ fn emit_assertion(
         },
         .all_greater_than => |greater_than| {
             const actual = try printer.to_case_alloc(.camel_case, greater_than.actual);
-            if (try scope.walk(actual)) {
-                try printer.print_indented("{s}.beforeFirst();", .{actual});
-            }
+            try emit_rewind(printer, scope, actual);
             try printer.print_indented("while ({s}.next()) {{", .{actual});
             printer.indent();
             for (greater_than.expected.fields) |field| {
