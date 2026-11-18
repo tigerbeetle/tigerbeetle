@@ -7,8 +7,8 @@ another account.
 Additionally, it may be desirable to forbid further transfers on this account (i.e. at the end of
 an accounting period, upon account termination, or even temporarily freezing the account for audit
 purposes).
-This doesn't affect existing [pending transfers](../two-phase-transfers.md), which can still time
-out but can’t be posted or voided.
+Closing an account does not cancel existing pending transfers. They can still expire or be voided,
+but cannot be posted while the account remains closed.
 
 ### Example
 
@@ -46,8 +46,9 @@ succeed or fail atomically.
 
   The closing transfer must also be a _pending transfer_ so the action can be reversible.
 
-After committing these transfers, `A` and `B` are closed with a net balance of zero, and will reject any
-further transfers.
+After committing these transfers, `A` and `B` are closed with a net balance of zero. While closed,
+they reject new single-phase and pending transfers, as well as attempts to post existing pending
+transfers. However, existing pending transfers can still be voided.
 
 | Account | Debits Pending | Debits Posted | Credits Pending | Credits Posted | Flags             |
 | ------: | -------------: | ------------: | --------------: | -------------: | ----------------- |
