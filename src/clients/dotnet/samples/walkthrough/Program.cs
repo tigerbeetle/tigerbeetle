@@ -487,7 +487,7 @@ using (var client = new Client(clusterID, addresses))
             // Set a unique and strictly increasing timestamp.
             historicalTimestamp += 1;
             transfer.Timestamp = historicalTimestamp;
-            // Set the account as `imported`.
+            // Set the transfer as `imported`.
             transfer.Flags = TransferFlags.Imported;
             // To ensure atomicity, the entire batch (except the last event in the chain)
             // must be `linked`.

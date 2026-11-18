@@ -162,7 +162,8 @@ these flags in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine constants from the
-`TigerBeetle::AccountFlags` module with bitwise-or:
+`TigerBeetle::AccountFlags` module with bitwise-or. Here are a few
+examples:
 
 * `AccountFlags::LINKED`
 * `AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS`
@@ -377,7 +378,8 @@ the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
 To toggle behavior for a transfer, combine constants from the
-`TigerBeetle::TransferFlags` module with bitwise-or:
+`TigerBeetle::TransferFlags` module with bitwise-or. Here are a few
+examples:
 
 * `TransferFlags::LINKED`
 * `TransferFlags::PENDING`
@@ -634,7 +636,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to

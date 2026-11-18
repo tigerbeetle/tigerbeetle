@@ -128,7 +128,6 @@ public final class Main {
                 transfers.setLedger(1);
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.NONE);
-                transfers.setTimeout(0);
 
                 CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.

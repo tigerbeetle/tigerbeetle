@@ -452,7 +452,7 @@ func main() {
 				Imported: true,
 				// To ensure atomicity, the entire batch (except the last event in the chain)
 				// must be `linked`.
-				Linked: index < len(historicalAccounts)-1,
+				Linked: index < len(historicalTransfers)-1,
 			}.ToUint16()
 
 			transfersBatch = append(transfersBatch, transfer)

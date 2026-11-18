@@ -466,7 +466,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
     try:
         # section:linked-events
-        batch = [] # List of tb.Transfers to create.
+        batch = [] # List of tb.Transfer to create.
         linkedFlag = 0
         linkedFlag |= tb.TransferFlags.LINKED
 
@@ -523,18 +523,18 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         account_results = client.create_accounts(accounts)
         # Results handling omitted.
 
-        # The, load and import all transfers with their timestamps from the historical source.
+        # Then, load and import all transfers with their timestamps from the historical source.
         transfers = []
         for index, transfer in enumerate(historical_transfers):
             # Set a unique and strictly increasing timestamp.
             historical_timestamp += 1
             transfer.timestamp = historical_timestamp
-            # Set the account as `imported`.
+            # Set the transfer as `imported`.
             transfer.flags = tb.TransferFlags.IMPORTED
             # To ensure atomicity, the entire batch (except the last event in the chain)
             # must be `linked`.
             if index < len(historical_transfers) - 1:
-                transfer.flags |= tb.AccountFlags.LINKED
+                transfer.flags |= tb.TransferFlags.LINKED
 
             transfers.append(transfer)
 

@@ -463,7 +463,7 @@ fn readme_root(ctx: *Context) !void {
             \\open-ended. Multiple chains or individual events may coexist within a
             \\batch to succeed or fail independently.
             \\
-            \\Events within a chain are executed within order, or are rolled back on
+            \\Events within a chain are executed in order, or are rolled back on
             \\error, so that the effect of each event in the chain is visible to the
             \\next, and so that the chain is either visible or invisible as a unit
             \\to subsequent events after the chain. The event that was the first to
