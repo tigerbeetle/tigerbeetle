@@ -30,12 +30,13 @@ pub const PythonDocs = Docs{
     .create_accounts_documentation = "",
     .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
-    \\`AccountFlags` object (it's an `enum.IntFlag`) with bitwise-or:
+    \\`AccountFlags` object (it's an `enum.IntFlag`) with bitwise-or. Here are a
+    \\few examples:
     \\
-    \\* `AccountFlags.linked`
-    \\* `AccountFlags.debits_must_not_exceed_credits`
-    \\* `AccountFlags.credits_must_not_exceed_debits`
-    \\* `AccountFlags.history`
+    \\* `AccountFlags.LINKED`
+    \\* `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
+    \\* `AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS`
+    \\* `AccountFlags.HISTORY`
     \\
     ,
 
@@ -53,11 +54,12 @@ pub const PythonDocs = Docs{
 
     .transfer_flags_documentation =
     \\To toggle behavior for a transfer, combine enum values stored in the
-    \\`TransferFlags` object (it's an `enum.IntFlag`) with bitwise-or:
+    \\`TransferFlags` object (it's an `enum.IntFlag`) with bitwise-or. Here are a
+    \\few examples:
     \\
-    \\* `TransferFlags.linked`
-    \\* `TransferFlags.pending`
-    \\* `TransferFlags.post_pending_transfer`
-    \\* `TransferFlags.void_pending_transfer`
+    \\* `TransferFlags.LINKED`
+    \\* `TransferFlags.PENDING`
+    \\* `TransferFlags.POST_PENDING_TRANSFER`
+    \\* `TransferFlags.VOID_PENDING_TRANSFER`
     ,
 };

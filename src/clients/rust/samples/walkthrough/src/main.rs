@@ -235,6 +235,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             amount: 10,
             ledger: 1,
             code: 1,
+            flags: tb::TransferFlags::Pending,
             ..Default::default()
         };
 
@@ -263,6 +264,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             amount: 10,
             ledger: 1,
             code: 1,
+            flags: tb::TransferFlags::Pending,
             ..Default::default()
         };
 
@@ -442,13 +444,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         let historical_transfers: Vec<tb::Transfer> = vec![]; // Loaded from an external source.
 
         // First, load and import all accounts with their timestamps from the historical source.
+        let accounts_count = historical_accounts.len();
         let mut accounts_batch = vec![];
         for (index, mut account) in historical_accounts.into_iter().enumerate() {
             // Set a unique and strictly increasing timestamp.
             historical_timestamp += 1;
             account.timestamp = historical_timestamp;
 
-            account.flags = if index < accounts_batch.len() - 1 {
+            account.flags = if index < accounts_count - 1 {
                 tb::AccountFlags::Imported | tb::AccountFlags::Linked
             } else {
                 tb::AccountFlags::Imported
@@ -461,13 +464,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         // Result handling omitted.
 
         // Then, load and import all transfers with their timestamps from the historical source.
+        let transfers_count = historical_transfers.len();
         let mut transfers_batch = vec![];
         for (index, mut transfer) in historical_transfers.into_iter().enumerate() {
             // Set a unique and strictly increasing timestamp.
             historical_timestamp += 1;
             transfer.timestamp = historical_timestamp;
 
-            transfer.flags = if index < transfers_batch.len() - 1 {
+            transfer.flags = if index < transfers_count - 1 {
                 tb::TransferFlags::Imported | tb::TransferFlags::Linked
             } else {
                 tb::TransferFlags::Imported

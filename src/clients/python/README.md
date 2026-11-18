@@ -128,12 +128,13 @@ these flags in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine enum values stored in the
-`AccountFlags` object (it's an `enum.IntFlag`) with bitwise-or:
+`AccountFlags` object (it's an `enum.IntFlag`) with bitwise-or. Here are a
+few examples:
 
-* `AccountFlags.linked`
-* `AccountFlags.debits_must_not_exceed_credits`
-* `AccountFlags.credits_must_not_exceed_debits`
-* `AccountFlags.history`
+* `AccountFlags.LINKED`
+* `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
+* `AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS`
+* `AccountFlags.HISTORY`
 
 
 For example, to link two accounts where the first account
@@ -407,12 +408,13 @@ the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
 To toggle behavior for a transfer, combine enum values stored in the
-`TransferFlags` object (it's an `enum.IntFlag`) with bitwise-or:
+`TransferFlags` object (it's an `enum.IntFlag`) with bitwise-or. Here are a
+few examples:
 
-* `TransferFlags.linked`
-* `TransferFlags.pending`
-* `TransferFlags.post_pending_transfer`
-* `TransferFlags.void_pending_transfer`
+* `TransferFlags.LINKED`
+* `TransferFlags.PENDING`
+* `TransferFlags.POST_PENDING_TRANSFER`
+* `TransferFlags.VOID_PENDING_TRANSFER`
 
 For example, to link `transfer0` and `transfer1`:
 
@@ -701,7 +703,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
@@ -709,7 +711,7 @@ break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
 
 ```python
-batch = [] # List of tb.Transfers to create.
+batch = [] # List of tb.Transfer to create.
 linkedFlag = 0
 linkedFlag |= tb.TransferFlags.LINKED
 
@@ -776,18 +778,18 @@ for index, account in enumerate(historical_accounts):
 account_results = client.create_accounts(accounts)
 # Results handling omitted.
 
-# The, load and import all transfers with their timestamps from the historical source.
+# Then, load and import all transfers with their timestamps from the historical source.
 transfers = []
 for index, transfer in enumerate(historical_transfers):
     # Set a unique and strictly increasing timestamp.
     historical_timestamp += 1
     transfer.timestamp = historical_timestamp
-    # Set the account as `imported`.
+    # Set the transfer as `imported`.
     transfer.flags = tb.TransferFlags.IMPORTED
     # To ensure atomicity, the entire batch (except the last event in the chain)
     # must be `linked`.
     if index < len(historical_transfers) - 1:
-        transfer.flags |= tb.AccountFlags.LINKED
+        transfer.flags |= tb.TransferFlags.LINKED
 
     transfers.append(transfer)
 

@@ -51,7 +51,7 @@ pub const DotnetDocs = Docs{
 
     .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
-    \\`AccountFlags` object with bitwise-or:
+    \\`AccountFlags` object with bitwise-or. Here are a few examples:
     \\
     \\* `AccountFlags.None`
     \\* `AccountFlags.Linked`
@@ -67,8 +67,8 @@ pub const DotnetDocs = Docs{
     .create_transfers_errors_documentation = "",
 
     .transfer_flags_documentation =
-    \\To toggle behavior for an account, combine enum values stored in the
-    \\`TransferFlags` object with bitwise-or:
+    \\To toggle behavior for a transfer, combine enum values stored in the
+    \\`TransferFlags` object with bitwise-or. Here are a few examples:
     \\
     \\* `TransferFlags.None`
     \\* `TransferFlags.Linked`

@@ -75,14 +75,14 @@ pub const RustDocs = Docs{
     \\and two-phase transfers. Use `TransferFlags` to specify behavior:
     \\
     \\```rust
-    \\let transfer = Transfer {
+    \\let transfer = tb::Transfer {
     \\    id: tb::id(),
     \\    debit_account_id: account1_id,
     \\    credit_account_id: account2_id,
     \\    amount: 100,
     \\    ledger: 1,
     \\    code: 1,
-    \\    flags: TransferFlags::Pending,
+    \\    flags: tb::TransferFlags::Pending,
     \\    ..Default::default()
     \\};
     \\```

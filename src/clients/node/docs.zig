@@ -39,7 +39,7 @@ pub const NodeDocs = Docs{
     .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
     \\`AccountFlags` object (in TypeScript it is an actual enum) with
-    \\bitwise-or:
+    \\bitwise-or. Here are a few examples:
     \\
     \\* `AccountFlags.linked`
     \\* `AccountFlags.debits_must_not_exceed_credits`
@@ -51,21 +51,21 @@ pub const NodeDocs = Docs{
     .create_accounts_errors_documentation =
     \\To handle errors you can either 1) exactly match error codes returned
     \\from `client.createAccounts` with enum values in the
-    \\`CreateAccountError` object, or you can 2) look up the error code in
-    \\the `CreateAccountError` object for a human-readable string.
+    \\`CreateAccountStatus` object, or you can 2) look up the error code in
+    \\the `CreateAccountStatus` object for a human-readable string.
     ,
     .create_transfers_documentation = "",
     .create_transfers_errors_documentation =
     \\To handle errors you can either 1) exactly match error codes returned
     \\from `client.createTransfers` with enum values in the
-    \\`CreateTransferError` object, or you can 2) look up the error code in
-    \\the `CreateTransferError` object for a human-readable string.
+    \\`CreateTransferStatus` object, or you can 2) look up the error code in
+    \\the `CreateTransferStatus` object for a human-readable string.
     ,
 
     .transfer_flags_documentation =
     \\To toggle behavior for a transfer, combine enum values stored in the
     \\`TransferFlags` object (in TypeScript it is an actual enum) with
-    \\bitwise-or:
+    \\bitwise-or. Here are a few examples:
     \\
     \\* `TransferFlags.linked`
     \\* `TransferFlags.pending`
