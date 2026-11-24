@@ -81,7 +81,10 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     var storage = try fixtures.init_storage(gpa, storage_options);
     defer storage.deinit(gpa);
 
-    var storage_verify = try fixtures.init_storage(gpa, storage_options);
+    var storage_verify_options = storage_options;
+    storage_verify_options.seed = prng.int(u64);
+
+    var storage_verify = try fixtures.init_storage(gpa, storage_verify_options);
     defer storage_verify.deinit(gpa);
 
     var superblock = try fixtures.init_superblock(gpa, &storage, .{
