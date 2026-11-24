@@ -81,20 +81,8 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     var storage = try fixtures.init_storage(gpa, storage_options);
     defer storage.deinit(gpa);
 
-    // Assign a different seed to `storage_verify_options`.
-    const storage_verify_options: Storage.Options = .{
-        .seed = prng.int(u64),
-        .size = storage_options.size,
-        .read_latency_min = storage_options.read_latency_min,
-        .read_latency_mean = storage_options.read_latency_mean,
-        .write_latency_min = storage_options.write_latency_min,
-        .write_latency_mean = storage_options.write_latency_mean,
-        .read_fault_probability = storage_options.read_fault_probability,
-        .write_fault_probability = storage_options.write_fault_probability,
-        .crash_fault_probability = storage_options.crash_fault_probability,
-        .replica_index = storage_options.replica_index,
-        .fault_atlas = storage_options.fault_atlas,
-    };
+    var storage_verify_options = storage_options;
+    storage_verify_options.seed = prng.int(u64);
 
     var storage_verify = try fixtures.init_storage(gpa, storage_verify_options);
     defer storage_verify.deinit(gpa);
