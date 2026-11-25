@@ -347,7 +347,7 @@ fn dropping_future_continues_request() -> Result<()> {
 
 #[test]
 fn dtor() -> Result<()> {
-    let (client, _guard) = test_client()?;
+    let (client, _guard) = isolated_client()?;
 
     block_on(async {
         // Let's at least talk to the server before dropping
@@ -359,7 +359,7 @@ fn dtor() -> Result<()> {
 
 #[test]
 fn close() -> Result<()> {
-    let (client, _guard) = test_client()?;
+    let (client, _guard) = isolated_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]).await?;
@@ -372,7 +372,7 @@ fn close() -> Result<()> {
 // Should still clean up correctly.
 #[test]
 fn dtor_no_wait() -> Result<()> {
-    let (client, _guard) = test_client()?;
+    let (client, _guard) = isolated_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -383,7 +383,7 @@ fn dtor_no_wait() -> Result<()> {
 
 #[test]
 fn close_no_wait() -> Result<()> {
-    let (client, _guard) = test_client()?;
+    let (client, _guard) = isolated_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -395,7 +395,7 @@ fn close_no_wait() -> Result<()> {
 #[test]
 fn client_drop_before_future_awaited() -> Result<()> {
     let future = {
-        let (client, _guard) = test_client()?;
+        let (client, _guard) = isolated_client()?;
 
         let account = tb::Account {
             id: tb::id(),
@@ -421,7 +421,7 @@ fn client_drop_before_future_awaited() -> Result<()> {
 #[test]
 fn client_drop_causes_shutdown_status() -> Result<()> {
     let futures = {
-        let (client, _guard) = test_client()?;
+        let (client, _guard) = isolated_client()?;
 
         let mut futures = Vec::new();
         for _ in 0..10 {
@@ -493,7 +493,7 @@ fn lots_of_accounts() -> Vec<tb::Account> {
 
 #[test]
 fn multithread() -> Result<()> {
-    let (client, _guard) = test_client()?;
+    let (client, _guard) = isolated_client()?;
     let client = Arc::new(client);
 
     let num_threads = 16;
@@ -600,7 +600,7 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
 
     // Queue up lots of transactions, drop their futures, drop the client.
     {
-        let (client, _guard) = test_client()?;
+        let (client, _guard) = isolated_client()?;
 
         // Timing-sensitive - trying to create enough pending transactions that
         // not all will be completed. I think test is unlikely to fail because

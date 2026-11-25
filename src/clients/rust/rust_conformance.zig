@@ -40,8 +40,7 @@ fn emit(printer: *Printer) !void {
         \\
         \\#![cfg_attr(rustfmt, rustfmt_skip)]
         \\
-        \\use std::cell::UnsafeCell;
-        \\use std::sync::{Once, PoisonError};
+        \\use std::sync::PoisonError;
         \\use std::time::Duration;
         \\
         \\use tigerbeetle as tb;
@@ -51,32 +50,6 @@ fn emit(printer: *Printer) !void {
         \\
         \\mod test_db;
         \\pub use test_db::*;
-        \\
-        \\/// The client shared between all cases.
-        \\fn client() -> &'static tb::Client {
-        \\    struct OnceLock {
-        \\        once: Once,
-        \\        value: UnsafeCell<Option<tb::Client>>,
-        \\    }
-        \\
-        \\    unsafe impl Sync for OnceLock {}
-        \\
-        \\    static CLIENT: OnceLock = OnceLock {
-        \\        once: Once::new(),
-        \\        value: UnsafeCell::new(None),
-        \\    };
-        \\
-        \\    let error_msg = "couldn't create test client";
-        \\
-        \\    unsafe {
-        \\        CLIENT.once.call_once(|| {
-        \\            *(&mut *CLIENT.value.get()) =
-        \\                Some(tb::Client::new(0, &get_test_db().address()).expect(error_msg));
-        \\        });
-        \\
-        \\        (&*CLIENT.value.get()).as_ref().expect(error_msg)
-        \\    }
-        \\}
         \\
     );
     for (conformance.sources) |source| {
