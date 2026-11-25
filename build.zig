@@ -160,10 +160,6 @@ pub fn build_with_options(
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
         .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
-        .conformance_generate = b.step(
-            "conformance:generate",
-            "Generate the list of conformance suites and cases",
-        ),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
