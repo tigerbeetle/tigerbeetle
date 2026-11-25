@@ -204,7 +204,10 @@ pub fn ClientType(
 
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
-            assert(!self.evicted);
+            if (self.evicted) {
+                buffer.invalidate(.evicted);
+                return;
+            }
 
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
@@ -223,7 +226,7 @@ pub fn ClientType(
             }
         }
 
-        pub fn on_message(self: *Client, message: *Message) void {
+        fn on_message(self: *Client, message: *Message) void {
             assert(!self.evicted);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
