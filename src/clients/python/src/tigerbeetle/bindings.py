@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ctypes
 import enum
+import struct
 import sys
 from dataclasses import dataclass
 from collections.abc import Callable # noqa: TCH003
@@ -332,50 +333,76 @@ CClient._fields_ = [ # noqa: SLF001
 
 
 class CAccount(ctypes.Structure):
+    _struct = struct.Struct("<QQQQQQQQQQQQQI4xIHHQ")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
-        id_u128 = c_uint128.from_param(obj.id, name="id")
-        debits_pending_u128 = c_uint128.from_param(obj.debits_pending, name="debits_pending")
-        debits_posted_u128 = c_uint128.from_param(obj.debits_posted, name="debits_posted")
-        credits_pending_u128 = c_uint128.from_param(obj.credits_pending, name="credits_pending")
-        credits_posted_u128 = c_uint128.from_param(obj.credits_posted, name="credits_posted")
-        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
+    def _validate(cls, obj: Account) -> None:
+        validate_uint(bits=128, name="id", number=obj.id)
+        validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
+        validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
+        validate_uint(bits=128, name="credits_pending", number=obj.credits_pending)
+        validate_uint(bits=128, name="credits_posted", number=obj.credits_posted)
+        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="ledger", number=obj.ledger)
         validate_uint(bits=16, name="code", number=obj.code)
+        validate_uint(bits=16, name="flags", number=obj.flags)
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
-        return cls(
-            id=id_u128,
-            debits_pending=debits_pending_u128,
-            debits_posted=debits_posted_u128,
-            credits_pending=credits_pending_u128,
-            credits_posted=credits_posted_u128,
-            user_data_128=user_data_128_u128,
-            user_data_64=obj.user_data_64,
-            user_data_32=obj.user_data_32,
-            ledger=obj.ledger,
-            code=obj.code,
-            flags=obj.flags,
-            timestamp=obj.timestamp,
-        )
 
+    @classmethod
+    def pack_many(cls, objs: list[Account]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.id & 0xFFFFFFFFFFFFFFFF,
+                    obj.id >> 64,
+                    obj.debits_pending & 0xFFFFFFFFFFFFFFFF,
+                    obj.debits_pending >> 64,
+                    obj.debits_posted & 0xFFFFFFFFFFFFFFFF,
+                    obj.debits_posted >> 64,
+                    obj.credits_pending & 0xFFFFFFFFFFFFFFFF,
+                    obj.credits_pending >> 64,
+                    obj.credits_posted & 0xFFFFFFFFFFFFFFFF,
+                    obj.credits_posted >> 64,
+                    obj.user_data_128 & 0xFFFFFFFFFFFFFFFF,
+                    obj.user_data_128 >> 64,
+                    obj.user_data_64,
+                    obj.user_data_32,
+                    obj.ledger,
+                    obj.code,
+                    obj.flags,
+                    obj.timestamp,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> Account:
-        return Account(
-            id=self.id.to_python(),
-            debits_pending=self.debits_pending.to_python(),
-            debits_posted=self.debits_posted.to_python(),
-            credits_pending=self.credits_pending.to_python(),
-            credits_posted=self.credits_posted.to_python(),
-            user_data_128=self.user_data_128.to_python(),
-            user_data_64=self.user_data_64,
-            user_data_32=self.user_data_32,
-            ledger=self.ledger,
-            code=self.code,
-            flags=AccountFlags(self.flags),
-            timestamp=self.timestamp,
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[Account]:
+        return [
+            Account(
+                id=f[0] | f[1] << 64,
+                debits_pending=f[2] | f[3] << 64,
+                debits_posted=f[4] | f[5] << 64,
+                credits_pending=f[6] | f[7] << 64,
+                credits_posted=f[8] | f[9] << 64,
+                user_data_128=f[10] | f[11] << 64,
+                user_data_64=f[12],
+                user_data_32=f[13],
+                ledger=f[14],
+                code=f[15],
+                flags=AccountFlags(f[16]),
+                timestamp=f[17],
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CAccount._fields_ = [ # noqa: SLF001
     ("id", c_uint128),
@@ -395,53 +422,79 @@ CAccount._fields_ = [ # noqa: SLF001
 
 
 class CTransfer(ctypes.Structure):
+    _struct = struct.Struct("<QQQQQQQQQQQQQIIIHHQ")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
-        id_u128 = c_uint128.from_param(obj.id, name="id")
-        debit_account_id_u128 = c_uint128.from_param(obj.debit_account_id, name="debit_account_id")
-        credit_account_id_u128 = c_uint128.from_param(obj.credit_account_id, name="credit_account_id")
-        amount_u128 = c_uint128.from_param(obj.amount, name="amount")
-        pending_id_u128 = c_uint128.from_param(obj.pending_id, name="pending_id")
-        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
+    def _validate(cls, obj: Transfer) -> None:
+        validate_uint(bits=128, name="id", number=obj.id)
+        validate_uint(bits=128, name="debit_account_id", number=obj.debit_account_id)
+        validate_uint(bits=128, name="credit_account_id", number=obj.credit_account_id)
+        validate_uint(bits=128, name="amount", number=obj.amount)
+        validate_uint(bits=128, name="pending_id", number=obj.pending_id)
+        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="timeout", number=obj.timeout)
         validate_uint(bits=32, name="ledger", number=obj.ledger)
         validate_uint(bits=16, name="code", number=obj.code)
+        validate_uint(bits=16, name="flags", number=obj.flags)
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
-        return cls(
-            id=id_u128,
-            debit_account_id=debit_account_id_u128,
-            credit_account_id=credit_account_id_u128,
-            amount=amount_u128,
-            pending_id=pending_id_u128,
-            user_data_128=user_data_128_u128,
-            user_data_64=obj.user_data_64,
-            user_data_32=obj.user_data_32,
-            timeout=obj.timeout,
-            ledger=obj.ledger,
-            code=obj.code,
-            flags=obj.flags,
-            timestamp=obj.timestamp,
-        )
 
+    @classmethod
+    def pack_many(cls, objs: list[Transfer]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.id & 0xFFFFFFFFFFFFFFFF,
+                    obj.id >> 64,
+                    obj.debit_account_id & 0xFFFFFFFFFFFFFFFF,
+                    obj.debit_account_id >> 64,
+                    obj.credit_account_id & 0xFFFFFFFFFFFFFFFF,
+                    obj.credit_account_id >> 64,
+                    obj.amount & 0xFFFFFFFFFFFFFFFF,
+                    obj.amount >> 64,
+                    obj.pending_id & 0xFFFFFFFFFFFFFFFF,
+                    obj.pending_id >> 64,
+                    obj.user_data_128 & 0xFFFFFFFFFFFFFFFF,
+                    obj.user_data_128 >> 64,
+                    obj.user_data_64,
+                    obj.user_data_32,
+                    obj.timeout,
+                    obj.ledger,
+                    obj.code,
+                    obj.flags,
+                    obj.timestamp,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> Transfer:
-        return Transfer(
-            id=self.id.to_python(),
-            debit_account_id=self.debit_account_id.to_python(),
-            credit_account_id=self.credit_account_id.to_python(),
-            amount=self.amount.to_python(),
-            pending_id=self.pending_id.to_python(),
-            user_data_128=self.user_data_128.to_python(),
-            user_data_64=self.user_data_64,
-            user_data_32=self.user_data_32,
-            timeout=self.timeout,
-            ledger=self.ledger,
-            code=self.code,
-            flags=TransferFlags(self.flags),
-            timestamp=self.timestamp,
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[Transfer]:
+        return [
+            Transfer(
+                id=f[0] | f[1] << 64,
+                debit_account_id=f[2] | f[3] << 64,
+                credit_account_id=f[4] | f[5] << 64,
+                amount=f[6] | f[7] << 64,
+                pending_id=f[8] | f[9] << 64,
+                user_data_128=f[10] | f[11] << 64,
+                user_data_64=f[12],
+                user_data_32=f[13],
+                timeout=f[14],
+                ledger=f[15],
+                code=f[16],
+                flags=TransferFlags(f[17]),
+                timestamp=f[18],
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CTransfer._fields_ = [ # noqa: SLF001
     ("id", c_uint128),
@@ -461,20 +514,40 @@ CTransfer._fields_ = [ # noqa: SLF001
 
 
 class CCreateAccountResult(ctypes.Structure):
+    _struct = struct.Struct("<QI4x")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
+    def _validate(cls, obj: CreateAccountResult) -> None:
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
-        return cls(
-            timestamp=obj.timestamp,
-            status=obj.status,
-        )
+        validate_uint(bits=32, name="status", number=obj.status)
 
+    @classmethod
+    def pack_many(cls, objs: list[CreateAccountResult]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.timestamp,
+                    obj.status,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> CreateAccountResult:
-        return CreateAccountResult(
-            timestamp=self.timestamp,
-            status=CreateAccountStatus(self.status),
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[CreateAccountResult]:
+        return [
+            CreateAccountResult(
+                timestamp=f[0],
+                status=CreateAccountStatus(f[1]),
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CCreateAccountResult._fields_ = [ # noqa: SLF001
     ("timestamp", ctypes.c_uint64),
@@ -484,20 +557,40 @@ CCreateAccountResult._fields_ = [ # noqa: SLF001
 
 
 class CCreateTransferResult(ctypes.Structure):
+    _struct = struct.Struct("<QI4x")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
+    def _validate(cls, obj: CreateTransferResult) -> None:
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
-        return cls(
-            timestamp=obj.timestamp,
-            status=obj.status,
-        )
+        validate_uint(bits=32, name="status", number=obj.status)
 
+    @classmethod
+    def pack_many(cls, objs: list[CreateTransferResult]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.timestamp,
+                    obj.status,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> CreateTransferResult:
-        return CreateTransferResult(
-            timestamp=self.timestamp,
-            status=CreateTransferStatus(self.status),
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[CreateTransferResult]:
+        return [
+            CreateTransferResult(
+                timestamp=f[0],
+                status=CreateTransferStatus(f[1]),
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CCreateTransferResult._fields_ = [ # noqa: SLF001
     ("timestamp", ctypes.c_uint64),
@@ -507,41 +600,63 @@ CCreateTransferResult._fields_ = [ # noqa: SLF001
 
 
 class CAccountFilter(ctypes.Structure):
+    _struct = struct.Struct("<QQQQQIH58xQQII")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
-        account_id_u128 = c_uint128.from_param(obj.account_id, name="account_id")
-        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
+    def _validate(cls, obj: AccountFilter) -> None:
+        validate_uint(bits=128, name="account_id", number=obj.account_id)
+        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=16, name="code", number=obj.code)
         validate_uint(bits=64, name="timestamp_min", number=obj.timestamp_min)
         validate_uint(bits=64, name="timestamp_max", number=obj.timestamp_max)
         validate_uint(bits=32, name="limit", number=obj.limit)
-        return cls(
-            account_id=account_id_u128,
-            user_data_128=user_data_128_u128,
-            user_data_64=obj.user_data_64,
-            user_data_32=obj.user_data_32,
-            code=obj.code,
-            timestamp_min=obj.timestamp_min,
-            timestamp_max=obj.timestamp_max,
-            limit=obj.limit,
-            flags=obj.flags,
-        )
+        validate_uint(bits=32, name="flags", number=obj.flags)
 
+    @classmethod
+    def pack_many(cls, objs: list[AccountFilter]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.account_id & 0xFFFFFFFFFFFFFFFF,
+                    obj.account_id >> 64,
+                    obj.user_data_128 & 0xFFFFFFFFFFFFFFFF,
+                    obj.user_data_128 >> 64,
+                    obj.user_data_64,
+                    obj.user_data_32,
+                    obj.code,
+                    obj.timestamp_min,
+                    obj.timestamp_max,
+                    obj.limit,
+                    obj.flags,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> AccountFilter:
-        return AccountFilter(
-            account_id=self.account_id.to_python(),
-            user_data_128=self.user_data_128.to_python(),
-            user_data_64=self.user_data_64,
-            user_data_32=self.user_data_32,
-            code=self.code,
-            timestamp_min=self.timestamp_min,
-            timestamp_max=self.timestamp_max,
-            limit=self.limit,
-            flags=AccountFilterFlags(self.flags),
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[AccountFilter]:
+        return [
+            AccountFilter(
+                account_id=f[0] | f[1] << 64,
+                user_data_128=f[2] | f[3] << 64,
+                user_data_64=f[4],
+                user_data_32=f[5],
+                code=f[6],
+                timestamp_min=f[7],
+                timestamp_max=f[8],
+                limit=f[9],
+                flags=AccountFilterFlags(f[10]),
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CAccountFilter._fields_ = [ # noqa: SLF001
     ("account_id", c_uint128),
@@ -558,30 +673,53 @@ CAccountFilter._fields_ = [ # noqa: SLF001
 
 
 class CAccountBalance(ctypes.Structure):
+    _struct = struct.Struct("<QQQQQQQQQ56x")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
-        debits_pending_u128 = c_uint128.from_param(obj.debits_pending, name="debits_pending")
-        debits_posted_u128 = c_uint128.from_param(obj.debits_posted, name="debits_posted")
-        credits_pending_u128 = c_uint128.from_param(obj.credits_pending, name="credits_pending")
-        credits_posted_u128 = c_uint128.from_param(obj.credits_posted, name="credits_posted")
+    def _validate(cls, obj: AccountBalance) -> None:
+        validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
+        validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
+        validate_uint(bits=128, name="credits_pending", number=obj.credits_pending)
+        validate_uint(bits=128, name="credits_posted", number=obj.credits_posted)
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
-        return cls(
-            debits_pending=debits_pending_u128,
-            debits_posted=debits_posted_u128,
-            credits_pending=credits_pending_u128,
-            credits_posted=credits_posted_u128,
-            timestamp=obj.timestamp,
-        )
 
+    @classmethod
+    def pack_many(cls, objs: list[AccountBalance]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.debits_pending & 0xFFFFFFFFFFFFFFFF,
+                    obj.debits_pending >> 64,
+                    obj.debits_posted & 0xFFFFFFFFFFFFFFFF,
+                    obj.debits_posted >> 64,
+                    obj.credits_pending & 0xFFFFFFFFFFFFFFFF,
+                    obj.credits_pending >> 64,
+                    obj.credits_posted & 0xFFFFFFFFFFFFFFFF,
+                    obj.credits_posted >> 64,
+                    obj.timestamp,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> AccountBalance:
-        return AccountBalance(
-            debits_pending=self.debits_pending.to_python(),
-            debits_posted=self.debits_posted.to_python(),
-            credits_pending=self.credits_pending.to_python(),
-            credits_posted=self.credits_posted.to_python(),
-            timestamp=self.timestamp,
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[AccountBalance]:
+        return [
+            AccountBalance(
+                debits_pending=f[0] | f[1] << 64,
+                debits_posted=f[2] | f[3] << 64,
+                credits_pending=f[4] | f[5] << 64,
+                credits_posted=f[6] | f[7] << 64,
+                timestamp=f[8],
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CAccountBalance._fields_ = [ # noqa: SLF001
     ("debits_pending", c_uint128),
@@ -594,9 +732,11 @@ CAccountBalance._fields_ = [ # noqa: SLF001
 
 
 class CQueryFilter(ctypes.Structure):
+    _struct = struct.Struct("<QQQIIH6xQQII")
+
     @classmethod
-    def from_param(cls, obj: Any) -> Self:
-        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
+    def _validate(cls, obj: QueryFilter) -> None:
+        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="ledger", number=obj.ledger)
@@ -604,31 +744,50 @@ class CQueryFilter(ctypes.Structure):
         validate_uint(bits=64, name="timestamp_min", number=obj.timestamp_min)
         validate_uint(bits=64, name="timestamp_max", number=obj.timestamp_max)
         validate_uint(bits=32, name="limit", number=obj.limit)
-        return cls(
-            user_data_128=user_data_128_u128,
-            user_data_64=obj.user_data_64,
-            user_data_32=obj.user_data_32,
-            ledger=obj.ledger,
-            code=obj.code,
-            timestamp_min=obj.timestamp_min,
-            timestamp_max=obj.timestamp_max,
-            limit=obj.limit,
-            flags=obj.flags,
-        )
+        validate_uint(bits=32, name="flags", number=obj.flags)
 
+    @classmethod
+    def pack_many(cls, objs: list[QueryFilter]) -> ctypes.Array[Any]:
+        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        offset = 0
+        for obj in objs:
+            try:
+                cls._struct.pack_into(
+                    buffer,
+                    offset,
+                    obj.user_data_128 & 0xFFFFFFFFFFFFFFFF,
+                    obj.user_data_128 >> 64,
+                    obj.user_data_64,
+                    obj.user_data_32,
+                    obj.ledger,
+                    obj.code,
+                    obj.timestamp_min,
+                    obj.timestamp_max,
+                    obj.limit,
+                    obj.flags,
+                )
+            except (struct.error, TypeError) as error:
+                cls._validate(obj)
+                raise TypeError(str(error)) from error
+            offset += cls._struct.size
+        return buffer
 
-    def to_python(self) -> QueryFilter:
-        return QueryFilter(
-            user_data_128=self.user_data_128.to_python(),
-            user_data_64=self.user_data_64,
-            user_data_32=self.user_data_32,
-            ledger=self.ledger,
-            code=self.code,
-            timestamp_min=self.timestamp_min,
-            timestamp_max=self.timestamp_max,
-            limit=self.limit,
-            flags=QueryFilterFlags(self.flags),
-        )
+    @classmethod
+    def unpack_many(cls, buffer: bytes) -> list[QueryFilter]:
+        return [
+            QueryFilter(
+                user_data_128=f[0] | f[1] << 64,
+                user_data_64=f[2],
+                user_data_32=f[3],
+                ledger=f[4],
+                code=f[5],
+                timestamp_min=f[6],
+                timestamp_max=f[7],
+                limit=f[8],
+                flags=QueryFilterFlags(f[9]),
+            )
+            for f in cls._struct.iter_unpack(buffer)
+        ]
 
 CQueryFilter._fields_ = [ # noqa: SLF001
     ("user_data_128", c_uint128),

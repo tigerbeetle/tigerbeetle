@@ -109,9 +109,7 @@ fn zig_to_ctype(comptime Type: type) []const u8 {
     }
 }
 
-/// Resolves a Zig Type into a string representing the name of a corresponding Python dataclass.
-/// Unlike zig_to_ctype, this only resolves state machine specific mappings: VSR mappings are
-/// internal to the client, and not exposed to calling code.
+/// Resolves a state machine type, or the type of one of its fields, into its Python type name.
 fn zig_to_python(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .@"enum" => return comptime mapping_name_from_type(mappings_state_machine, Type).?,
@@ -187,20 +185,208 @@ fn emit_enum(
     buffer.print("\n\n", .{});
 }
 
+fn emit_struct_pack_unpack(
+    buffer: *Buffer,
+    comptime Type: type,
+    comptime python_name: []const u8,
+) void {
+    emit_struct_format(buffer, Type);
+    emit_struct_validate(buffer, Type, python_name);
+    emit_struct_pack_many(buffer, Type, python_name);
+    emit_struct_unpack_many(buffer, Type, python_name);
+}
+
+fn emit_struct_format(buffer: *Buffer, comptime Type: type) void {
+    const type_info = @typeInfo(Type).@"struct";
+    buffer.print("    _struct = struct.Struct(\"<", .{});
+
+    comptime var size: usize = 0;
+    inline for (type_info.fields) |field| {
+        size += @sizeOf(field.type);
+
+        if (comptime std.mem.eql(u8, field.name, "reserved")) {
+            buffer.print("{d}x", .{@sizeOf(field.type)});
+        } else {
+            comptime switch (@typeInfo(field.type)) {
+                .int => |info| assert(info.signedness == .unsigned),
+                .@"enum" => |info| assert(@typeInfo(info.tag_type).int.signedness == .unsigned),
+                .@"struct" => |info| {
+                    assert(info.layout == .@"packed");
+                    assert(@typeInfo(info.backing_integer.?).int.signedness == .unsigned);
+                },
+                else => @compileError("Unhandled type: " ++ @typeName(field.type)),
+            };
+            buffer.print("{s}", .{switch (@bitSizeOf(field.type)) {
+                8 => "B",
+                16 => "H",
+                32 => "I",
+                64 => "Q",
+                128 => "QQ", // Low then high 64 bits.
+                else => @compileError("Unhandled type: " ++ @typeName(field.type)),
+            }});
+        }
+    }
+    comptime assert(size == @sizeOf(Type));
+    buffer.print("\")\n\n", .{});
+}
+
+fn emit_struct_validate(
+    buffer: *Buffer,
+    comptime Type: type,
+    comptime python_name: []const u8,
+) void {
+    const type_info = @typeInfo(Type).@"struct";
+    buffer.print(
+        \\    @classmethod
+        \\    def _validate(cls, obj: {[type_name]s}) -> None:
+        \\
+    , .{ .type_name = python_name });
+
+    inline for (type_info.fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
+
+        buffer.print("        validate_uint(bits={[bits]d}, name=\"{[name]s}\", " ++
+            "number=obj.{[name]s})\n", .{
+            .name = field.name,
+            .bits = @bitSizeOf(field.type),
+        });
+    }
+    buffer.print("\n", .{});
+}
+
+fn emit_struct_pack_many(
+    buffer: *Buffer,
+    comptime Type: type,
+    comptime python_name: []const u8,
+) void {
+    const type_info = @typeInfo(Type).@"struct";
+    buffer.print(
+        \\    @classmethod
+        \\    def pack_many(cls, objs: list[{[type_name]s}]) -> ctypes.Array[Any]:
+        \\        buffer = ctypes.create_string_buffer(cls._struct.size * len(objs))
+        \\        offset = 0
+        \\        for obj in objs:
+        \\            try:
+        \\                cls._struct.pack_into(
+        \\                    buffer,
+        \\                    offset,
+        \\
+    , .{ .type_name = python_name });
+
+    inline for (type_info.fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
+
+        if (comptime field.type == u128) {
+            buffer.print(
+                "                    obj.{[name]s} & 0xFFFFFFFFFFFFFFFF,\n" ++
+                    "                    obj.{[name]s} >> 64,\n",
+                .{ .name = field.name },
+            );
+        } else {
+            buffer.print("                    obj.{s},\n", .{field.name});
+        }
+    }
+
+    buffer.print(
+        \\                )
+        \\            except (struct.error, TypeError) as error:
+        \\                cls._validate(obj)
+        \\                raise TypeError(str(error)) from error
+        \\            offset += cls._struct.size
+        \\        return buffer
+        \\
+        \\
+    , .{});
+}
+
+fn emit_struct_unpack_many(
+    buffer: *Buffer,
+    comptime Type: type,
+    comptime python_name: []const u8,
+) void {
+    const type_info = @typeInfo(Type).@"struct";
+    buffer.print(
+        \\    @classmethod
+        \\    def unpack_many(cls, buffer: bytes) -> list[{[type_name]s}]:
+        \\        return [
+        \\            {[type_name]s}(
+        \\
+    , .{ .type_name = python_name });
+
+    comptime var index: usize = 0;
+    inline for (type_info.fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
+
+        if (comptime field.type == u128) {
+            buffer.print("                {[name]s}=f[{[low]d}] | f[{[high]d}] << 64,\n", .{
+                .name = field.name,
+                .low = index,
+                .high = index + 1,
+            });
+            index += 2;
+        } else if (comptime @typeInfo(field.type) == .@"enum" or
+            @typeInfo(field.type) == .@"struct")
+        {
+            buffer.print("                {[name]s}={[python_type]s}(f[{[index]d}]),\n", .{
+                .name = field.name,
+                .python_type = comptime zig_to_python(field.type),
+                .index = index,
+            });
+            index += 1;
+        } else {
+            buffer.print("                {[name]s}=f[{[index]d}],\n", .{
+                .name = field.name,
+                .index = index,
+            });
+            index += 1;
+        }
+    }
+
+    buffer.print(
+        \\            )
+        \\            for f in cls._struct.iter_unpack(buffer)
+        \\        ]
+        \\
+        \\
+    , .{});
+}
+
 fn emit_struct_ctypes(
     buffer: *Buffer,
-    comptime type_info: anytype,
+    comptime Type: type,
     comptime python_name: []const u8,
-    generate_ctypes_to_python: bool,
+    comptime generate_pack_unpack: bool,
 ) !void {
+    const type_info = @typeInfo(Type).@"struct";
+    buffer.print("class C{s}(ctypes.Structure):\n", .{python_name});
+
+    if (generate_pack_unpack) {
+        emit_struct_pack_unpack(buffer, Type, python_name);
+    } else {
+        emit_struct_from_param(buffer, Type);
+    }
+
+    buffer.print("C{s}._fields_ = [ # noqa: SLF001\n", .{python_name});
+
+    inline for (type_info.fields) |field| {
+        buffer.print("    (\"{s}\", {s}),", .{
+            field.name,
+            zig_to_ctype(field.type),
+        });
+
+        buffer.print("\n", .{});
+    }
+
+    buffer.print("]\n\n\n", .{});
+}
+
+fn emit_struct_from_param(buffer: *Buffer, comptime Type: type) void {
+    const type_info = @typeInfo(Type).@"struct";
     buffer.print(
-        \\class C{[type_name]s}(ctypes.Structure):
         \\    @classmethod
         \\    def from_param(cls, obj: Any) -> Self:
         \\
-    , .{
-        .type_name = python_name,
-    });
+    , .{});
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
@@ -243,55 +429,6 @@ fn emit_struct_ctypes(
         }
     }
     buffer.print("        )\n\n", .{});
-
-    if (generate_ctypes_to_python) {
-        buffer.print(
-            \\
-            \\    def to_python(self) -> {[type_name]s}:
-            \\        return {[type_name]s}(
-            \\
-        , .{
-            .type_name = python_name,
-        });
-
-        inline for (type_info.fields) |field| {
-            if (comptime !std.mem.eql(u8, field.name, "reserved")) {
-                buffer.print("            {s}={s},\n", .{
-                    field.name,
-                    convert_ctypes_to_python("self." ++ field.name, field.type),
-                });
-            }
-        }
-        buffer.print("        )\n\n", .{});
-    }
-
-    buffer.print("C{s}._fields_ = [ # noqa: SLF001\n", .{python_name});
-
-    inline for (type_info.fields) |field| {
-        buffer.print("    (\"{s}\", {s}),", .{
-            field.name,
-            zig_to_ctype(field.type),
-        });
-
-        buffer.print("\n", .{});
-    }
-
-    buffer.print("]\n\n\n", .{});
-}
-
-fn convert_ctypes_to_python(comptime name: []const u8, comptime Type: type) []const u8 {
-    inline for (mappings_state_machine) |type_mapping| {
-        const ZigType, const python_name = type_mapping;
-
-        if (ZigType == Type) {
-            return python_name ++ "(" ++ name ++ ")";
-        }
-    }
-    if (@typeInfo(Type) == .int and @typeInfo(Type).int.bits == 128) {
-        return name ++ ".to_python()";
-    }
-
-    return name;
 }
 
 fn emit_struct_dataclass(
@@ -411,6 +548,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\import ctypes
         \\import enum
+        \\import struct
         \\import sys
         \\from dataclasses import dataclass
         \\from collections.abc import Callable # noqa: TCH003
@@ -488,9 +626,7 @@ pub fn main(init: std.process.Init) !void {
     inline for (mappings_all) |type_mapping| {
         const ZigType, const python_name = type_mapping;
 
-        // VSR ctype structs don't have a corresponding Python dataclass - so don't generate the
-        // `def to_python(self):` method for them.
-        const generate_ctypes_to_python = comptime mapping_name_from_type(
+        const generate_pack_unpack = comptime mapping_name_from_type(
             mappings_state_machine,
             ZigType,
         ) != null;
@@ -501,9 +637,9 @@ pub fn main(init: std.process.Init) !void {
                 .@"packed" => continue,
                 .@"extern" => try emit_struct_ctypes(
                     &buffer,
-                    info,
+                    ZigType,
                     python_name,
-                    generate_ctypes_to_python,
+                    generate_pack_unpack,
                 ),
             },
             else => continue,

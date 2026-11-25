@@ -300,3 +300,110 @@ def test_uint128(client):
         capture_output=True
     )
     assert json.loads(repl_output.stdout) == expected_repl_response
+
+# Range and type checks for the fields of each request struct.
+
+@pytest.mark.parametrize("field, value", [
+    ("ledger", 2**32),
+    ("user_data_64", 2**64),
+    ("code", -1),
+])
+def test_range_check_account_fields(client, field, value):
+    account = tb.Account(**{ **asdict(account_a), "id": tb.id(), field: value })
+
+    with pytest.raises(tb.IntegerOverflowError, match=f"{field}=="):
+        client.create_accounts([account])
+
+@pytest.mark.parametrize("field", ["ledger", "user_data_64", "code"])
+def test_type_check_account_fields(client, field):
+    account = tb.Account(**{ **asdict(account_a), "id": tb.id(), field: None })
+
+    with pytest.raises(TypeError):
+        client.create_accounts([account])
+
+transfer_a = tb.Transfer(
+    id=1,
+    debit_account_id=account_a.id,
+    credit_account_id=account_b.id,
+    amount=1,
+    ledger=1,
+    code=1,
+)
+
+@pytest.mark.parametrize("field, value", [
+    ("timeout", 2**32),
+    ("user_data_64", 2**64),
+    ("code", -1),
+])
+def test_range_check_transfer_fields(client, field, value):
+    transfer = tb.Transfer(**{ **asdict(transfer_a), "id": tb.id(), field: value })
+
+    with pytest.raises(tb.IntegerOverflowError, match=f"{field}=="):
+        client.create_transfers([transfer])
+
+@pytest.mark.parametrize("field", ["timeout", "user_data_64", "code"])
+def test_type_check_transfer_fields(client, field):
+    transfer = tb.Transfer(**{ **asdict(transfer_a), "id": tb.id(), field: None })
+
+    with pytest.raises(TypeError):
+        client.create_transfers([transfer])
+
+account_filter_a = tb.AccountFilter(
+    account_id=account_a.id,
+    user_data_128=0,
+    user_data_64=0,
+    user_data_32=0,
+    code=0,
+    timestamp_min=0,
+    timestamp_max=0,
+    limit=1,
+    flags=tb.AccountFilterFlags.DEBITS,
+)
+
+@pytest.mark.parametrize("field, value", [
+    ("limit", 2**32),
+    ("timestamp_min", 2**64),
+    ("code", -1),
+])
+def test_range_check_account_filter_fields(client, field, value):
+    account_filter = tb.AccountFilter(**{ **asdict(account_filter_a), field: value })
+
+    with pytest.raises(tb.IntegerOverflowError, match=f"{field}=="):
+        client.get_account_transfers(account_filter)
+
+@pytest.mark.parametrize("field", ["limit", "timestamp_min", "code"])
+def test_type_check_account_filter_fields(client, field):
+    account_filter = tb.AccountFilter(**{ **asdict(account_filter_a), field: None })
+
+    with pytest.raises(TypeError):
+        client.get_account_transfers(account_filter)
+
+query_filter_a = tb.QueryFilter(
+    user_data_128=0,
+    user_data_64=0,
+    user_data_32=0,
+    ledger=1,
+    code=0,
+    timestamp_min=0,
+    timestamp_max=0,
+    limit=1,
+    flags=tb.QueryFilterFlags.NONE,
+)
+
+@pytest.mark.parametrize("field, value", [
+    ("ledger", 2**32),
+    ("timestamp_max", 2**64),
+    ("code", -1),
+])
+def test_range_check_query_filter_fields(client, field, value):
+    query_filter = tb.QueryFilter(**{ **asdict(query_filter_a), field: value })
+
+    with pytest.raises(tb.IntegerOverflowError, match=f"{field}=="):
+        client.query_accounts(query_filter)
+
+@pytest.mark.parametrize("field", ["ledger", "timestamp_max", "code"])
+def test_type_check_query_filter_fields(client, field):
+    query_filter = tb.QueryFilter(**{ **asdict(query_filter_a), field: None })
+
+    with pytest.raises(TypeError):
+        client.query_accounts(query_filter)

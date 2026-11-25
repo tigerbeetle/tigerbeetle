@@ -44,8 +44,8 @@ def test_init_parameters():
                 ctypes.POINTER(ctypes.c_char * init_parameters_out.addresses_len))
             addresses_out = bytes(addresses_out_slice.contents).decode("ascii")
 
-            assert init_parameters_out.client_id.to_python() != 0
-            assert init_parameters_out.cluster_id.to_python() == cluster_id
+            assert int.from_bytes(bytes(init_parameters_out.client_id), "little") != 0
+            assert int.from_bytes(bytes(init_parameters_out.cluster_id), "little") == cluster_id
             assert addresses_out == address_permutation
 
             client.close()
