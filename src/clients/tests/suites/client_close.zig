@@ -2,6 +2,7 @@ const ct = @import("../conformance/api.zig");
 const client = ct.default_client;
 
 test "fails operations after close" {
+    ct.requires_use_after_close();
     ct.use_isolated_client();
     client.close_client();
 
@@ -11,6 +12,7 @@ test "fails operations after close" {
 // Closing the client also doubles as cancellation. To avoid any manual synchronization in
 // concurrent code, we are forgiving when closing an already closed client.
 test "ignores a second close" {
+    ct.requires_use_after_close();
     ct.use_isolated_client();
     client.close_client();
 

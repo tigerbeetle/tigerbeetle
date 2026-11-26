@@ -160,10 +160,6 @@ pub fn build_with_options(
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
         .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
-        .conformance_generate = b.step(
-            "conformance:generate",
-            "Generate the list of conformance suites and cases",
-        ),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -467,6 +463,8 @@ pub fn build_with_options(
     build_rust_client(b, build_steps.clients_rust, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .stdx_module = stdx_module,
+        .conformance_module = conformance_module,
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
@@ -1817,6 +1815,8 @@ fn build_rust_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        stdx_module: *std.Build.Module,
+        conformance_module: *std.Build.Module,
         tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
@@ -1830,6 +1830,21 @@ fn build_rust_client(
         .path = "./src/clients/rust/assets/tb_client.h",
     });
     step_clients_rust.dependOn(&tb_client_header_copy.step);
+
+    const rust_conformance_generator = b.addExecutable(.{
+        .name = "rust_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/rust/rust_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    rust_conformance_generator.root_module.addImport("stdx", options.stdx_module);
+    rust_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    const conformance_tests = Generated.file(b, .{
+        .generator = rust_conformance_generator,
+        .path = "./src/clients/rust/tests/conformance.rs",
+    });
+    step_clients_rust.dependOn(&conformance_tests.step);
 
     const client_files = b.addUpdateSourceFiles();
     step_clients_rust.dependOn(&client_files.step);

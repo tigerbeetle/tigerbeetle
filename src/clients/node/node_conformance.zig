@@ -26,8 +26,9 @@ pub fn main(init: std.process.Init) !void {
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         // Amounts are `bigint`s: arbitrary precision, but integral only.
-        .requires_unbounded_integers => true,
         .requires_fractional_amounts => false,
+        .requires_unbounded_integers => true,
+        .requires_use_after_close => true,
     };
 }
 

@@ -39,6 +39,32 @@ pub fn get_test_db() -> &'static TestDb {
     }
 }
 
+/// The client shared between all cases.
+pub fn client() -> &'static tb::Client {
+    struct OnceLock {
+        once: Once,
+        value: UnsafeCell<Option<tb::Client>>,
+    }
+
+    unsafe impl Sync for OnceLock {}
+
+    static CLIENT: OnceLock = OnceLock {
+        once: Once::new(),
+        value: UnsafeCell::new(None),
+    };
+
+    let error_msg = "couldn't create test client";
+
+    unsafe {
+        CLIENT.once.call_once(|| {
+            *(&mut *CLIENT.value.get()) =
+                Some(tb::Client::new(0, &get_test_db().address()).expect(error_msg));
+        });
+
+        (&*CLIENT.value.get()).as_ref().expect(error_msg)
+    }
+}
+
 pub struct TestDb {
     port: u16,
     // Keep the server's stdin handle open as long as the test process is running,
@@ -117,9 +143,16 @@ impl TestDb {
 // lock; the eviction test takes a write lock so it runs exclusively.
 pub static DB_LOCK: RwLock<()> = RwLock::new(());
 
-/// Returns the client and a read guard that must be held for the test's
+/// Returns the shared client and a read guard that must be held for the test's
 /// duration. The guard prevents the eviction test from running concurrently.
-pub fn test_client() -> Result<(tb::Client, std::sync::RwLockReadGuard<'static, ()>)> {
+pub fn test_client() -> Result<(&'static tb::Client, std::sync::RwLockReadGuard<'static, ()>)> {
+    let guard = DB_LOCK.read().unwrap();
+    Ok((client(), guard))
+}
+
+/// Like `test_client`, but returns a new client owned by the test. Used by tests that
+/// close or drop the client.
+pub fn isolated_client() -> Result<(tb::Client, std::sync::RwLockReadGuard<'static, ()>)> {
     let guard = DB_LOCK.read().unwrap();
     let client = tb::Client::new(0, &get_test_db().address())?;
     Ok((client, guard))
