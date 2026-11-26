@@ -26,8 +26,9 @@ pub fn main(init: std.process.Init) !void {
 
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
-        .requires_unbounded_integers => true,
         .requires_fractional_amounts => true,
+        .requires_unbounded_integers => true,
+        .requires_use_after_close => true,
     };
 }
 

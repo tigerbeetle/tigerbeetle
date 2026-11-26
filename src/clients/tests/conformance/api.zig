@@ -30,15 +30,21 @@ pub const ClientError = enum {
 
 const ct_compile_error = "conformance test suites are parsed, not compiled";
 
+/// Restricts the case to clients that can pass a fractional value where an integer is expected, so
+/// we can test that it is rejected.
+pub fn requires_fractional_amounts() void {
+    @compileError(ct_compile_error);
+}
+
 /// Restricts the case to clients whose integers are unbounded so we can test for things like u128
 /// overflow.
 pub fn requires_unbounded_integers() void {
     @compileError(ct_compile_error);
 }
 
-/// Restricts the case to clients that can pass a fractional value where an integer is expected, so
-/// we can test that it is rejected.
-pub fn requires_fractional_amounts() void {
+/// Restricts the case to clients that allow calls after `close_client`, so we can test their
+/// behavior once closed.
+pub fn requires_use_after_close() void {
     @compileError(ct_compile_error);
 }
 
@@ -49,6 +55,12 @@ pub const default_client: Client = .{};
 
 /// Gives the case a client the test harness creates for it alone. Used to test client closing.
 pub fn use_isolated_client() void {
+    @compileError(ct_compile_error);
+}
+
+/// Runs the case while no other case runs. Used for cases that should run in isolation, e.g.
+/// imports with explicit timestamps.
+pub fn run_exclusively() void {
     @compileError(ct_compile_error);
 }
 
