@@ -2,6 +2,7 @@ const std = @import("std");
 
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 const exports = tb_client.exports;
@@ -206,12 +207,12 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn emit_enum(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.print(
+    try printer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -235,9 +236,10 @@ fn emit_enum(
         break :fields fields;
     };
 
+    printer.indent();
     inline for (fields, 0..) |field, i| {
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\
                 \\    /**
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
@@ -250,11 +252,8 @@ fn emit_enum(
         }
 
         const int_value = @intFromEnum(@field(Type, field.name));
-        try buffer.print(
-            \\    {[enum_name]s}(({[int_type]s}) {[value]s}){[separator]c}
-            \\
-        , .{
-            .enum_name = stdx.to_case(field.name, .pascal_case),
+        try printer.print_indented("{[enum_name]s}(({[int_type]s}) {[value]s}){[separator]c}", .{
+            .enum_name = SourcePrinter.to_case(field.name, .pascal_case),
             .int_type = int_type,
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
@@ -263,8 +262,9 @@ fn emit_enum(
             .separator = if (i == fields.len - 1) ';' else ',',
         });
     }
+    printer.dedent();
 
-    try buffer.print(
+    try printer.print(
         \\
         \\    public final {[int_type]s} value;
         \\
@@ -280,13 +280,12 @@ fn emit_enum(
         .name = mapping.name,
     });
 
+    // `case` labels are inside the enum, `fromValue` and `switch`.
+    for (0..3) |_| printer.indent();
     inline for (fields) |field| {
         const int_value = @intFromEnum(@field(Type, field.name));
-        try buffer.print(
-            \\            case {[int_cast]s}{[value]s}: return {[enum_name]s};
-            \\
-        , .{
-            .enum_name = stdx.to_case(field.name, .pascal_case),
+        try printer.print_indented("case {[int_cast]s}{[value]s}: return {[enum_name]s};", .{
+            .enum_name = SourcePrinter.to_case(field.name, .pascal_case),
             // Explicitly cast numeric literals to types other than `int`.
             .int_cast = if (std.mem.eql(u8, int_type, "int")) "" else "(" ++ int_type ++ ")",
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
@@ -295,8 +294,9 @@ fn emit_enum(
                 std.fmt.comptimePrint("{}", .{int_value}),
         });
     }
+    for (0..3) |_| printer.dedent();
 
-    try buffer.print(
+    try printer.print(
         \\            default: throw new IllegalArgumentException(
         \\                String.format("Invalid {[name]s} value=%d", value));
         \\        }}
@@ -310,12 +310,12 @@ fn emit_enum(
 }
 
 fn emit_packed_enum(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.print(
+    try printer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -329,11 +329,12 @@ fn emit_packed_enum(
         .int_type = int_type,
     });
 
+    printer.indent();
     inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\
                 \\    /**
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
@@ -345,38 +346,37 @@ fn emit_packed_enum(
             });
         }
 
-        try buffer.print(
-            \\    {[int_type]s} {[enum_name]s} = ({[int_type]s}) (1 << {[value]d});
-            \\
-        , .{
+        try printer.print_indented("{[int_type]s} {[enum_name]s} = " ++
+            "({[int_type]s}) (1 << {[value]d});", .{
             .int_type = int_type,
-            .enum_name = stdx.to_case(field.name, .upper_case),
+            .enum_name = SourcePrinter.to_case(field.name, .upper_case),
             .value = i,
         });
     }
+    printer.dedent();
 
-    try buffer.print("\n", .{});
+    try printer.write_empty_line();
 
     inline for (type_info.fields) |field| {
         if (comptime mapping.is_private(field.name)) continue;
 
-        try buffer.print(
+        try printer.print(
             \\    static boolean has{[flag_name]s}(final {[int_type]s} flags) {{
             \\        return (flags & {[enum_name]s}) == {[enum_name]s};
             \\    }}
             \\
             \\
         , .{
-            .flag_name = stdx.to_case(field.name, .pascal_case),
+            .flag_name = SourcePrinter.to_case(field.name, .pascal_case),
             .int_type = int_type,
-            .enum_name = stdx.to_case(field.name, .upper_case),
+            .enum_name = SourcePrinter.to_case(field.name, .upper_case),
         });
     }
 
-    try buffer.print(
-        \\}}
+    try printer.write(
+        \\}
         \\
-    , .{});
+    );
 }
 
 fn batch_type(comptime Type: type) []const u8 {
@@ -402,12 +402,12 @@ fn batch_type(comptime Type: type) []const u8 {
 }
 
 fn emit_batch(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime size: usize,
 ) !void {
-    try buffer.print(
+    try printer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -435,20 +435,19 @@ fn emit_batch(
 
     // Fields offset:
     var offset: usize = 0;
+    for (0..2) |_| printer.indent();
     inline for (type_info.fields) |field| {
-        try buffer.print(
-            \\        int {[field_name]s} = {[offset]d};
-            \\
-        , .{
-            .field_name = stdx.to_case(field.name, .pascal_case),
+        try printer.print_indented("int {[field_name]s} = {[offset]d};", .{
+            .field_name = SourcePrinter.to_case(field.name, .pascal_case),
             .offset = offset,
         });
 
         offset += @sizeOf(field.type);
     }
+    for (0..2) |_| printer.dedent();
 
     // Constructors:
-    try buffer.print(
+    try printer.print(
         \\    }}
         \\
         \\    /**
@@ -476,21 +475,21 @@ fn emit_batch(
     // Properties:
     inline for (type_info.fields) |field| {
         if (field.type == u128) {
-            try emit_u128_batch_accessors(buffer, mapping, field);
+            try emit_u128_batch_accessors(printer, mapping, field);
         } else {
-            try emit_batch_accessors(buffer, mapping, field);
+            try emit_batch_accessors(printer, mapping, field);
         }
     }
 
-    try buffer.print(
-        \\}}
+    try printer.write(
+        \\}
         \\
         \\
-    , .{});
+    );
 }
 
 fn emit_batch_accessors(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
@@ -499,14 +498,14 @@ fn emit_batch_accessors(
     const is_read_only = comptime mapping.is_read_only(field.name);
 
     // Get:
-    try buffer.print(
+    try printer.write(
         \\    /**
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+        \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
         \\
-    , .{});
+    );
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
+        try printer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -515,14 +514,14 @@ fn emit_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.print(
+        try printer.write(
             \\     */
             \\
-        , .{});
+        );
     }
 
     if (@typeInfo(field.type) == .array) {
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
             \\    }}
@@ -530,11 +529,11 @@ fn emit_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
             .array_len = @typeInfo(field.type).array.len,
         });
     } else {
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}{[java_type]s} get{[property]s}() {{
             \\        final var value = get{[batch_type]s}(at(Struct.{[property]s}));
             \\        return {[return_expression]s};
@@ -544,7 +543,7 @@ fn emit_batch_accessors(
         , .{
             .visibility = if (is_private) "" else "public ",
             .java_type = java_type(field.type),
-            .property = stdx.to_case(field.name, .pascal_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
             .batch_type = batch_type(field.type),
             .return_expression = comptime if (@typeInfo(field.type) == .@"enum")
                 get_mapped_type_name(field.type).? ++ ".fromValue(value)"
@@ -554,18 +553,18 @@ fn emit_batch_accessors(
     }
 
     // Set:
-    try buffer.print(
+    try printer.print(
         \\    /**
         \\     * @param {[param_name]s}
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
         \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
         \\
     , .{
-        .param_name = stdx.to_case(field.name, .camel_case),
+        .param_name = SourcePrinter.to_case(field.name, .camel_case),
     });
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
+        try printer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -574,14 +573,14 @@ fn emit_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.print(
+        try printer.write(
             \\     */
             \\
-        , .{});
+        );
     }
 
     if (@typeInfo(field.type) == .array) {
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}void set{[property]s}(byte[] {[param_name]s}) {{
             \\        if ({[param_name]s} == null)
             \\            {[param_name]s} = new byte[{[array_len]d}];
@@ -592,21 +591,21 @@ fn emit_batch_accessors(
             \\
             \\
         , .{
-            .property = stdx.to_case(field.name, .pascal_case),
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
             .visibility = if (is_private or is_read_only) "" else "public ",
             .array_len = @typeInfo(field.type).array.len,
         });
     } else {
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}void set{[property]s}(final {[java_type]s} {[param_name]s}) {{
             \\        put{[batch_type]s}(at(Struct.{[property]s}), {[param_name]s}{[value_expression]s});
             \\    }}
             \\
             \\
         , .{
-            .property = stdx.to_case(field.name, .pascal_case),
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
             .visibility = if (is_private or is_read_only) "" else "public ",
             .batch_type = batch_type(field.type),
             .java_type = java_type(field.type),
@@ -623,7 +622,7 @@ fn emit_batch_accessors(
 // - A BigInteger, heap-allocated, for balances and amounts;
 // - Two 64-bit integers (long), stack-allocated, for both cases;
 fn emit_u128_batch_accessors(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
@@ -633,15 +632,15 @@ fn emit_u128_batch_accessors(
 
     if (big_integer.contains(field.name)) {
         // Get BigInteger:
-        try buffer.print(
+        try printer.write(
             \\    /**
-            \\     * @return a {{@link java.math.BigInteger}} representing the 128-bit value.
-            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+            \\     * @return a {@link java.math.BigInteger} representing the 128-bit value.
+            \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
             \\
-        , .{});
+        );
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -650,13 +649,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.print(
+            try printer.write(
                 \\     */
                 \\
-            , .{});
+            );
         }
 
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}BigInteger get{[property]s}() {{
             \\        final var index = at(Struct.{[property]s});
             \\        return UInt128.asBigInteger(
@@ -667,19 +666,19 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
         });
     } else {
         // Get array:
-        try buffer.print(
+        try printer.write(
             \\    /**
             \\     * @return an array of 16 bytes representing the 128-bit value.
-            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+            \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
             \\
-        , .{});
+        );
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -688,13 +687,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.print(
+            try printer.write(
                 \\     */
                 \\
-            , .{});
+            );
         }
 
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getUInt128(at(Struct.{[property]s}));
             \\    }}
@@ -702,24 +701,24 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
         });
     }
 
     // Get long:
-    try buffer.print(
+    try printer.write(
         \\    /**
-        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value
+        \\     * @param part a {@link UInt128} enum indicating which part of the 128-bit value
         \\              is to be retrieved.
-        \\     * @return a {{@code long}} representing the first 8 bytes of the 128-bit value if
-        \\     *         {{@link UInt128#LeastSignificant}} is informed, or the last 8 bytes if
-        \\     *         {{@link UInt128#MostSignificant}}.
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+        \\     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+        \\     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+        \\     *         {@link UInt128#MostSignificant}.
+        \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
         \\
-    , .{});
+    );
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
+        try printer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -728,13 +727,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.print(
+        try printer.write(
             \\     */
             \\
-        , .{});
+        );
     }
 
-    try buffer.print(
+    try printer.print(
         \\    {[visibility]s}long get{[property]s}(final UInt128 part) {{
         \\        return getUInt128(at(Struct.{[property]s}), part);
         \\    }}
@@ -742,23 +741,23 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal_case),
+        .property = SourcePrinter.to_case(field.name, .pascal_case),
     });
 
     if (big_integer.contains(field.name)) {
         // Set BigInteger:
-        try buffer.print(
+        try printer.print(
             \\    /**
             \\     * @param {[param_name]s} a {{@link java.math.BigInteger}} representing the 128-bit value.
             \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
             \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
         , .{
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
         });
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -767,13 +766,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.print(
+            try printer.write(
                 \\     */
                 \\
-            , .{});
+            );
         }
 
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}void set{[property]s}(final BigInteger {[param_name]s}) {{
             \\        putUInt128(at(Struct.{[property]s}), UInt128.asBytes({[param_name]s}));
             \\    }}
@@ -781,12 +780,12 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private or is_read_only) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal_case),
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
         });
     } else {
         // Set array:
-        try buffer.print(
+        try printer.print(
             \\    /**
             \\     * @param {[param_name]s} an array of 16 bytes representing the 128-bit value.
             \\     * @throws IllegalArgumentException if {{@code {[param_name]s}}} is not 16 bytes long.
@@ -794,11 +793,11 @@ fn emit_u128_batch_accessors(
             \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
         , .{
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
         });
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.print(
+            try printer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -807,13 +806,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.print(
+            try printer.write(
                 \\     */
                 \\
-            , .{});
+            );
         }
 
-        try buffer.print(
+        try printer.print(
             \\    {[visibility]s}void set{[property]s}(final byte[] {[param_name]s}) {{
             \\        putUInt128(at(Struct.{[property]s}), {[param_name]s});
             \\    }}
@@ -821,23 +820,23 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private or is_read_only) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal_case),
-            .param_name = stdx.to_case(field.name, .camel_case),
+            .property = SourcePrinter.to_case(field.name, .pascal_case),
+            .param_name = SourcePrinter.to_case(field.name, .camel_case),
         });
     }
 
     // Set long:
-    try buffer.print(
+    try printer.write(
         \\    /**
-        \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
-        \\     * @param mostSignificant a {{@code long}} representing the last 8 bytes of the 128-bit value.
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
-        \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
+        \\     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+        \\     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+        \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+        \\     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
         \\
-    , .{});
+    );
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
+        try printer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -846,13 +845,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.print(
+        try printer.write(
             \\     */
             \\
-        , .{});
+        );
     }
 
-    try buffer.print(
+    try printer.print(
         \\    {[visibility]s}void set{[property]s}(final long leastSignificant, final long mostSignificant) {{
         \\        putUInt128(at(Struct.{[property]s}), leastSignificant, mostSignificant);
         \\    }}
@@ -860,20 +859,20 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private or is_read_only) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal_case),
+        .property = SourcePrinter.to_case(field.name, .pascal_case),
     });
 
     // Set long without most significant bits
-    try buffer.print(
+    try printer.write(
         \\    /**
-        \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
-        \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
+        \\     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+        \\     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+        \\     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
         \\
-    , .{});
+    );
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
+        try printer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -882,13 +881,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.print(
+        try printer.write(
             \\     */
             \\
-        , .{});
+        );
     }
 
-    try buffer.print(
+    try printer.print(
         \\    {[visibility]s}void set{[property]s}(final long leastSignificant) {{
         \\        putUInt128(at(Struct.{[property]s}), leastSignificant, 0);
         \\    }}
@@ -896,14 +895,14 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private or is_read_only) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal_case),
+        .property = SourcePrinter.to_case(field.name, .pascal_case),
     });
 }
 
 pub fn generate_bindings(
     comptime ZigType: type,
     comptime mapping: TypeMapping,
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
 ) !void {
     @setEvalBranchQuota(100_000);
 
@@ -913,26 +912,34 @@ pub fn generate_bindings(
                 "Only packed or extern structs are supported: " ++ @typeName(ZigType),
             ),
             .@"packed" => try emit_packed_enum(
-                buffer,
+                printer,
                 info,
                 mapping,
                 comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
             ),
             .@"extern" => try emit_batch(
-                buffer,
+                printer,
                 info,
                 mapping,
                 @sizeOf(ZigType),
             ),
         },
         .@"enum" => try emit_enum(
-            buffer,
+            printer,
             ZigType,
             mapping,
             comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
         ),
         else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
     }
+}
+
+fn printer_init(allocator: std.mem.Allocator, writer: *std.Io.Writer) SourcePrinter {
+    return SourcePrinter.init(allocator, writer, .{
+        .indent_width = 4,
+        .indent_char = ' ',
+        .comment_marker = "//",
+    });
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -956,7 +963,8 @@ pub fn main(init: std.process.Init) !void {
         const mapping = type_mapping[1];
 
         var buffer: std.Io.Writer.Allocating = .init(allocator);
-        try generate_bindings(ZigType, mapping, &buffer.writer);
+        var printer = printer_init(allocator, &buffer.writer);
+        try generate_bindings(ZigType, mapping, &printer);
 
         try target_dir.writeFile(init.io, .{
             .sub_path = mapping.name ++ ".java",
@@ -966,18 +974,15 @@ pub fn main(init: std.process.Init) !void {
 
     {
         var buffer: std.Io.Writer.Allocating = .init(allocator);
-        try buffer.writer.print(
-            \\package com.tigerbeetle;
-            \\
-            \\interface TBClient {{
-            \\    int SIZE = {};
-            \\    int ALIGNMENT = {};
-            \\}}
-            \\
-        , .{
-            @sizeOf(exports.tb_client_t),
-            @alignOf(exports.tb_client_t),
-        });
+        var printer = printer_init(allocator, &buffer.writer);
+        try printer.write_indented("package com.tigerbeetle;");
+        try printer.write_empty_line();
+        try printer.write_indented("interface TBClient {");
+        printer.indent();
+        try printer.print_indented("int SIZE = {};", .{@sizeOf(exports.tb_client_t)});
+        try printer.print_indented("int ALIGNMENT = {};", .{@alignOf(exports.tb_client_t)});
+        printer.dedent();
+        try printer.write_indented("}");
         try target_dir.writeFile(init.io, .{
             .sub_path = "TBClient.java",
             .data = buffer.written(),

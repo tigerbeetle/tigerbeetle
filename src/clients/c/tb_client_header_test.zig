@@ -5,18 +5,8 @@ const exports = @import("tb_client.zig").exports;
 const c = @cImport(@cInclude("tb_client.h"));
 const stdx = @import("stdx");
 
-fn to_snakecase(comptime input: []const u8) []const u8 {
-    comptime var output: []const u8 = &.{};
-    inline for (input, 0..) |char, i| {
-        const is_uppercase = (char >= 'A') and (char <= 'Z');
-        if (is_uppercase and i > 0) output = "_" ++ output;
-        output = output ++ &[_]u8{char};
-    }
-    return output;
-}
-
 test "valid tb_client.h" {
-    @setEvalBranchQuota(20_000);
+    @setEvalBranchQuota(30_000);
 
     comptime for (.{
         .{ exports.tb_account_t, "tb_account_t" },
@@ -63,7 +53,7 @@ test "valid tb_client.h" {
                 // Compare the enum int values in C to the enum int values in Zig.
                 for (std.meta.fields(ty)) |field| {
                     if (std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-                    const c_enum_field = stdx.to_case(to_snakecase(field.name), .upper_case);
+                    const c_enum_field = stdx.SourcePrinter.to_case(field.name, .upper_case);
                     const c_value = @field(c, c_enum_prefix ++ c_enum_field);
 
                     const zig_value = @intFromEnum(@field(ty, field.name));
@@ -81,7 +71,7 @@ test "valid tb_client.h" {
                         if (!std.mem.eql(u8, field.name, "padding")) {
                             // Get the bit value in the C enum.
                             const c_enum_field =
-                                stdx.to_case(to_snakecase(field.name), .upper_case);
+                                stdx.SourcePrinter.to_case(field.name, .upper_case);
                             const c_value = @field(c, c_enum_prefix ++ c_enum_field);
 
                             // Compare the bit value to the packed struct's field.

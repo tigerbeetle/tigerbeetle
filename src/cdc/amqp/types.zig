@@ -148,6 +148,16 @@ pub const QueueOverflow = enum {
     reject_publish_dlx,
 };
 
+/// Converts a snake_case identifier to kebab-case at comptime.
+fn to_kebab_case(comptime snake_case: []const u8) []const u8 {
+    comptime {
+        var output: [snake_case.len]u8 = undefined;
+        for (snake_case, &output) |byte, *char| char.* = if (byte == '_') '-' else byte;
+        const result = output;
+        return &result;
+    }
+}
+
 /// A set of implementation-defined arguments for the declaration.
 /// The syntax and semantics of these arguments are specific to RabbitMQ.
 pub const QueueDeclareArguments = struct {
@@ -191,12 +201,12 @@ pub const QueueDeclareArguments = struct {
                             const FieldType = @TypeOf(value);
                             // Keys are follow the pattern "x-max-length":
                             const key = comptime "x-" ++
-                                vsr.stdx.to_case(field.name, .kebab_case);
+                                to_kebab_case(field.name);
                             switch (FieldType) {
                                 []const u8 => encoder.put(key, .{ .string = value }),
                                 QueueOverflow => encoder.put(key, .{ .string = switch (value) {
                                     inline else => |tag| comptime "" ++
-                                        vsr.stdx.to_case(@tagName(tag), .kebab_case),
+                                        to_kebab_case(@tagName(tag)),
                                 } }),
                                 bool => encoder.put(key, .{ .boolean = value }),
                                 u32 => encoder.put(key, .{ .uint32 = value }),

@@ -1,6 +1,5 @@
+const stdx = @import("stdx");
 pub const Arena = @import("conformance/arena.zig").Arena;
-pub const Printer = @import("conformance/printer.zig").Printer;
-pub const Words = @import("conformance/printer.zig").Words;
 pub const ast = @import("conformance/ast.zig");
 const parser = @import("conformance/parser.zig");
 
@@ -43,9 +42,9 @@ pub const sources: []const Source = sources: {
 
 pub const parse = parser.parse;
 
-// We're keeping this as a freestanding function so Printer doesn't need to
-// depend on ast.Case.
-pub fn write_not_applicable(printer: *Printer, case: ast.Case) !void {
+// We're keeping this as a freestanding function so stdx.SourcePrinter doesn't
+// need to depend on ast.Case.
+pub fn write_not_applicable(printer: *stdx.SourcePrinter, case: ast.Case) !void {
     try printer.print_indented("{s} N/A: \"{s}\"", .{
         printer.options.comment_marker, case.description,
     });

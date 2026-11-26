@@ -3,6 +3,7 @@ const vsr = @import("vsr");
 
 const assert = std.debug.assert;
 const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 const tb = vsr.tigerbeetle;
 const exports = vsr.tb_client.exports;
 
@@ -192,7 +193,7 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn emit_enum(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
@@ -202,78 +203,70 @@ fn emit_enum(
     if (is_packed_struct) {
         assert(type_info.layout == .@"packed");
         // Packed structs represented as Enum needs a Flags attribute:
-        try buffer.print("[Flags]\n", .{});
+        try printer.write_indented("[Flags]");
     }
 
-    try buffer.print(
-        \\{s} enum {s} : {s}
-        \\{{
-        \\
-    , .{
+    try printer.print_indented("{s} enum {s} : {s}", .{
         @tagName(mapping.visibility),
         mapping.name,
         int_type,
     });
+    try printer.write_indented("{");
+    printer.indent();
 
     if (is_packed_struct) {
         // Packed structs represented as Enum needs a ZERO value:
-        try buffer.print(
-            \\    None = 0,
-            \\
-            \\
-        , .{});
+        try printer.write_indented("None = 0,");
+        try printer.write_empty_line();
     }
 
     inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
 
-        try emit_docs(buffer, mapping, field.name);
+        try emit_docs(printer, mapping, field.name);
         if (is_packed_struct) {
-            try buffer.print("    {s} = 1 << {},\n\n", .{
-                stdx.to_case(field.name, .pascal_case),
+            try printer.print_indented("{s} = 1 << {},", .{
+                SourcePrinter.to_case(field.name, .pascal_case),
                 i,
             });
+            try printer.write_empty_line();
         } else {
             const int_value = @intFromEnum(@field(Type, field.name));
-            try buffer.print("    {s} = {s},\n\n", .{
-                stdx.to_case(field.name, .pascal_case),
+            try printer.print_indented("{s} = {s},", .{
+                SourcePrinter.to_case(field.name, .pascal_case),
                 if (int_value == std.math.maxInt(@TypeOf(int_value)))
                     std.fmt.comptimePrint("0x{X}", .{int_value})
                 else
                     std.fmt.comptimePrint("{}", .{int_value}),
             });
+            try printer.write_empty_line();
         }
     }
 
-    try buffer.print(
-        \\}}
-        \\
-        \\
-    , .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_struct(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime size: usize,
 ) !void {
-    try buffer.print(
-        \\[StructLayout(LayoutKind.Sequential, Size = SIZE)]
-        \\{s} {s}struct {s}
-        \\{{
-        \\    public const int SIZE = {};
-        \\
-        \\{s}
-        \\
-    , .{
+    try printer.write_indented("[StructLayout(LayoutKind.Sequential, Size = SIZE)]");
+    try printer.print_indented("{s} {s}struct {s}", .{
         @tagName(mapping.visibility),
         if (mapping.visibility == .internal) "unsafe " else "",
         mapping.name,
-        size,
-        mapping.constants,
     });
+    try printer.write_indented("{");
+    printer.indent();
+    try printer.print_indented("public const int SIZE = {};", .{size});
+    try printer.write_empty_line();
+    // `constants` carries its own indentation.
+    try printer.print("{s}\n", .{mapping.constants});
 
     // Fixed len array are exposed as internal structs with stackalloc fields
     // It's more efficient than exposing heap-allocated arrays using
@@ -281,7 +274,7 @@ fn emit_struct(
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .array => |array| {
-                try buffer.print(
+                try printer.print(
                     \\    [StructLayout(LayoutKind.Sequential, Size = {[name]s}Data.SIZE)]
                     \\    private unsafe struct {[name]s}Data
                     \\    {{
@@ -317,7 +310,7 @@ fn emit_struct(
                     \\
                     \\
                 , .{
-                    .name = stdx.to_case(field.name, .pascal_case),
+                    .name = SourcePrinter.to_case(field.name, .pascal_case),
                     .size = array.len * @sizeOf(array.child),
                     .len = array.len,
                     .child_type = dotnet_type(array.child),
@@ -332,26 +325,20 @@ fn emit_struct(
         const is_private = comptime mapping.is_private(field.name);
 
         switch (@typeInfo(field.type)) {
-            .array => try buffer.print(
-                \\    {s} {s}Data {s};
-                \\
-                \\
-            ,
+            .array => try printer.print_indented(
+                "{s} {s}Data {s};\n",
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
-                    stdx.to_case(field.name, .pascal_case),
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .pascal_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                 },
             ),
-            else => try buffer.print(
-                \\    {s} {s} {s};
-                \\
-                \\
-            ,
+            else => try printer.print_indented(
+                "{s} {s} {s};\n",
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
                     dotnet_type(field.type),
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                 },
             ),
         }
@@ -361,64 +348,57 @@ fn emit_struct(
 
         // Properties
         inline for (type_info.fields) |field| {
-            try emit_docs(buffer, mapping, field.name);
+            try emit_docs(printer, mapping, field.name);
 
             const is_private = comptime mapping.is_private(field.name);
             const is_read_only = comptime mapping.is_read_only(field.name);
 
             switch (@typeInfo(field.type)) {
-                .array => try buffer.print(
-                    \\    {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
-                    \\
-                    \\
-                , .{
+                .array => try printer.print_indented("{s} byte[] {s} {{ get => {s}.GetData(); " ++
+                    "{s}set => {s}.SetData(value); }}\n", .{
                     if (is_private) "internal" else "public",
-                    stdx.to_case(field.name, .pascal_case),
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .pascal_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                     if (is_read_only and !is_private) "internal " else "",
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                 }),
-                else => try buffer.print(
-                    \\    {s} {s} {s} {{ get => {s}; {s}set => {s} = value; }}
-                    \\
-                    \\
-                , .{
+                else => try printer.print_indented("{s} {s} {s} {{ get => {s}; " ++
+                    "{s}set => {s} = value; }}\n", .{
                     if (is_private) "internal" else "public",
                     dotnet_type(field.type),
-                    stdx.to_case(field.name, .pascal_case),
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .pascal_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                     if (is_read_only and !is_private) "internal " else "",
-                    stdx.to_case(field.name, .camel_case),
+                    SourcePrinter.to_case(field.name, .camel_case),
                 }),
             }
         }
     }
 
-    try buffer.print(
-        \\}}
-        \\
-        \\
-    , .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
-fn emit_docs(buffer: anytype, comptime mapping: TypeMapping, comptime field: ?[]const u8) !void {
+fn emit_docs(
+    printer: *SourcePrinter,
+    comptime mapping: TypeMapping,
+    comptime field: ?[]const u8,
+) !void {
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
-            \\    /// <summary>
-            \\    /// https://docs.tigerbeetle.com/{s}{s}
-            \\    /// </summary>
-            \\
-        , .{
+        try printer.write_indented("/// <summary>");
+        try printer.print_indented("/// https://docs.tigerbeetle.com/{s}{s}", .{
             docs_link,
             field orelse "",
         });
+        try printer.write_indented("/// </summary>");
     }
 }
 
-pub fn generate_bindings(buffer: *std.Io.Writer) !void {
+pub fn generate_bindings(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    try buffer.print(
+    try printer.write(
         \\//////////////////////////////////////////////////////////
         \\// This file was auto-generated by dotnet_bindings.zig  //
         \\//              Do not manually modify.                 //
@@ -430,7 +410,7 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
         \\namespace TigerBeetle;
         \\
         \\
-    , .{});
+    );
 
     // Emit C# declarations.
     inline for (type_mappings) |type_mapping| {
@@ -443,7 +423,7 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
                 .@"packed" => try emit_enum(
-                    buffer,
+                    printer,
                     ZigType,
                     info,
                     mapping,
@@ -452,14 +432,14 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
                     ),
                 ),
                 .@"extern" => try emit_struct(
-                    buffer,
+                    printer,
                     info,
                     mapping,
                     @sizeOf(ZigType),
                 ),
             },
             .@"enum" => |info| try emit_enum(
-                buffer,
+                printer,
                 ZigType,
                 info,
                 mapping,
@@ -472,9 +452,9 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
     // Emit function declarations.
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
-    try buffer.print(
+    try printer.write(
         \\internal static class Native
-        \\{{
+        \\{
         \\    private const string LIB_NAME = "tb_client";
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -499,10 +479,10 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
         \\    public static unsafe extern ClientStatus tb_client_deinit(
         \\        TBClient* client
         \\    );
-        \\}}
+        \\}
         \\
         \\
-    , .{});
+    );
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -511,7 +491,12 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     var buffer: std.Io.Writer.Allocating = .init(allocator);
-    try generate_bindings(&buffer.writer);
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = 4,
+        .indent_char = ' ',
+        .comment_marker = "//",
+    });
+    try generate_bindings(&printer);
 
     try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }

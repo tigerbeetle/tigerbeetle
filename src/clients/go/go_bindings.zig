@@ -5,6 +5,11 @@ const assert = std.debug.assert;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 
+const SourcePrinter = stdx.SourcePrinter;
+
+// See: https://go.dev/wiki/CodeReviewComments#initialisms
+const go_initialisms: []const []const u8 = &.{ "id", "ok" };
+
 const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
@@ -58,31 +63,15 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    return comptime blk: {
-        var len: usize = 0;
-        var output = [_]u8{' '} ** (min_len orelse input.len);
-        var iterator = std.mem.tokenizeScalar(u8, input, '_');
-        while (iterator.next()) |word| {
-            assert(word.len > 0);
-            if (is_upper_case(word)) {
-                _ = std.ascii.upperString(output[len..], word);
-            } else {
-                output[len] = std.ascii.toUpper(word[0]);
-                for (word[1..], 1..) |c, i| output[len + i] = c;
-            }
-            len += word.len;
-        }
-
-        break :blk stdx.comptime_slice(&output, min_len orelse len);
-    };
-}
-
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
     comptime {
         var min_len: comptime_int = 0;
         for (type_info.fields) |field| {
-            const field_len = to_pascal_case(field.name, null).len;
+            const field_len = SourcePrinter.to_case_initialisms(
+                field.name,
+                .pascal_case,
+                go_initialisms,
+            ).len;
             if (field_len > min_len) {
                 min_len = field_len;
             }
@@ -91,162 +80,174 @@ fn calculate_min_len(comptime type_info: anytype) comptime_int {
     }
 }
 
-fn is_upper_case(comptime word: []const u8) bool {
-    // https://github.com/golang/go/wiki/CodeReviewComments#initialisms
-    const initialisms = .{ "id", "ok" };
-    inline for (initialisms) |initialism| {
-        if (std.ascii.eqlIgnoreCase(initialism, word)) {
-            return true;
-        }
-    } else return false;
-}
-
 fn emit_enum(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime name: []const u8,
     comptime prefix: []const u8,
     comptime tag_type: []const u8,
 ) !void {
-    try buffer.print("type {s} {s}\n\n" ++
-        "const (\n", .{
-        name,
-        tag_type,
-    });
+    try printer.print_indented("type {s} {s}", .{ name, tag_type });
+    try printer.write_empty_line();
+    try printer.write_indented("const (");
+    printer.indent();
 
     const type_info = @typeInfo(Type).@"enum";
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
+        const enum_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
+            field.name,
+            .pascal_case,
+            go_initialisms,
+        );
+        const enum_width = prefix.len + min_len;
         if (type_info.tag_type == u1) {
-            try buffer.print("\t{s} {s} = {s}\n", .{
+            try printer.print_indented("{s:<[3]} {s} = {s}", .{
                 enum_name,
                 name,
                 if (@intFromEnum(@field(Type, field.name)) == 1) "true" else "false",
+                enum_width,
             });
         } else {
             const int_value = @intFromEnum(@field(Type, field.name));
-            try buffer.print("\t{s} {s} = {s}\n", .{
+            try printer.print_indented("{s:<[3]} {s} = {s}", .{
                 enum_name,
                 name,
                 if (int_value == std.math.maxInt(@TypeOf(int_value)))
                     std.fmt.comptimePrint("0x{X}", .{int_value})
                 else
                     std.fmt.comptimePrint("{}", .{int_value}),
+                enum_width,
             });
         }
     }
 
-    try buffer.print(")\n\n" ++
-        "func (i {s}) String() string {{\n", .{
-        name,
-    });
+    printer.dedent();
+    try printer.write_indented(")");
+    try printer.write_empty_line();
+    try printer.print_indented("func (i {s}) String() string {{", .{name});
+    printer.indent();
 
     if (type_info.tag_type == u1) {
-        const enum_zero_name = prefix ++ comptime to_pascal_case(
+        const enum_zero_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
             @tagName(@as(Type, @enumFromInt(0))),
-            null,
+            .pascal_case,
+            go_initialisms,
         );
-        const enum_one_name = prefix ++ comptime to_pascal_case(
+        const enum_one_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
             @tagName(@as(Type, @enumFromInt(1))),
-            null,
+            .pascal_case,
+            go_initialisms,
         );
 
-        try buffer.print("\tif (i == {s}) {{\n" ++
-            "\t\treturn \"{s}\"\n" ++
-            "\t}} else {{\n" ++
-            "\t\treturn \"{s}\"\n" ++
-            "\t}}\n", .{
-            enum_one_name,
-            enum_one_name,
-            enum_zero_name,
-        });
+        try printer.print_indented("if (i == {s}) {{", .{enum_one_name});
+        printer.indent();
+        try printer.print_indented("return \"{s}\"", .{enum_one_name});
+        printer.dedent();
+        try printer.write_indented("} else {");
+        printer.indent();
+        try printer.print_indented("return \"{s}\"", .{enum_zero_name});
+        printer.dedent();
+        try printer.write_indented("}");
     } else {
-        try buffer.print("\tswitch i {{\n", .{});
+        try printer.write_indented("switch i {");
 
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
-            try buffer.print("\tcase {s}:\n" ++
-                "\t\treturn \"{s}\"\n", .{
-                enum_name,
-                enum_name,
-            });
+            const enum_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
+                field.name,
+                .pascal_case,
+                go_initialisms,
+            );
+            try printer.print_indented("case {s}:", .{enum_name});
+            printer.indent();
+            try printer.print_indented("return \"{s}\"", .{enum_name});
+            printer.dedent();
         }
 
-        try buffer.print(
-            "\t}}\n" ++
-                "\treturn \"{s}(\" + strconv.FormatInt(int64(i+1), 10) + \")\"\n",
+        try printer.write_indented("}");
+        try printer.print_indented(
+            "return \"{s}(\" + strconv.FormatInt(int64(i+1), 10) + \")\"",
             .{name},
         );
     }
 
-    try buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_packed_struct(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime name: []const u8,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.print("type {s} struct {{\n", .{
-        name,
-    });
+    try printer.print_indented("type {s} struct {{", .{name});
+    printer.indent();
 
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
-        try buffer.print("\t{s} {s}\n", .{
-            to_pascal_case(field.name, min_len),
+        try printer.print_indented("{s:<[2]} {s}", .{
+            SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
             go_type(field.type),
+            min_len,
         });
     }
 
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
+
     // Conversion from struct to packed (e.g. AccountFlags.ToUint16())
-    try buffer.print("}}\n\n" ++
-        "func (f {s}) To{s}() {s} {{\n" ++
-        "\tvar ret {s} = 0\n\n", .{
+    try printer.print_indented("func (f {s}) To{s}() {s} {{", .{
         name,
-        to_pascal_case(int_type, null),
-        int_type,
+        SourcePrinter.to_case_initialisms(int_type, .pascal_case, go_initialisms),
         int_type,
     });
+    printer.indent();
+    try printer.print_indented("var ret {s} = 0", .{int_type});
+    try printer.write_empty_line();
 
     inline for (type_info.fields, 0..) |field, i| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
-        try buffer.print("\tif f.{s} {{\n" ++
-            "\t\tret |= (1 << {d})\n" ++
-            "\t}}\n\n", .{
-            to_pascal_case(field.name, null),
-            i,
+        try printer.print_indented("if f.{s} {{", .{
+            SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
         });
+        printer.indent();
+        try printer.print_indented("ret |= (1 << {d})", .{i});
+        printer.dedent();
+        try printer.write_indented("}");
+        try printer.write_empty_line();
     }
 
-    try buffer.print("\treturn ret\n" ++
-        "}}\n\n", .{});
+    try printer.write_indented("return ret");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_struct(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime name: []const u8,
 ) !void {
-    try buffer.print("type {s} struct {{\n", .{
-        name,
-    });
+    try printer.print_indented("type {s} struct {{", .{name});
+    printer.indent();
 
     const min_len = calculate_min_len(type_info);
     comptime var flagsField = false;
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .array => |array| {
-                try buffer.print("\t{s} [{d}]{s}\n", .{
-                    to_pascal_case(field.name, min_len),
+                try printer.print_indented("{s:<[3]} [{d}]{s}", .{
+                    SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
                     array.len,
                     go_type(array.child),
+                    min_len,
                 });
             },
             else => {
@@ -254,18 +255,25 @@ fn emit_struct(
                     flagsField = true;
                 }
 
-                try buffer.print(
-                    "\t{s} {s}\n",
+                try printer.print_indented(
+                    "{s:<[2]} {s}",
                     .{
-                        to_pascal_case(field.name, min_len),
+                        SourcePrinter.to_case_initialisms(
+                            field.name,
+                            .pascal_case,
+                            go_initialisms,
+                        ),
                         go_type(field.type),
+                        min_len,
                     },
                 );
             },
         }
     }
 
-    try buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 
     if (flagsField) {
         const flagType = if (comptime std.mem.eql(u8, name, "Account"))
@@ -279,24 +287,17 @@ fn emit_struct(
         else
             unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
-        try buffer.print(
-            "func (o {s}) {s}Flags() {s}Flags {{\n" ++
-                "\tvar f {s}Flags\n",
-            .{
-                name,
-                name,
-                name,
-                name,
-            },
-        );
+        try printer.print_indented("func (o {s}) {s}Flags() {s}Flags {{", .{ name, name, name });
+        printer.indent();
+        try printer.print_indented("var f {s}Flags", .{name});
 
         switch (@typeInfo(flagType)) {
             .@"struct" => |info| switch (info.layout) {
                 .@"packed" => inline for (info.fields, 0..) |field, i| {
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
-                    try buffer.print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{
-                        to_pascal_case(field.name, null),
+                    try printer.print_indented("f.{s} = ((o.Flags >> {}) & 0x1) == 1", .{
+                        SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
                         i,
                     });
                 },
@@ -305,15 +306,17 @@ fn emit_struct(
             else => unreachable,
         }
 
-        try buffer.print("\treturn f\n" ++
-            "}}\n\n", .{});
+        try printer.write_indented("return f");
+        printer.dedent();
+        try printer.write_indented("}");
+        try printer.write_empty_line();
     }
 }
 
-pub fn generate_bindings(buffer: *std.Io.Writer) !void {
+pub fn generate_bindings(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    try buffer.print(
+    try printer.write(
         \\///////////////////////////////////////////////////////
         \\// This file was auto-generated by go_bindings.zig   //
         \\//              Do not manually modify.              //
@@ -328,7 +331,7 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
         \\import "strconv"
         \\
         \\
-    , .{});
+    );
 
     // Emit Go declarations.
     inline for (type_mappings) |type_mapping| {
@@ -341,15 +344,15 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
                 .@"packed" => try emit_packed_struct(
-                    buffer,
+                    printer,
                     info,
                     name,
                     comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
                 ),
-                .@"extern" => try emit_struct(buffer, info, name),
+                .@"extern" => try emit_struct(printer, info, name),
             },
             .@"enum" => try emit_enum(
-                buffer,
+                printer,
                 ZigType,
                 name,
                 type_mapping[2],
@@ -358,6 +361,7 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }
+    const buffer = printer.writer;
     assert(buffer.buffered()[buffer.end - 1] == '\n');
     buffer.undo(1);
     assert(std.mem.endsWith(u8, buffer.buffered(), "\n"));
@@ -370,6 +374,11 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     var buffer: std.Io.Writer.Allocating = .init(allocator);
-    try generate_bindings(&buffer.writer);
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = 1,
+        .indent_char = '\t',
+        .comment_marker = "//",
+    });
+    try generate_bindings(&printer);
     try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }
