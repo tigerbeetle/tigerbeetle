@@ -129,7 +129,7 @@ reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine enum values stored in the
 `AccountFlags` object (in TypeScript it is an actual enum) with
-bitwise-or:
+bitwise-or. Here are a few examples:
 
 * `AccountFlags.linked`
 * `AccountFlags.debits_must_not_exceed_credits`
@@ -255,8 +255,8 @@ for (let i = 0; i < account_results.length; i++) {
 
 To handle errors you can either 1) exactly match error codes returned
 from `client.createAccounts` with enum values in the
-`CreateAccountError` object, or you can 2) look up the error code in
-the `CreateAccountError` object for a human-readable string.
+`CreateAccountStatus` object, or you can 2) look up the error code in
+the `CreateAccountStatus` object for a human-readable string.
 
 ## Account Lookup
 
@@ -365,7 +365,7 @@ const transfers = [{
   timestamp: 0n,
 }];
 
-const transfers_results = await client.createTransfers(batch);
+const transfers_results = await client.createTransfers(transfers);
 for (let i = 0; i < transfers_results.length; i++) {
   switch (transfers_results[i].status) {
     case CreateTransferStatus.created:
@@ -383,8 +383,8 @@ for (let i = 0; i < transfers_results.length; i++) {
 
 To handle errors you can either 1) exactly match error codes returned
 from `client.createTransfers` with enum values in the
-`CreateTransferError` object, or you can 2) look up the error code in
-the `CreateTransferError` object for a human-readable string.
+`CreateTransferStatus` object, or you can 2) look up the error code in
+the `CreateTransferStatus` object for a human-readable string.
 
 ## Batching
 
@@ -407,7 +407,7 @@ const batch = []; // Array of transfer to create.
 const BATCH_SIZE = 8189;
 for (let i = 0; i < batch.length; i += BATCH_SIZE) {
   const transfers_results = await client.createTransfers(
-    batch.slice(i, Math.min(batch.length, BATCH_SIZE)),
+    batch.slice(i, i + BATCH_SIZE),
   );
   // Results handling omitted.
 }
@@ -429,7 +429,7 @@ reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
 To toggle behavior for a transfer, combine enum values stored in the
 `TransferFlags` object (in TypeScript it is an actual enum) with
-bitwise-or:
+bitwise-or. Here are a few examples:
 
 * `TransferFlags.linked`
 * `TransferFlags.pending`
@@ -723,7 +723,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
@@ -782,8 +782,8 @@ const historical_transfers = []; // Loaded from an external source.
 
 // First, load and import all accounts with their timestamps from the historical source.
 const accounts = [];
-for (let index = 0; i < historical_accounts.length; i++) {
-  let account = historical_accounts[i];
+for (let index = 0; index < historical_accounts.length; index++) {
+  let account = historical_accounts[index];
   // Set a unique and strictly increasing timestamp.
   historical_timestamp += 1;
   account.timestamp = historical_timestamp;
@@ -803,12 +803,12 @@ const account_results = await client.createAccounts(accounts);
 
 // Then, load and import all transfers with their timestamps from the historical source.
 const transfers = [];
-for (let index = 0; i < historical_transfers.length; i++) {
-  let transfer = historical_transfers[i];
+for (let index = 0; index < historical_transfers.length; index++) {
+  let transfer = historical_transfers[index];
   // Set a unique and strictly increasing timestamp.
   historical_timestamp += 1;
   transfer.timestamp = historical_timestamp;
-  // Set the account as `imported`.
+  // Set the transfer as `imported`.
   transfer.flags = TransferFlags.imported;
   // To ensure atomicity, the entire batch (except the last event in the chain)
   // must be `linked`.

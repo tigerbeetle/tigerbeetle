@@ -138,7 +138,7 @@ these flags in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine enum values stored in the
-`AccountFlags` object with bitwise-or:
+`AccountFlags` object with bitwise-or. Here are a few examples:
 
 * `AccountFlags.None`
 * `AccountFlags.Linked`
@@ -383,8 +383,8 @@ The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
-To toggle behavior for an account, combine enum values stored in the
-`TransferFlags` object with bitwise-or:
+To toggle behavior for a transfer, combine enum values stored in the
+`TransferFlags` object with bitwise-or. Here are a few examples:
 
 * `TransferFlags.None`
 * `TransferFlags.Linked`
@@ -646,7 +646,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
@@ -733,7 +733,7 @@ for (var index = 0; index < historicalTransfers.Length; index++)
     // Set a unique and strictly increasing timestamp.
     historicalTimestamp += 1;
     transfer.Timestamp = historicalTimestamp;
-    // Set the account as `imported`.
+    // Set the transfer as `imported`.
     transfer.Flags = TransferFlags.Imported;
     // To ensure atomicity, the entire batch (except the last event in the chain)
     // must be `linked`.

@@ -69,7 +69,7 @@ pub const GoDocs = Docs{
     .create_transfers_errors_documentation = "",
 
     .transfer_flags_documentation =
-    \\To toggle behavior for an account, use the `types.TransferFlags` struct
+    \\To toggle behavior for a transfer, use the `types.TransferFlags` struct
     \\to combine enum values and generate a `uint16`. Here are a
     \\few examples:
     \\

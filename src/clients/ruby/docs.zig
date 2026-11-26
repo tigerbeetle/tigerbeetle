@@ -73,7 +73,8 @@ pub const RubyDocs = Docs{
     .create_accounts_documentation = "",
     .account_flags_documentation =
     \\To toggle behavior for an account, combine constants from the
-    \\`TigerBeetle::AccountFlags` module with bitwise-or:
+    \\`TigerBeetle::AccountFlags` module with bitwise-or. Here are a few
+    \\examples:
     \\
     \\* `AccountFlags::LINKED`
     \\* `AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS`
@@ -96,7 +97,8 @@ pub const RubyDocs = Docs{
 
     .transfer_flags_documentation =
     \\To toggle behavior for a transfer, combine constants from the
-    \\`TigerBeetle::TransferFlags` module with bitwise-or:
+    \\`TigerBeetle::TransferFlags` module with bitwise-or. Here are a few
+    \\examples:
     \\
     \\* `TransferFlags::LINKED`
     \\* `TransferFlags::PENDING`

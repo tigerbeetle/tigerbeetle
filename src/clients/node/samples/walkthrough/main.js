@@ -231,7 +231,7 @@ async function main() {
       timestamp: 0n,
     }];
 
-    const transfers_results = await client.createTransfers(batch);
+    const transfers_results = await client.createTransfers(transfers);
     for (let i = 0; i < transfers_results.length; i++) {
       switch (transfers_results[i].status) {
         case CreateTransferStatus.created:
@@ -254,7 +254,7 @@ async function main() {
     const BATCH_SIZE = 8189;
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
       const transfers_results = await client.createTransfers(
-        batch.slice(i, Math.min(batch.length, BATCH_SIZE)),
+        batch.slice(i, i + BATCH_SIZE),
       );
       // Results handling omitted.
     }
@@ -509,8 +509,8 @@ async function main() {
 
       // First, load and import all accounts with their timestamps from the historical source.
       const accounts = [];
-      for (let index = 0; i < historical_accounts.length; i++) {
-        let account = historical_accounts[i];
+      for (let index = 0; index < historical_accounts.length; index++) {
+        let account = historical_accounts[index];
         // Set a unique and strictly increasing timestamp.
         historical_timestamp += 1;
         account.timestamp = historical_timestamp;
@@ -530,12 +530,12 @@ async function main() {
 
       // Then, load and import all transfers with their timestamps from the historical source.
       const transfers = [];
-      for (let index = 0; i < historical_transfers.length; i++) {
-        let transfer = historical_transfers[i];
+      for (let index = 0; index < historical_transfers.length; index++) {
+        let transfer = historical_transfers[index];
         // Set a unique and strictly increasing timestamp.
         historical_timestamp += 1;
         transfer.timestamp = historical_timestamp;
-        // Set the account as `imported`.
+        // Set the transfer as `imported`.
         transfer.flags = TransferFlags.imported;
         // To ensure atomicity, the entire batch (except the last event in the chain)
         // must be `linked`.

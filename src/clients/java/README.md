@@ -189,7 +189,7 @@ these flags in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account#flags).
 
 To toggle behavior for an account, combine enum values stored in the
-`AccountFlags` object with bitwise-or:
+`AccountFlags` object with bitwise-or. Here are a few examples:
 
 * `AccountFlags.LINKED`
 * `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
@@ -313,7 +313,6 @@ transfers.setTimeout(0);
 transfers.setLedger(1);
 transfers.setCode(1);
 transfers.setFlags(TransferFlags.NONE);
-transfers.setTimeout(0);
 
 CreateTransferResultBatch transferResults = client.createTransfers(transfers);
 // Results handling omitted.
@@ -443,8 +442,8 @@ The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer#flags).
 
-To toggle behavior for an account, combine enum values stored in the
-`TransferFlags` object with bitwise-or:
+To toggle behavior for a transfer, combine enum values stored in the
+`TransferFlags` object with bitwise-or. Here are a few examples:
 
 * `TransferFlags.NONE`
 * `TransferFlags.LINKED`
@@ -701,7 +700,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to

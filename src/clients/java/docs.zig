@@ -99,7 +99,7 @@ pub const JavaDocs = Docs{
 
     .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
-    \\`AccountFlags` object with bitwise-or:
+    \\`AccountFlags` object with bitwise-or. Here are a few examples:
     \\
     \\* `AccountFlags.LINKED`
     \\* `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
@@ -114,8 +114,8 @@ pub const JavaDocs = Docs{
     .create_transfers_errors_documentation = "",
 
     .transfer_flags_documentation =
-    \\To toggle behavior for an account, combine enum values stored in the
-    \\`TransferFlags` object with bitwise-or:
+    \\To toggle behavior for a transfer, combine enum values stored in the
+    \\`TransferFlags` object with bitwise-or. Here are a few examples:
     \\
     \\* `TransferFlags.NONE`
     \\* `TransferFlags.LINKED`

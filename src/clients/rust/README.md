@@ -473,6 +473,7 @@ let transfer0 = tb::Transfer {
     amount: 10,
     ledger: 1,
     code: 1,
+    flags: tb::TransferFlags::Pending,
     ..Default::default()
 };
 
@@ -507,6 +508,7 @@ let transfer0 = tb::Transfer {
     amount: 10,
     ledger: 1,
     code: 1,
+    flags: tb::TransferFlags::Pending,
     ..Default::default()
 };
 
@@ -672,7 +674,7 @@ have the `linked` flag set as this would leave a chain
 open-ended. Multiple chains or individual events may coexist within a
 batch to succeed or fail independently.
 
-Events within a chain are executed within order, or are rolled back on
+Events within a chain are executed in order, or are rolled back on
 error, so that the effect of each event in the chain is visible to the
 next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
@@ -763,13 +765,14 @@ let historical_accounts: Vec<tb::Account> = vec![]; // Loaded from an external s
 let historical_transfers: Vec<tb::Transfer> = vec![]; // Loaded from an external source.
 
 // First, load and import all accounts with their timestamps from the historical source.
+let accounts_count = historical_accounts.len();
 let mut accounts_batch = vec![];
 for (index, mut account) in historical_accounts.into_iter().enumerate() {
     // Set a unique and strictly increasing timestamp.
     historical_timestamp += 1;
     account.timestamp = historical_timestamp;
 
-    account.flags = if index < accounts_batch.len() - 1 {
+    account.flags = if index < accounts_count - 1 {
         tb::AccountFlags::Imported | tb::AccountFlags::Linked
     } else {
         tb::AccountFlags::Imported
@@ -782,13 +785,14 @@ let account_results = client.create_accounts(&accounts_batch).await?;
 // Result handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
+let transfers_count = historical_transfers.len();
 let mut transfers_batch = vec![];
 for (index, mut transfer) in historical_transfers.into_iter().enumerate() {
     // Set a unique and strictly increasing timestamp.
     historical_timestamp += 1;
     transfer.timestamp = historical_timestamp;
 
-    transfer.flags = if index < transfers_batch.len() - 1 {
+    transfer.flags = if index < transfers_count - 1 {
         tb::TransferFlags::Imported | tb::TransferFlags::Linked
     } else {
         tb::TransferFlags::Imported
