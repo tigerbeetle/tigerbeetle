@@ -5,6 +5,11 @@ const assert = std.debug.assert;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 
+const SourcePrinter = stdx.SourcePrinter;
+
+// See: https://go.dev/wiki/CodeReviewComments#initialisms
+const go_initialisms: []const []const u8 = &.{ "id", "ok" };
+
 const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
@@ -58,47 +63,21 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    return comptime blk: {
-        var len: usize = 0;
-        var output = [_]u8{' '} ** (min_len orelse input.len);
-        var iterator = std.mem.tokenizeScalar(u8, input, '_');
-        while (iterator.next()) |word| {
-            assert(word.len > 0);
-            if (is_upper_case(word)) {
-                _ = std.ascii.upperString(output[len..], word);
-            } else {
-                output[len] = std.ascii.toUpper(word[0]);
-                for (word[1..], 1..) |c, i| output[len + i] = c;
-            }
-            len += word.len;
-        }
-
-        break :blk stdx.comptime_slice(&output, min_len orelse len);
-    };
-}
-
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
     comptime {
         var min_len: comptime_int = 0;
         for (type_info.fields) |field| {
-            const field_len = to_pascal_case(field.name, null).len;
+            const field_len = SourcePrinter.to_case_initialisms(
+                field.name,
+                .pascal_case,
+                go_initialisms,
+            ).len;
             if (field_len > min_len) {
                 min_len = field_len;
             }
         }
         return min_len;
     }
-}
-
-fn is_upper_case(comptime word: []const u8) bool {
-    // https://github.com/golang/go/wiki/CodeReviewComments#initialisms
-    const initialisms = .{ "id", "ok" };
-    inline for (initialisms) |initialism| {
-        if (std.ascii.eqlIgnoreCase(initialism, word)) {
-            return true;
-        }
-    } else return false;
 }
 
 fn emit_enum(
@@ -118,22 +97,29 @@ fn emit_enum(
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
+        const enum_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
+            field.name,
+            .pascal_case,
+            go_initialisms,
+        );
+        const enum_width = prefix.len + min_len;
         if (type_info.tag_type == u1) {
-            try buffer.print("\t{s} {s} = {s}\n", .{
+            try buffer.print("\t{s:<[3]} {s} = {s}\n", .{
                 enum_name,
                 name,
                 if (@intFromEnum(@field(Type, field.name)) == 1) "true" else "false",
+                enum_width,
             });
         } else {
             const int_value = @intFromEnum(@field(Type, field.name));
-            try buffer.print("\t{s} {s} = {s}\n", .{
+            try buffer.print("\t{s:<[3]} {s} = {s}\n", .{
                 enum_name,
                 name,
                 if (int_value == std.math.maxInt(@TypeOf(int_value)))
                     std.fmt.comptimePrint("0x{X}", .{int_value})
                 else
                     std.fmt.comptimePrint("{}", .{int_value}),
+                enum_width,
             });
         }
     }
@@ -144,13 +130,15 @@ fn emit_enum(
     });
 
     if (type_info.tag_type == u1) {
-        const enum_zero_name = prefix ++ comptime to_pascal_case(
+        const enum_zero_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
             @tagName(@as(Type, @enumFromInt(0))),
-            null,
+            .pascal_case,
+            go_initialisms,
         );
-        const enum_one_name = prefix ++ comptime to_pascal_case(
+        const enum_one_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
             @tagName(@as(Type, @enumFromInt(1))),
-            null,
+            .pascal_case,
+            go_initialisms,
         );
 
         try buffer.print("\tif (i == {s}) {{\n" ++
@@ -167,7 +155,11 @@ fn emit_enum(
 
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
+            const enum_name = prefix ++ comptime SourcePrinter.to_case_initialisms(
+                field.name,
+                .pascal_case,
+                go_initialisms,
+            );
             try buffer.print("\tcase {s}:\n" ++
                 "\t\treturn \"{s}\"\n", .{
                 enum_name,
@@ -198,9 +190,10 @@ fn emit_packed_struct(
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
-        try buffer.print("\t{s} {s}\n", .{
-            to_pascal_case(field.name, min_len),
+        try buffer.print("\t{s:<[2]} {s}\n", .{
+            SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
             go_type(field.type),
+            min_len,
         });
     }
 
@@ -209,7 +202,7 @@ fn emit_packed_struct(
         "func (f {s}) To{s}() {s} {{\n" ++
         "\tvar ret {s} = 0\n\n", .{
         name,
-        to_pascal_case(int_type, null),
+        SourcePrinter.to_case_initialisms(int_type, .pascal_case, go_initialisms),
         int_type,
         int_type,
     });
@@ -220,7 +213,7 @@ fn emit_packed_struct(
         try buffer.print("\tif f.{s} {{\n" ++
             "\t\tret |= (1 << {d})\n" ++
             "\t}}\n\n", .{
-            to_pascal_case(field.name, null),
+            SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
             i,
         });
     }
@@ -243,10 +236,11 @@ fn emit_struct(
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .array => |array| {
-                try buffer.print("\t{s} [{d}]{s}\n", .{
-                    to_pascal_case(field.name, min_len),
+                try buffer.print("\t{s:<[3]} [{d}]{s}\n", .{
+                    SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
                     array.len,
                     go_type(array.child),
+                    min_len,
                 });
             },
             else => {
@@ -255,10 +249,15 @@ fn emit_struct(
                 }
 
                 try buffer.print(
-                    "\t{s} {s}\n",
+                    "\t{s:<[2]} {s}\n",
                     .{
-                        to_pascal_case(field.name, min_len),
+                        SourcePrinter.to_case_initialisms(
+                            field.name,
+                            .pascal_case,
+                            go_initialisms,
+                        ),
                         go_type(field.type),
+                        min_len,
                     },
                 );
             },
@@ -296,7 +295,7 @@ fn emit_struct(
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
                     try buffer.print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{
-                        to_pascal_case(field.name, null),
+                        SourcePrinter.to_case_initialisms(field.name, .pascal_case, go_initialisms),
                         i,
                     });
                 },

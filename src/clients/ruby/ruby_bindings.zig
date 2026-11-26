@@ -39,12 +39,12 @@ fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
 }
 
 fn c_operation_name(comptime operation: tb.Operation) []const u8 {
-    const upper_snake = stdx.to_case(@tagName(operation), .upper_case);
+    const upper_snake = stdx.SourcePrinter.to_case(@tagName(operation), .upper_case);
     return "TB_OPERATION_" ++ upper_snake;
 }
 
 fn c_init_status_name(comptime status: exports.tb_init_status) []const u8 {
-    const upper_snake = stdx.to_case(@tagName(status), .upper_case);
+    const upper_snake = stdx.SourcePrinter.to_case(@tagName(status), .upper_case);
     return "TB_INIT_" ++ upper_snake;
 }
 
@@ -67,26 +67,8 @@ fn type_basename(comptime Type: type) []const u8 {
     return name;
 }
 
-fn to_snake_case(comptime input: []const u8) []const u8 {
-    comptime var output: [input.len * 2]u8 = undefined;
-    comptime var len: usize = 0;
-    inline for (input, 0..) |c, i| {
-        if (c >= 'A' and c <= 'Z') {
-            if (i > 0) {
-                output[len] = '_';
-                len += 1;
-            }
-            output[len] = c + 32;
-        } else {
-            output[len] = c;
-        }
-        len += 1;
-    }
-    return output[0..len];
-}
-
 fn c_type_name(comptime Type: type) []const u8 {
-    return "tb_" ++ to_snake_case(type_basename(Type)) ++ "_t";
+    return "tb_" ++ stdx.SourcePrinter.to_case(type_basename(Type), .snake_case) ++ "_t";
 }
 
 fn ruby_type_name(comptime Type: type) []const u8 {
@@ -134,7 +116,7 @@ fn emit_flags_module(
     inline for (@typeInfo(Type).@"struct".fields, 0..) |field, i| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-        const upper_snake = stdx.to_case(field.name, .upper_case);
+        const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
         buffer.print("    {s} = 1 << {d}\n", .{ upper_snake, i });
     }
     buffer.print("  end\n\n", .{});
@@ -156,7 +138,7 @@ fn emit_enum_module(
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
         }
         if (skip) continue;
-        const upper_snake = stdx.to_case(field.name, .upper_case);
+        const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
         const value: u64 = @intCast(@intFromEnum(@field(Type, field.name)));
         buffer.print("    {s} = {d}\n", .{ upper_snake, value });
     }
@@ -250,7 +232,7 @@ fn emit_rbs_constants_module(
             inline for (info.fields) |field| {
                 if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
                 if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-                const upper_snake = stdx.to_case(field.name, .upper_case);
+                const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
                 buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
@@ -262,7 +244,7 @@ fn emit_rbs_constants_module(
                     skip = skip or comptime std.mem.eql(u8, sf, field.name);
                 }
                 if (skip) continue;
-                const upper_snake = stdx.to_case(field.name, .upper_case);
+                const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
                 buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
@@ -709,6 +691,8 @@ fn emit_c_lookup_serializer(buffer: *Buffer) void {
 }
 
 fn emit_c_event_size(buffer: *Buffer) void {
+    @setEvalBranchQuota(5_000);
+
     buffer.print("static size_t rb_tb_event_size(TB_OPERATION operation) {{\n", .{});
     buffer.print("    switch (operation) {{\n", .{});
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
@@ -734,6 +718,8 @@ fn emit_c_event_size(buffer: *Buffer) void {
 }
 
 fn emit_c_serialize_dispatch(buffer: *Buffer) void {
+    @setEvalBranchQuota(5_000);
+
     buffer.write(
         \\static void rb_tb_serialize(
         \\    TB_OPERATION operation,
@@ -769,6 +755,8 @@ fn emit_c_serialize_dispatch(buffer: *Buffer) void {
 }
 
 fn emit_c_deserialize_dispatch(buffer: *Buffer) void {
+    @setEvalBranchQuota(5_000);
+
     buffer.write(
         \\static VALUE rb_tb_deserialize(
         \\    TB_OPERATION operation,

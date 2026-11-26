@@ -62,6 +62,8 @@ const net = @import("./net.zig");
 pub const IPAddress = net.IPAddress;
 pub const SocketAddress = net.SocketAddress;
 
+pub const SourcePrinter = @import("source_printer.zig").SourcePrinter;
+
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
 pub const MiB = 1 << 20;
@@ -1210,68 +1212,10 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
 
 pub const Casing = enum {
     camel_case,
-    kebab_case,
     pascal_case,
     snake_case,
     upper_case,
 };
-
-/// Converts a snake_case identifier to another identifier case at comptime.
-pub fn to_case(
-    comptime snake_case: []const u8,
-    comptime case: Casing,
-) []const u8 {
-    return comptime blk: {
-        var output: [snake_case.len]u8 = undefined;
-        switch (case) {
-            .kebab_case => {
-                for (snake_case, 0..) |byte, index| output[index] = if (byte == '_') '-' else byte;
-                break :blk comptime_slice(&output, snake_case.len);
-            },
-            .upper_case => {
-                const len = std.ascii.upperString(output[0..], snake_case).len;
-                break :blk comptime_slice(&output, len);
-            },
-            .camel_case, .pascal_case => {
-                var len: usize = 0;
-                var iterator = std.mem.tokenizeScalar(u8, snake_case, '_');
-                while (iterator.next()) |word| {
-                    _ = std.ascii.lowerString(output[len..], word);
-                    output[len] = std.ascii.toUpper(output[len]);
-                    len += word.len;
-                }
-
-                output[0] = switch (case) {
-                    .camel_case => std.ascii.toLower(output[0]),
-                    .pascal_case => std.ascii.toUpper(output[0]),
-                    .kebab_case, .snake_case, .upper_case => unreachable,
-                };
-
-                break :blk comptime_slice(&output, len);
-            },
-            .snake_case => unreachable,
-        }
-    };
-}
-
-test "to_case" {
-    try std.testing.expectEqualStrings("createAccounts", to_case(
-        "create_accounts",
-        .camel_case,
-    ));
-    try std.testing.expectEqualStrings("CreateTransfers", to_case(
-        "create_transfers",
-        .pascal_case,
-    ));
-    try std.testing.expectEqualStrings("user-data-128", to_case(
-        "user_data_128",
-        .kebab_case,
-    ));
-    try std.testing.expectEqualStrings("GET_ACCOUNT_BALANCES", to_case(
-        "get_account_balances",
-        .upper_case,
-    ));
-}
 
 /// Utility for print-if debugging, a-la Rust's dbg! macro.
 ///
@@ -1308,6 +1252,7 @@ comptime {
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
     _ = @import("sort_test.zig");
+    _ = @import("source_printer.zig");
     _ = @import("stack.zig");
     _ = @import("stdx.zig");
     _ = @import("testing/fuzz.zig");
