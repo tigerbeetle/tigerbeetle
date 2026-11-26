@@ -572,15 +572,15 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
                 "Failed to set property \"" ++ field.name ++
                     "\" of " ++ @typeName(Result) ++ " object",
             );
-
-            try translate.set_array_element(
-                env,
-                array,
-                @intCast(i),
-                object,
-                "Failed to set element in results array.",
-            );
         }
+
+        try translate.set_array_element(
+            env,
+            array,
+            @intCast(i),
+            object,
+            "Failed to set element in results array.",
+        );
     }
 
     return array;
