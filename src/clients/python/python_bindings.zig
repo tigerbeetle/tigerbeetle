@@ -3,6 +3,7 @@ const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const assert = std.debug.assert;
 const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 
 const tb = vsr.tigerbeetle;
 
@@ -37,20 +38,6 @@ const mappings_state_machine = .{
 };
 
 const mappings_all = mappings_vsr ++ mappings_state_machine;
-
-const Buffer = struct {
-    inner: std.Io.Writer.Allocating,
-
-    pub fn init(allocator: std.mem.Allocator) Buffer {
-        return .{
-            .inner = .init(allocator),
-        };
-    }
-
-    pub fn print(self: *Buffer, comptime format: []const u8, args: anytype) void {
-        self.inner.writer.print(format, args) catch unreachable;
-    }
-};
 
 fn mapping_name_from_type(mappings: anytype, Type: type) ?[]const u8 {
     comptime for (mappings) |mapping| {
@@ -140,20 +127,22 @@ fn zig_to_python(comptime Type: type) []const u8 {
 }
 
 fn emit_enum(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime type_info: anytype,
     comptime python_name: []const u8,
     comptime skip_fields: []const []const u8,
 ) !void {
     if (@typeInfo(Type) == .@"enum") {
-        buffer.print("class {s}(enum.IntEnum):\n", .{python_name});
+        try printer.print_indented("class {s}(enum.IntEnum):", .{python_name});
+        printer.indent();
     } else {
         // Packed structs.
         assert(@typeInfo(Type) == .@"struct" and @typeInfo(Type).@"struct".layout == .@"packed");
 
-        buffer.print("class {s}(enum.IntFlag):\n", .{python_name});
-        buffer.print("    NONE = 0\n", .{});
+        try printer.print_indented("class {s}(enum.IntFlag):", .{python_name});
+        printer.indent();
+        try printer.write_indented("NONE = 0");
     }
 
     inline for (type_info.fields, 0..) |field, i| {
@@ -164,10 +153,10 @@ fn emit_enum(
         }
 
         if (!skip) {
-            const field_name = stdx.SourcePrinter.to_case(field.name, .upper_case);
+            const field_name = SourcePrinter.to_case(field.name, .upper_case);
             if (@typeInfo(Type) == .@"enum") {
                 const int_value = @intFromEnum(@field(Type, field.name));
-                buffer.print("    {s} = {s}\n", .{
+                try printer.print_indented("{s} = {s}", .{
                     field_name,
                     if (int_value == std.math.maxInt(@TypeOf(int_value)))
                         std.fmt.comptimePrint("0x{X}", .{int_value})
@@ -176,7 +165,7 @@ fn emit_enum(
                 });
             } else {
                 // Packed structs.
-                buffer.print("    {s} = 1 << {}\n", .{
+                try printer.print_indented("{s} = 1 << {}", .{
                     field_name,
                     i,
                 });
@@ -184,23 +173,21 @@ fn emit_enum(
         }
     }
 
-    buffer.print("\n\n", .{});
+    printer.dedent();
+    try printer.write("\n\n");
 }
 
 fn emit_struct_ctypes(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime python_name: []const u8,
     generate_ctypes_to_python: bool,
 ) !void {
-    buffer.print(
-        \\class C{[type_name]s}(ctypes.Structure):
-        \\    @classmethod
-        \\    def from_param(cls, obj: Any) -> Self:
-        \\
-    , .{
-        .type_name = python_name,
-    });
+    try printer.print_indented("class C{s}(ctypes.Structure):", .{python_name});
+    printer.indent();
+    try printer.write_indented("@classmethod");
+    try printer.write_indented("def from_param(cls, obj: Any) -> Self:");
+    printer.indent();
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
@@ -211,13 +198,13 @@ fn emit_struct_ctypes(
         // u128 goes through our custom c_uint128.from_param.
         if (comptime !std.mem.eql(u8, field.name, "reserved") and field_type_info == .int) {
             if (field_is_u128) {
-                buffer.print("        {[field_name]s}_u128 = c_uint128.from_param(" ++
-                    "obj.{[field_name]s}, name=\"{[field_name]s}\")\n", .{
+                try printer.print_indented("{[field_name]s}_u128 = c_uint128.from_param(" ++
+                    "obj.{[field_name]s}, name=\"{[field_name]s}\")", .{
                     .field_name = field.name,
                 });
             } else {
-                buffer.print("        validate_uint(bits={[int_bits]}, " ++
-                    "name=\"{[field_name]s}\", number=obj.{[field_name]s})\n", .{
+                try printer.print_indented("validate_uint(bits={[int_bits]}, " ++
+                    "name=\"{[field_name]s}\", number=obj.{[field_name]s})", .{
                     .field_name = field.name,
                     .int_bits = field_type_info.int.bits,
                 });
@@ -225,7 +212,8 @@ fn emit_struct_ctypes(
         }
     }
 
-    buffer.print("        return cls(\n", .{});
+    try printer.write_indented("return cls(");
+    printer.indent();
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
@@ -234,49 +222,53 @@ fn emit_struct_ctypes(
         const value_suffix = if (field_is_u128) "_u128" else "";
 
         if (comptime !std.mem.eql(u8, field.name, "reserved")) {
-            buffer.print("            {[field_name]s}={[value_prefix]s}" ++
-                "{[field_name]s}{[value_suffix]s},\n", .{
+            try printer.print_indented("{[field_name]s}={[value_prefix]s}" ++
+                "{[field_name]s}{[value_suffix]s},", .{
                 .field_name = field.name,
                 .value_prefix = value_prefix,
                 .value_suffix = value_suffix,
             });
         }
     }
-    buffer.print("        )\n\n", .{});
+    printer.dedent();
+    try printer.write_indented(")");
+    try printer.write_empty_line();
+    printer.dedent();
 
     if (generate_ctypes_to_python) {
-        buffer.print(
-            \\
-            \\    def to_python(self) -> {[type_name]s}:
-            \\        return {[type_name]s}(
-            \\
-        , .{
-            .type_name = python_name,
-        });
+        try printer.write_empty_line();
+        try printer.print_indented("def to_python(self) -> {s}:", .{python_name});
+        printer.indent();
+        try printer.print_indented("return {s}(", .{python_name});
+        printer.indent();
 
         inline for (type_info.fields) |field| {
             if (comptime !std.mem.eql(u8, field.name, "reserved")) {
-                buffer.print("            {s}={s},\n", .{
+                try printer.print_indented("{s}={s},", .{
                     field.name,
                     convert_ctypes_to_python("self." ++ field.name, field.type),
                 });
             }
         }
-        buffer.print("        )\n\n", .{});
+        printer.dedent();
+        try printer.write_indented(")");
+        try printer.write_empty_line();
+        printer.dedent();
     }
 
-    buffer.print("C{s}._fields_ = [ # noqa: SLF001\n", .{python_name});
+    printer.dedent();
+    try printer.print_indented("C{s}._fields_ = [ # noqa: SLF001", .{python_name});
+    printer.indent();
 
     inline for (type_info.fields) |field| {
-        buffer.print("    (\"{s}\", {s}),", .{
+        try printer.print_indented("(\"{s}\", {s}),", .{
             field.name,
             zig_to_ctype(field.type),
         });
-
-        buffer.print("\n", .{});
     }
 
-    buffer.print("]\n\n\n", .{});
+    printer.dedent();
+    try printer.write("]\n\n\n");
 }
 
 fn convert_ctypes_to_python(comptime name: []const u8, comptime Type: type) []const u8 {
@@ -295,51 +287,54 @@ fn convert_ctypes_to_python(comptime name: []const u8, comptime Type: type) []co
 }
 
 fn emit_struct_dataclass(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime python_name: []const u8,
     has_default_initialization: bool,
 ) !void {
-    buffer.print("@dataclass\n", .{});
-    buffer.print("class {s}:\n", .{python_name});
+    try printer.write_indented("@dataclass");
+    try printer.print_indented("class {s}:", .{python_name});
+    printer.indent();
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
         if (comptime !std.mem.eql(u8, field.name, "reserved")) {
             const python_type = zig_to_python(field.type);
-            buffer.print("    {[name]s}: {[python_type]s}", .{
+            try printer.write_indent();
+            try printer.print("{[name]s}: {[python_type]s}", .{
                 .name = field.name,
                 .python_type = python_type,
             });
 
             if (has_default_initialization) {
-                buffer.print(" = ", .{});
+                try printer.write(" = ");
                 if (field_type_info == .@"struct" and
                     field_type_info.@"struct".layout == .@"packed")
                 {
                     // Flags:
-                    buffer.print("{s}.NONE", .{python_type});
+                    try printer.print("{s}.NONE", .{python_type});
                 } else {
                     if (field_type_info == .@"enum") {
                         // Enums - initialized with the default value.
-                        buffer.print("{s}.{s}", .{
+                        try printer.print("{s}.{s}", .{
                             python_type,
-                            stdx.SourcePrinter.to_case(
+                            SourcePrinter.to_case(
                                 @tagName(@as(field.type, @enumFromInt(0))),
                                 .upper_case,
                             ),
                         });
                     } else {
                         // Simple integer types:
-                        buffer.print("0", .{});
+                        try printer.write("0");
                     }
                 }
             }
-            buffer.print("\n", .{});
+            try printer.write("\n");
         }
     }
 
-    buffer.print("\n\n", .{});
+    printer.dedent();
+    try printer.write("\n\n");
 }
 
 fn ctype_type_name(comptime Type: type) []const u8 {
@@ -351,10 +346,10 @@ fn ctype_type_name(comptime Type: type) []const u8 {
 }
 
 fn emit_method(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime operation: tb.Operation,
     options: struct { is_async: bool },
-) void {
+) !void {
     const event_type = comptime if (operation.is_batchable())
         "list[" ++ zig_to_python(operation.EventType()) ++ "]"
     else
@@ -371,7 +366,7 @@ fn emit_method(
         event_name(operation);
 
     // NB: _submit is loosely annotated, the operations define interfaces for the Python developer.
-    buffer.print(
+    try printer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
         \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
         \\            Operation.{[uppercase_name]s},
@@ -390,7 +385,7 @@ fn emit_method(
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = stdx.SourcePrinter.to_case(@tagName(operation), .upper_case),
+            .uppercase_name = SourcePrinter.to_case(@tagName(operation), .upper_case),
             .event_type_c = ctype_type_name(operation.EventType()),
             .result_type_c = ctype_type_name(operation.ResultType()),
         },
@@ -404,8 +399,13 @@ pub fn main(init: std.process.Init) !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var buffer = Buffer.init(allocator);
-    buffer.print(
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = 4,
+        .indent_char = ' ',
+        .comment_marker = "#",
+    });
+    try printer.write(
         \\#########################################################
         \\## This file was auto-generated by python_bindings.zig ##
         \\##              Do not manually modify.                ##
@@ -432,7 +432,7 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\
         \\
-    , .{});
+    );
 
     // Emit enum and direct declarations.
     inline for (mappings_all) |type_mapping| {
@@ -441,7 +441,7 @@ pub fn main(init: std.process.Init) !void {
         switch (@typeInfo(ZigType)) {
             .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
-                .@"packed" => try emit_enum(&buffer, ZigType, info, python_name, &.{"padding"}),
+                .@"packed" => try emit_enum(&printer, ZigType, info, python_name, &.{"padding"}),
                 .@"extern" => continue,
             },
             .@"enum" => |info| {
@@ -450,12 +450,15 @@ pub fn main(init: std.process.Init) !void {
                     skip = &.{ "reserved", "root", "register" };
                 }
 
-                try emit_enum(&buffer, ZigType, info, python_name, skip);
+                try emit_enum(&printer, ZigType, info, python_name, skip);
             },
-            else => buffer.print("{s} = {s}\n\n", .{
-                python_name,
-                zig_to_ctype(ZigType),
-            }),
+            else => {
+                try printer.print_indented("{s} = {s}", .{
+                    python_name,
+                    zig_to_ctype(ZigType),
+                });
+                try printer.write_empty_line();
+            },
         }
     }
 
@@ -476,7 +479,7 @@ pub fn main(init: std.process.Init) !void {
         switch (@typeInfo(ZigType)) {
             .@"struct" => |info| switch (info.layout) {
                 .@"extern" => try emit_struct_dataclass(
-                    &buffer,
+                    &printer,
                     info,
                     python_name,
                     has_default_initialization,
@@ -503,7 +506,7 @@ pub fn main(init: std.process.Init) !void {
                 .auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
                 .@"packed" => continue,
                 .@"extern" => try emit_struct_ctypes(
-                    &buffer,
+                    &printer,
                     info,
                     python_name,
                     generate_ctypes_to_python,
@@ -515,7 +518,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Emit function declarations corresponding to the underlying libtbclient exported functions.
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
-    buffer.print(
+    try printer.write(
         \\# Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
         \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CBatch),
         \\                                ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
@@ -560,14 +563,14 @@ pub fn main(init: std.process.Init) !void {
         \\
         \\
         \\
-    , .{});
+    );
 
     inline for (.{ true, false }) |is_async| {
         const prefix_class = if (is_async) "Async" else "";
 
         // This is annotated loosely, the operations calling it will contain their
         // own annotations so the interface is clear to Python as well.
-        buffer.print(
+        try printer.print(
             \\class {s}StateMachineMixin:
             \\    _submit: Callable[[Operation, Any, Any, Any], Any]
             \\
@@ -584,13 +587,13 @@ pub fn main(init: std.process.Init) !void {
             .query_transfers,
         };
         inline for (operations) |operation| {
-            emit_method(&buffer, operation, .{ .is_async = is_async });
+            try emit_method(&printer, operation, .{ .is_async = is_async });
         }
 
-        buffer.print("\n\n", .{});
+        try printer.write("\n\n");
     }
 
-    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.inner.written());
+    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }
 
 /// Used by client code generation to make clearer APIs: the name of the Event parameter,

@@ -6,28 +6,13 @@ const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const tb = vsr.tigerbeetle;
 const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 
 const flag_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
     .{ tb.AccountFilterFlags, "AccountFilterFlags" },
     .{ tb.QueryFilterFlags, "QueryFilterFlags" },
-};
-
-const Buffer = struct {
-    inner: std.Io.Writer.Allocating,
-
-    pub fn init(allocator: std.mem.Allocator) Buffer {
-        return .{ .inner = .init(allocator) };
-    }
-
-    pub fn print(self: *Buffer, comptime format: []const u8, args: anytype) void {
-        self.inner.writer.print(format, args) catch unreachable;
-    }
-
-    pub fn write(self: *Buffer, bytes: []const u8) void {
-        self.inner.writer.writeAll(bytes) catch unreachable;
-    }
 };
 
 fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
@@ -39,12 +24,12 @@ fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
 }
 
 fn c_operation_name(comptime operation: tb.Operation) []const u8 {
-    const upper_snake = stdx.SourcePrinter.to_case(@tagName(operation), .upper_case);
+    const upper_snake = SourcePrinter.to_case(@tagName(operation), .upper_case);
     return "TB_OPERATION_" ++ upper_snake;
 }
 
 fn c_init_status_name(comptime status: exports.tb_init_status) []const u8 {
-    const upper_snake = stdx.SourcePrinter.to_case(@tagName(status), .upper_case);
+    const upper_snake = SourcePrinter.to_case(@tagName(status), .upper_case);
     return "TB_INIT_" ++ upper_snake;
 }
 
@@ -68,7 +53,7 @@ fn type_basename(comptime Type: type) []const u8 {
 }
 
 fn c_type_name(comptime Type: type) []const u8 {
-    return "tb_" ++ stdx.SourcePrinter.to_case(type_basename(Type), .snake_case) ++ "_t";
+    return "tb_" ++ SourcePrinter.to_case(type_basename(Type), .snake_case) ++ "_t";
 }
 
 fn ruby_type_name(comptime Type: type) []const u8 {
@@ -104,33 +89,37 @@ fn field_reserved(comptime field_name: []const u8) bool {
 }
 
 fn emit_flags_module(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime ruby_name: []const u8,
-) void {
+) !void {
     assert(@typeInfo(Type) == .@"struct");
     assert(@typeInfo(Type).@"struct".layout == .@"packed");
 
-    buffer.print("  module {s}\n", .{ruby_name});
-    buffer.print("    NONE = 0\n", .{});
+    try printer.print_indented("module {s}", .{ruby_name});
+    printer.indent();
+    try printer.write_indented("NONE = 0");
     inline for (@typeInfo(Type).@"struct".fields, 0..) |field, i| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-        const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
-        buffer.print("    {s} = 1 << {d}\n", .{ upper_snake, i });
+        const upper_snake = SourcePrinter.to_case(field.name, .upper_case);
+        try printer.print_indented("{s} = 1 << {d}", .{ upper_snake, i });
     }
-    buffer.print("  end\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
+    try printer.write_empty_line();
 }
 
 fn emit_enum_module(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime ruby_name: []const u8,
     comptime skip_fields: []const []const u8,
-) void {
+) !void {
     assert(@typeInfo(Type) == .@"enum");
 
-    buffer.print("  module {s}\n", .{ruby_name});
+    try printer.print_indented("module {s}", .{ruby_name});
+    printer.indent();
     inline for (@typeInfo(Type).@"enum".fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         comptime var skip = false;
@@ -138,102 +127,119 @@ fn emit_enum_module(
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
         }
         if (skip) continue;
-        const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
+        const upper_snake = SourcePrinter.to_case(field.name, .upper_case);
         const value: u64 = @intCast(@intFromEnum(@field(Type, field.name)));
-        buffer.print("    {s} = {d}\n", .{ upper_snake, value });
+        try printer.print_indented("{s} = {d}", .{ upper_snake, value });
     }
-    buffer.print("  end\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
+    try printer.write_empty_line();
 }
 
-fn emit_field_default(buffer: *Buffer, comptime FieldType: type) void {
+fn emit_field_default(printer: *SourcePrinter, comptime FieldType: type) !void {
     const type_info = @typeInfo(FieldType);
     const is_flags = type_info == .@"struct" and type_info.@"struct".layout == .@"packed";
     if (is_flags) {
-        buffer.print("{s}::NONE", .{comptime ruby_flags_name_from_type(FieldType).?});
+        try printer.print("{s}::NONE", .{comptime ruby_flags_name_from_type(FieldType).?});
     } else {
-        buffer.print("0", .{});
+        try printer.write("0");
     }
 }
 
 fn emit_struct_class(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime ruby_name: []const u8,
     comptime read_only: bool,
-) void {
+) !void {
     assert(@typeInfo(Type) == .@"struct");
     assert(@typeInfo(Type).@"struct".layout == .@"extern");
 
     const fields = @typeInfo(Type).@"struct".fields;
 
-    buffer.print("  class {s}\n", .{ruby_name});
+    try printer.print_indented("class {s}", .{ruby_name});
+    printer.indent();
 
     inline for (fields) |field| {
         if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-        buffer.print(
-            "    attr_{s} :{s}\n",
+        try printer.print_indented(
+            "attr_{s} :{s}",
             .{ if (read_only) "reader" else "accessor", field.name },
         );
         if (comptime read_only and
             std.mem.eql(u8, field.name, "status") and
             result_status_type(Type) != null)
         {
-            buffer.print("    attr_reader :status_name\n", .{});
+            try printer.write_indented("attr_reader :status_name");
         }
     }
-    buffer.print("\n", .{});
+    try printer.write_empty_line();
 
     if (!read_only) {
-        buffer.print("    def initialize(\n", .{});
+        try printer.write_indented("def initialize(");
+        printer.indent();
         comptime var sep: []const u8 = "";
         inline for (fields) |field| {
             if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-            if (sep.len > 0) buffer.print("{s}", .{sep});
-            buffer.print("      {s}: ", .{field.name});
-            emit_field_default(buffer, field.type);
+            if (sep.len > 0) try printer.write(sep);
+            try printer.write_indent();
+            try printer.print("{s}: ", .{field.name});
+            try emit_field_default(printer, field.type);
             sep = ",\n";
         }
-        buffer.print("\n    )\n", .{});
+        try printer.write("\n");
+        printer.dedent();
+        try printer.write_indented(")");
+        printer.indent();
         inline for (fields) |field| {
             if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-            buffer.print("      @{s} = {s}\n", .{ field.name, field.name });
+            try printer.print_indented("@{s} = {s}", .{ field.name, field.name });
         }
-        buffer.print("    end\n", .{});
+        printer.dedent();
+        try printer.write_indented("end");
     } else {
-        buffer.print("    def initialize\n", .{});
+        try printer.write_indented("def initialize");
+        printer.indent();
         inline for (fields) |field| {
             if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-            buffer.print("      @{s} = 0\n", .{field.name});
+            try printer.print_indented("@{s} = 0", .{field.name});
         }
-        buffer.print("    end\n", .{});
+        printer.dedent();
+        try printer.write_indented("end");
 
         if (comptime result_status_type(Type) != null) {
-            buffer.print("\n", .{});
-            buffer.print("    def to_s =\n", .{});
-            buffer.write("      \"#<#{self.class} timestamp=#{@timestamp} ");
-            buffer.write("status_name=#{@status_name}>\"\n");
+            try printer.write_empty_line();
+            try printer.write_indented("def to_s =");
+            printer.indent();
+            try printer.write_indent();
+            try printer.write("\"#<#{self.class} timestamp=#{@timestamp} ");
+            try printer.write("status_name=#{@status_name}>\"\n");
+            printer.dedent();
         }
     }
-    buffer.print("  end\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
+    try printer.write_empty_line();
 }
 
 fn emit_rbs_constants_module(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime ruby_name: []const u8,
     comptime skip_fields: []const []const u8,
-) void {
-    buffer.print("  module {s}\n", .{ruby_name});
+) !void {
+    try printer.print_indented("module {s}", .{ruby_name});
+    printer.indent();
 
     switch (@typeInfo(Type)) {
         .@"struct" => |info| {
             assert(info.layout == .@"packed");
-            buffer.print("    NONE: Integer\n", .{});
+            try printer.write_indented("NONE: Integer");
             inline for (info.fields) |field| {
                 if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
                 if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-                const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
-                buffer.print("    {s}: Integer\n", .{upper_snake});
+                const upper_snake = SourcePrinter.to_case(field.name, .upper_case);
+                try printer.print_indented("{s}: Integer", .{upper_snake});
             }
         },
         .@"enum" => |info| {
@@ -244,82 +250,90 @@ fn emit_rbs_constants_module(
                     skip = skip or comptime std.mem.eql(u8, sf, field.name);
                 }
                 if (skip) continue;
-                const upper_snake = stdx.SourcePrinter.to_case(field.name, .upper_case);
-                buffer.print("    {s}: Integer\n", .{upper_snake});
+                const upper_snake = SourcePrinter.to_case(field.name, .upper_case);
+                try printer.print_indented("{s}: Integer", .{upper_snake});
             }
         },
         else => @compileError("unsupported RBS constants module type: " ++ @typeName(Type)),
     }
 
-    buffer.print("  end\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
+    try printer.write_empty_line();
 }
 
 fn emit_rbs_status_name_alias(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime StatusType: type,
     comptime alias_name: []const u8,
-) void {
+) !void {
     assert(@typeInfo(StatusType) == .@"enum");
 
-    buffer.print("  type {s} =\n", .{alias_name});
-    comptime var sep: []const u8 = "    ";
+    try printer.print_indented("type {s} =", .{alias_name});
+    printer.indent();
+    comptime var sep: []const u8 = "";
     inline for (@typeInfo(StatusType).@"enum".fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        buffer.print("{s}:{s}\n", .{ sep, field.name });
-        sep = "    | ";
+        try printer.print_indented("{s}:{s}", .{ sep, field.name });
+        sep = "| ";
     }
-    buffer.print("\n", .{});
+    printer.dedent();
+    try printer.write_empty_line();
 }
 
 fn emit_rbs_struct_class(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime ruby_name: []const u8,
     comptime read_only: bool,
-) void {
+) !void {
     assert(@typeInfo(Type) == .@"struct");
     assert(@typeInfo(Type).@"struct".layout == .@"extern");
 
     const fields = @typeInfo(Type).@"struct".fields;
 
-    buffer.print("  class {s}\n", .{ruby_name});
+    try printer.print_indented("class {s}", .{ruby_name});
+    printer.indent();
 
     inline for (fields) |field| {
         if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-        buffer.print(
-            "    attr_{s} {s}: Integer\n",
+        try printer.print_indented(
+            "attr_{s} {s}: Integer",
             .{ if (read_only) "reader" else "accessor", field.name },
         );
         if (comptime read_only and std.mem.eql(u8, field.name, "status")) {
             if (comptime Type == tb.CreateAccountResult) {
-                buffer.print("    attr_reader status_name: create_account_status_name\n", .{});
+                try printer.write_indented("attr_reader status_name: create_account_status_name");
             } else if (comptime Type == tb.CreateTransferResult) {
-                buffer.print("    attr_reader status_name: create_transfer_status_name\n", .{});
+                try printer.write_indented("attr_reader status_name: create_transfer_status_name");
             }
         }
     }
-    buffer.print("\n", .{});
+    try printer.write_empty_line();
 
     if (read_only) {
-        buffer.print("    def initialize: () -> void\n", .{});
+        try printer.write_indented("def initialize: () -> void");
     } else {
-        buffer.print("    def initialize: (", .{});
+        try printer.write_indent();
+        try printer.write("def initialize: (");
         comptime var sep: []const u8 = "";
         inline for (fields) |field| {
             if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-            buffer.print("{s}?{s}: Integer", .{ sep, field.name });
+            try printer.print("{s}?{s}: Integer", .{ sep, field.name });
             sep = ", ";
         }
-        buffer.print(") -> void\n", .{});
+        try printer.write(") -> void\n");
     }
 
-    buffer.print("  end\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
+    try printer.write_empty_line();
 }
 
-fn emit_rbs_bindings(buffer: *Buffer) void {
+fn emit_rbs_bindings(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    buffer.write(
+    try printer.write(
         \\########################################################
         \\## This file was auto-generated by ruby_bindings.zig ##
         \\##              Do not manually modify.              ##
@@ -341,9 +355,9 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
         \\
         \\  class Client
     );
-    buffer.write("\n    def self.open: (cluster_id: Integer, replica_addresses: String)");
-    buffer.write(" { (Client) -> untyped } -> untyped\n\n");
-    buffer.write(
+    try printer.write("\n    def self.open: (cluster_id: Integer, replica_addresses: String)");
+    try printer.write(" { (Client) -> untyped } -> untyped\n\n");
+    try printer.write(
         \\    def initialize: (cluster_id: Integer, replica_addresses: String) -> void
         \\    def close: () -> nil
         \\
@@ -360,43 +374,45 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
         \\
     );
 
+    printer.indent();
     inline for (flag_mappings) |mapping| {
         const ZigType, const ruby_name = mapping;
-        emit_rbs_constants_module(buffer, ZigType, ruby_name, &.{});
+        try emit_rbs_constants_module(printer, ZigType, ruby_name, &.{});
     }
 
-    emit_rbs_constants_module(buffer, exports.tb_operation, "Operation", &.{
+    try emit_rbs_constants_module(printer, exports.tb_operation, "Operation", &.{
         "reserved", "root", "register", "pulse", "get_change_events",
     });
-    emit_rbs_constants_module(buffer, tb.CreateAccountStatus, "CreateAccountStatus", &.{});
-    emit_rbs_constants_module(buffer, tb.CreateTransferStatus, "CreateTransferStatus", &.{});
+    try emit_rbs_constants_module(printer, tb.CreateAccountStatus, "CreateAccountStatus", &.{});
+    try emit_rbs_constants_module(printer, tb.CreateTransferStatus, "CreateTransferStatus", &.{});
 
-    emit_rbs_struct_class(buffer, tb.Account, "Account", false);
-    emit_rbs_struct_class(buffer, tb.Transfer, "Transfer", false);
-    emit_rbs_struct_class(buffer, tb.AccountFilter, "AccountFilter", false);
-    emit_rbs_struct_class(buffer, tb.QueryFilter, "QueryFilter", false);
+    try emit_rbs_struct_class(printer, tb.Account, "Account", false);
+    try emit_rbs_struct_class(printer, tb.Transfer, "Transfer", false);
+    try emit_rbs_struct_class(printer, tb.AccountFilter, "AccountFilter", false);
+    try emit_rbs_struct_class(printer, tb.QueryFilter, "QueryFilter", false);
 
-    emit_rbs_struct_class(buffer, tb.AccountBalance, "AccountBalance", true);
-    emit_rbs_status_name_alias(
-        buffer,
+    try emit_rbs_struct_class(printer, tb.AccountBalance, "AccountBalance", true);
+    try emit_rbs_status_name_alias(
+        printer,
         tb.CreateAccountStatus,
         "create_account_status_name",
     );
-    emit_rbs_status_name_alias(
-        buffer,
+    try emit_rbs_status_name_alias(
+        printer,
         tb.CreateTransferStatus,
         "create_transfer_status_name",
     );
-    emit_rbs_struct_class(buffer, tb.CreateAccountResult, "CreateAccountResult", true);
-    emit_rbs_struct_class(buffer, tb.CreateTransferResult, "CreateTransferResult", true);
+    try emit_rbs_struct_class(printer, tb.CreateAccountResult, "CreateAccountResult", true);
+    try emit_rbs_struct_class(printer, tb.CreateTransferResult, "CreateTransferResult", true);
 
-    buffer.print("end\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
 }
 
-fn emit_ruby_bindings(buffer: *Buffer) void {
+fn emit_ruby_bindings(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    buffer.print(
+    try printer.write(
         \\########################################################
         \\## This file was auto-generated by ruby_bindings.zig ##
         \\##              Do not manually modify.              ##
@@ -404,39 +420,42 @@ fn emit_ruby_bindings(buffer: *Buffer) void {
         \\
         \\module TigerBeetle
         \\
-    , .{});
+    );
+
+    printer.indent();
 
     // Flag modules (packed structs).
     inline for (flag_mappings) |mapping| {
         const ZigType, const ruby_name = mapping;
-        emit_flags_module(buffer, ZigType, ruby_name);
+        try emit_flags_module(printer, ZigType, ruby_name);
     }
 
     // Operation constants.
-    emit_enum_module(buffer, exports.tb_operation, "Operation", &.{
+    try emit_enum_module(printer, exports.tb_operation, "Operation", &.{
         "reserved", "root", "register", "pulse", "get_change_events",
     });
 
     // Status constants.
-    emit_enum_module(buffer, tb.CreateAccountStatus, "CreateAccountStatus", &.{});
-    emit_enum_module(buffer, tb.CreateTransferStatus, "CreateTransferStatus", &.{});
+    try emit_enum_module(printer, tb.CreateAccountStatus, "CreateAccountStatus", &.{});
+    try emit_enum_module(printer, tb.CreateTransferStatus, "CreateTransferStatus", &.{});
 
     // Struct classes — input types (read-write, yield self).
-    emit_struct_class(buffer, tb.Account, "Account", false);
-    emit_struct_class(buffer, tb.Transfer, "Transfer", false);
-    emit_struct_class(buffer, tb.AccountFilter, "AccountFilter", false);
-    emit_struct_class(buffer, tb.QueryFilter, "QueryFilter", false);
+    try emit_struct_class(printer, tb.Account, "Account", false);
+    try emit_struct_class(printer, tb.Transfer, "Transfer", false);
+    try emit_struct_class(printer, tb.AccountFilter, "AccountFilter", false);
+    try emit_struct_class(printer, tb.QueryFilter, "QueryFilter", false);
 
     // Struct classes — response-only types (read-only, no yield).
-    emit_struct_class(buffer, tb.AccountBalance, "AccountBalance", true);
-    emit_struct_class(buffer, tb.CreateAccountResult, "CreateAccountResult", true);
-    emit_struct_class(buffer, tb.CreateTransferResult, "CreateTransferResult", true);
+    try emit_struct_class(printer, tb.AccountBalance, "AccountBalance", true);
+    try emit_struct_class(printer, tb.CreateAccountResult, "CreateAccountResult", true);
+    try emit_struct_class(printer, tb.CreateTransferResult, "CreateTransferResult", true);
 
-    buffer.print("end\n", .{});
+    printer.dedent();
+    try printer.write_indented("end");
 }
 
-fn emit_c_header_preamble(buffer: *Buffer) void {
-    buffer.write(
+fn emit_c_header_preamble(printer: *SourcePrinter) !void {
+    try printer.write(
         \\////////////////////////////////////////////////////////
         \\// This file was auto-generated by ruby_bindings.zig //
         \\//              Do not manually modify.              //
@@ -497,54 +516,63 @@ fn emit_c_header_preamble(buffer: *Buffer) void {
     );
 }
 
-fn emit_c_init_error_message(buffer: *Buffer) void {
-    buffer.print("static const char *rb_tb_init_error_message(TB_INIT_STATUS status) {{\n", .{});
-    buffer.print("    switch (status) {{\n", .{});
+fn emit_c_init_error_message(printer: *SourcePrinter) !void {
+    try printer.write_indented(
+        "static const char *rb_tb_init_error_message(TB_INIT_STATUS status) {",
+    );
+    printer.indent();
+    try printer.write_indented("switch (status) {");
     inline for (@typeInfo(exports.tb_init_status).@"enum".fields) |field| {
         const status: exports.tb_init_status = @enumFromInt(field.value);
-        buffer.print("    case {s}:\n", .{comptime c_init_status_name(status)});
-        buffer.print("        return \"{s}\";\n", .{field.name});
+        try printer.print_indented("case {s}:", .{comptime c_init_status_name(status)});
+        printer.indent();
+        try printer.print_indented("return \"{s}\";", .{field.name});
+        printer.dedent();
     }
-    buffer.write(
-        \\    default:
-        \\        return "unknown";
-        \\    }
-        \\}
-        \\
-        \\
-    );
+    try printer.write_indented("default:");
+    printer.indent();
+    try printer.write_indented("return \"unknown\";");
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_c_status_name_function(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime StatusType: type,
     comptime function_name: []const u8,
-) void {
+) !void {
     assert(@typeInfo(StatusType) == .@"enum");
 
-    buffer.print("static VALUE {s}(uint32_t status) {{\n", .{function_name});
-    buffer.print("    switch (status) {{\n", .{});
+    try printer.print_indented("static VALUE {s}(uint32_t status) {{", .{function_name});
+    printer.indent();
+    try printer.write_indented("switch (status) {");
     inline for (@typeInfo(StatusType).@"enum".fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         const value: u64 = @intCast(@intFromEnum(@field(StatusType, field.name)));
-        buffer.print("    case {d}:\n", .{value});
-        buffer.print("        return ID2SYM(rb_intern(\"{s}\"));\n", .{field.name});
+        try printer.print_indented("case {d}:", .{value});
+        printer.indent();
+        try printer.print_indented("return ID2SYM(rb_intern(\"{s}\"));", .{field.name});
+        printer.dedent();
     }
-    buffer.write(
-        \\    default:
-        \\        tb_assert(false);
-        \\        return Qnil;
-        \\    }
-        \\}
-    );
-    buffer.write("\n\n");
+    try printer.write_indented("default:");
+    printer.indent();
+    try printer.write_indented("tb_assert(false);");
+    try printer.write_indented("return Qnil;");
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_c_num_from_ruby(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime FieldType: type,
     comptime field_name: []const u8,
-) void {
+) !void {
     const bits = comptime int_bits(FieldType);
     const macro: []const u8 = switch (bits) {
         8 => "RB_NUM2CHR",
@@ -553,132 +581,149 @@ fn emit_c_num_from_ruby(
         64 => "RB_NUM2ULL",
         else => @compileError("unsupported Ruby numeric field"),
     };
-    buffer.print("{s}(rb_tb_ivar_get_checked(item_rb, {s}))", .{ macro, field_name });
+    try printer.print("{s}(rb_tb_ivar_get_checked(item_rb, {s}))", .{ macro, field_name });
 }
 
 fn emit_c_value_from_field(
-    buffer: *Buffer,
+    printer: *SourcePrinter,
     comptime FieldType: type,
     comptime field_expr: []const u8,
-) void {
+) !void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
-        8, 16, 32 => buffer.print("RB_UINT2NUM({s})", .{field_expr}),
-        64 => buffer.print("RB_ULL2NUM({s})", .{field_expr}),
-        128 => buffer.print("rb_tb_unpack_u128(&{s})", .{field_expr}),
+        8, 16, 32 => try printer.print("RB_UINT2NUM({s})", .{field_expr}),
+        64 => try printer.print("RB_ULL2NUM({s})", .{field_expr}),
+        128 => try printer.print("rb_tb_unpack_u128(&{s})", .{field_expr}),
         else => @compileError("unsupported C numeric field"),
     }
 }
 
-fn emit_c_serialize_struct(buffer: *Buffer, comptime operation: tb.Operation) void {
+fn emit_c_serialize_struct(printer: *SourcePrinter, comptime operation: tb.Operation) !void {
     const Type = operation.EventType();
     const operation_name = comptime operation_function_name(operation);
     const c_name = comptime c_type_name(Type);
-    buffer.print(
-        "static void rb_tb_serialize_{s}(VALUE items_rb, uint8_t *buf, long count) {{\n",
+    try printer.print_indented(
+        "static void rb_tb_serialize_{s}(VALUE items_rb, uint8_t *buf, long count) {{",
         .{
             operation_name,
         },
     );
-    buffer.print("    {s} *items = ({s} *)buf;\n", .{ c_name, c_name });
-    buffer.print("    for (long i = 0; i < count; i++) {{\n", .{});
-    buffer.print("        VALUE item_rb = RARRAY_AREF(items_rb, i);\n", .{});
-    buffer.print("        {s} *item = &items[i];\n", .{c_name});
+    printer.indent();
+    try printer.print_indented("{s} *items = ({s} *)buf;", .{ c_name, c_name });
+    try printer.write_indented("for (long i = 0; i < count; i++) {");
+    printer.indent();
+    try printer.write_indented("VALUE item_rb = RARRAY_AREF(items_rb, i);");
+    try printer.print_indented("{s} *item = &items[i];", .{c_name});
 
     inline for (@typeInfo(Type).@"struct".fields) |field| {
         if (comptime field_reserved(field.name)) {
             switch (@typeInfo(field.type)) {
-                .array => buffer.print(
-                    "        memset(item->{s}, 0, sizeof(item->{s}));\n",
+                .array => try printer.print_indented(
+                    "memset(item->{s}, 0, sizeof(item->{s}));",
                     .{ field.name, field.name },
                 ),
-                else => buffer.print("        item->{s} = 0;\n", .{field.name}),
+                else => try printer.print_indented("item->{s} = 0;", .{field.name}),
             }
             continue;
         }
         switch (@typeInfo(field.type)) {
             .int => |info| if (info.bits == 128) {
-                buffer.print(
-                    "        rb_tb_pack_u128_checked(item_rb, item, {s});\n",
+                try printer.print_indented(
+                    "rb_tb_pack_u128_checked(item_rb, item, {s});",
                     .{field.name},
                 );
             } else {
-                buffer.print("        item->{s} = ", .{field.name});
-                emit_c_num_from_ruby(buffer, field.type, field.name);
-                buffer.print(";\n", .{});
+                try printer.write_indent();
+                try printer.print("item->{s} = ", .{field.name});
+                try emit_c_num_from_ruby(printer, field.type, field.name);
+                try printer.write(";\n");
             },
             .@"enum", .@"struct" => {
-                buffer.print("        item->{s} = ", .{field.name});
-                emit_c_num_from_ruby(buffer, field.type, field.name);
-                buffer.print(";\n", .{});
+                try printer.write_indent();
+                try printer.print("item->{s} = ", .{field.name});
+                try emit_c_num_from_ruby(printer, field.type, field.name);
+                try printer.write(";\n");
             },
             else => @compileError("unsupported serializer field: " ++ @typeName(field.type)),
         }
     }
 
-    buffer.print("    }}\n", .{});
-    buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
-fn emit_c_deserialize_struct(buffer: *Buffer, comptime operation: tb.Operation) void {
+fn emit_c_deserialize_struct(printer: *SourcePrinter, comptime operation: tb.Operation) !void {
     const Type = operation.ResultType();
     const operation_name = comptime operation_function_name(operation);
     const c_name = comptime c_type_name(Type);
-    buffer.print(
-        "static VALUE rb_tb_deserialize_{s}(const uint8_t *buf, uint32_t buf_size) {{\n",
+    try printer.print_indented(
+        "static VALUE rb_tb_deserialize_{s}(const uint8_t *buf, uint32_t buf_size) {{",
         .{operation_name},
     );
-    buffer.print("    VALUE klass = rb_path2class(\"TigerBeetle::{s}\");\n", .{
+    printer.indent();
+    try printer.print_indented("VALUE klass = rb_path2class(\"TigerBeetle::{s}\");", .{
         comptime ruby_type_name(Type),
     });
-    buffer.print("    tb_assert(buf_size % sizeof({s}) == 0);\n", .{c_name});
-    buffer.print("    long count = (long)(buf_size / sizeof({s}));\n", .{c_name});
-    buffer.print("    VALUE results = rb_ary_new_capa(count);\n", .{});
-    buffer.print("    const {s} *items = (const {s} *)buf;\n", .{ c_name, c_name });
-    buffer.print("    for (long i = 0; i < count; i++) {{\n", .{});
-    buffer.print("        const {s} *item = &items[i];\n", .{c_name});
-    buffer.print("        VALUE obj = rb_obj_alloc(klass);\n", .{});
+    try printer.print_indented("tb_assert(buf_size % sizeof({s}) == 0);", .{c_name});
+    try printer.print_indented("long count = (long)(buf_size / sizeof({s}));", .{c_name});
+    try printer.write_indented("VALUE results = rb_ary_new_capa(count);");
+    try printer.print_indented("const {s} *items = (const {s} *)buf;", .{ c_name, c_name });
+    try printer.write_indented("for (long i = 0; i < count; i++) {");
+    printer.indent();
+    try printer.print_indented("const {s} *item = &items[i];", .{c_name});
+    try printer.write_indented("VALUE obj = rb_obj_alloc(klass);");
 
     inline for (@typeInfo(Type).@"struct".fields) |field| {
         if (comptime field_reserved(field.name)) {
             switch (@typeInfo(field.type)) {
-                .array => buffer.print(
-                    \\        uint8_t zero[sizeof(item->{s})] = {{0}};
-                    \\        tb_assert(memcmp(item->{s}, zero, sizeof(item->{s})) == 0);
-                    \\
-                ,
-                    .{ field.name, field.name, field.name },
-                ),
-                else => buffer.print("        tb_assert(item->{s} == 0);\n", .{field.name}),
+                .array => {
+                    try printer.print_indented(
+                        "uint8_t zero[sizeof(item->{s})] = {{0}};",
+                        .{field.name},
+                    );
+                    try printer.print_indented(
+                        "tb_assert(memcmp(item->{s}, zero, sizeof(item->{s})) == 0);",
+                        .{ field.name, field.name },
+                    );
+                },
+                else => try printer.print_indented("tb_assert(item->{s} == 0);", .{field.name}),
             }
             continue;
         }
         const field_expr = "item->" ++ field.name;
-        buffer.print("        rb_ivar_set(obj, rb_intern(\"@{s}\"), ", .{field.name});
-        emit_c_value_from_field(buffer, field.type, field_expr);
-        buffer.print(");\n", .{});
+        try printer.write_indent();
+        try printer.print("rb_ivar_set(obj, rb_intern(\"@{s}\"), ", .{field.name});
+        try emit_c_value_from_field(printer, field.type, field_expr);
+        try printer.write(");\n");
         if (comptime std.mem.eql(u8, field.name, "status")) {
             if (comptime result_status_type(Type) != null) {
-                buffer.print(
-                    \\        rb_ivar_set(
-                    \\            obj,
-                    \\            rb_intern("@status_name"),
-                    \\            rb_tb_{s}_status_name(item->status)
-                    \\        );
-                    \\
-                , .{operation_name});
+                try printer.write_indented("rb_ivar_set(");
+                printer.indent();
+                try printer.write_indented("obj,");
+                try printer.write_indented("rb_intern(\"@status_name\"),");
+                try printer.print_indented("rb_tb_{s}_status_name(item->status)", .{
+                    operation_name,
+                });
+                printer.dedent();
+                try printer.write_indented(");");
             }
         }
     }
 
-    buffer.print("        rb_ary_push(results, obj);\n", .{});
-    buffer.print("    }}\n", .{});
-    buffer.print("    return results;\n", .{});
-    buffer.print("}}\n\n", .{});
+    try printer.write_indented("rb_ary_push(results, obj);");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_indented("return results;");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
-fn emit_c_lookup_serializer(buffer: *Buffer) void {
-    buffer.write(
+fn emit_c_lookup_serializer(printer: *SourcePrinter) !void {
+    try printer.write(
         \\static void rb_tb_serialize_u128(VALUE items_rb, uint8_t *buf, long count) {
         \\    tb_uint128_t *ids = (tb_uint128_t *)buf;
         \\    for (long i = 0; i < count; i++) {
@@ -690,37 +735,42 @@ fn emit_c_lookup_serializer(buffer: *Buffer) void {
     );
 }
 
-fn emit_c_event_size(buffer: *Buffer) void {
+fn emit_c_event_size(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(5_000);
 
-    buffer.print("static size_t rb_tb_event_size(TB_OPERATION operation) {{\n", .{});
-    buffer.print("    switch (operation) {{\n", .{});
+    try printer.write_indented("static size_t rb_tb_event_size(TB_OPERATION operation) {");
+    printer.indent();
+    try printer.write_indented("switch (operation) {");
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
         if (comptime !operation_supported(operation)) continue;
         const Event = operation.EventType();
-        buffer.print("    case {s}:\n", .{comptime c_operation_name(operation)});
+        try printer.print_indented("case {s}:", .{comptime c_operation_name(operation)});
+        printer.indent();
         if (Event == u128) {
-            buffer.print("        return sizeof(tb_uint128_t);\n", .{});
+            try printer.write_indented("return sizeof(tb_uint128_t);");
         } else {
-            buffer.print("        return sizeof({s});\n", .{comptime c_type_name(Event)});
+            try printer.print_indented("return sizeof({s});", .{comptime c_type_name(Event)});
         }
+        printer.dedent();
     }
-    buffer.write(
-        \\    default:
-        \\        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-        \\        return 0;
-        \\    }
-        \\}
-        \\
-        \\
+    try printer.write_indented("default:");
+    printer.indent();
+    try printer.write_indented(
+        "rb_raise(rb_eRuntimeError, \"unsupported operation: %d\", (int)operation);",
     );
+    try printer.write_indented("return 0;");
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
-fn emit_c_serialize_dispatch(buffer: *Buffer) void {
+fn emit_c_serialize_dispatch(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(5_000);
 
-    buffer.write(
+    try printer.write(
         \\static void rb_tb_serialize(
         \\    TB_OPERATION operation,
         \\    VALUE items_rb,
@@ -729,35 +779,40 @@ fn emit_c_serialize_dispatch(buffer: *Buffer) void {
         \\) {
         \\
     );
-    buffer.print("    switch (operation) {{\n", .{});
+    printer.indent();
+    try printer.write_indented("switch (operation) {");
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
         if (comptime !operation_supported(operation)) continue;
         const Event = operation.EventType();
-        buffer.print("    case {s}:\n", .{comptime c_operation_name(operation)});
+        try printer.print_indented("case {s}:", .{comptime c_operation_name(operation)});
+        printer.indent();
         if (Event == u128) {
-            buffer.print("        rb_tb_serialize_u128(items_rb, buf, count);\n", .{});
+            try printer.write_indented("rb_tb_serialize_u128(items_rb, buf, count);");
         } else {
-            buffer.print("        rb_tb_serialize_{s}(items_rb, buf, count);\n", .{
+            try printer.print_indented("rb_tb_serialize_{s}(items_rb, buf, count);", .{
                 comptime operation_function_name(operation),
             });
         }
-        buffer.print("        break;\n", .{});
+        try printer.write_indented("break;");
+        printer.dedent();
     }
-    buffer.write(
-        \\    default:
-        \\        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-        \\    }
-        \\}
-        \\
-        \\
+    try printer.write_indented("default:");
+    printer.indent();
+    try printer.write_indented(
+        "rb_raise(rb_eRuntimeError, \"unsupported operation: %d\", (int)operation);",
     );
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
-fn emit_c_deserialize_dispatch(buffer: *Buffer) void {
+fn emit_c_deserialize_dispatch(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(5_000);
 
-    buffer.write(
+    try printer.write(
         \\static VALUE rb_tb_deserialize(
         \\    TB_OPERATION operation,
         \\    const uint8_t *buf,
@@ -765,36 +820,41 @@ fn emit_c_deserialize_dispatch(buffer: *Buffer) void {
         \\) {
         \\
     );
-    buffer.print("    switch (operation) {{\n", .{});
+    printer.indent();
+    try printer.write_indented("switch (operation) {");
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
         if (comptime !operation_supported(operation)) continue;
-        buffer.print("    case {s}:\n", .{comptime c_operation_name(operation)});
-        buffer.print("        return rb_tb_deserialize_{s}(buf, buf_size);\n", .{
+        try printer.print_indented("case {s}:", .{comptime c_operation_name(operation)});
+        printer.indent();
+        try printer.print_indented("return rb_tb_deserialize_{s}(buf, buf_size);", .{
             comptime operation_function_name(operation),
         });
+        printer.dedent();
     }
-    buffer.write(
-        \\    default:
-        \\        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-        \\    }
-        \\}
-        \\
+    try printer.write_indented("default:");
+    printer.indent();
+    try printer.write_indented(
+        "rb_raise(rb_eRuntimeError, \"unsupported operation: %d\", (int)operation);",
     );
+    printer.dedent();
+    try printer.write_indented("}");
+    printer.dedent();
+    try printer.write_indented("}");
 }
 
-fn emit_c_header(buffer: *Buffer) void {
+fn emit_c_header(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    emit_c_header_preamble(buffer);
-    emit_c_init_error_message(buffer);
-    emit_c_status_name_function(
-        buffer,
+    try emit_c_header_preamble(printer);
+    try emit_c_init_error_message(printer);
+    try emit_c_status_name_function(
+        printer,
         tb.CreateAccountStatus,
         "rb_tb_create_accounts_status_name",
     );
-    emit_c_status_name_function(
-        buffer,
+    try emit_c_status_name_function(
+        printer,
         tb.CreateTransferStatus,
         "rb_tb_create_transfers_status_name",
     );
@@ -802,16 +862,16 @@ fn emit_c_header(buffer: *Buffer) void {
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
         if (comptime !operation_supported(operation)) continue;
-        if (operation.EventType() != u128) emit_c_serialize_struct(buffer, operation);
-        emit_c_deserialize_struct(buffer, operation);
+        if (operation.EventType() != u128) try emit_c_serialize_struct(printer, operation);
+        try emit_c_deserialize_struct(printer, operation);
     }
 
-    emit_c_lookup_serializer(buffer);
-    emit_c_event_size(buffer);
-    emit_c_serialize_dispatch(buffer);
-    emit_c_deserialize_dispatch(buffer);
+    try emit_c_lookup_serializer(printer);
+    try emit_c_event_size(printer);
+    try emit_c_serialize_dispatch(printer);
+    try emit_c_deserialize_dispatch(printer);
 
-    buffer.print("#endif\n", .{});
+    try printer.write_indented("#endif");
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -819,17 +879,23 @@ pub fn main(init: std.process.Init) !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var buffer = Buffer.init(allocator);
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    const is_c = comptime std.mem.eql(u8, generator_options.output, "c_header");
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = if (is_c) 4 else 2,
+        .indent_char = ' ',
+        .comment_marker = if (is_c) "//" else "#",
+    });
 
     if (comptime std.mem.eql(u8, generator_options.output, "ruby")) {
-        emit_ruby_bindings(&buffer);
+        try emit_ruby_bindings(&printer);
     } else if (comptime std.mem.eql(u8, generator_options.output, "rbs")) {
-        emit_rbs_bindings(&buffer);
+        try emit_rbs_bindings(&printer);
     } else if (comptime std.mem.eql(u8, generator_options.output, "c_header")) {
-        emit_c_header(&buffer);
+        try emit_c_header(&printer);
     } else {
         @compileError("unsupported ruby bindings output mode");
     }
 
-    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.inner.written());
+    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }

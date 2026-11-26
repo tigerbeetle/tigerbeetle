@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 
 const TypeMapping = struct {
     source: type,
@@ -139,7 +140,7 @@ fn resolve_rust_backing_integer(comptime integer_type: type) []const u8 {
 }
 
 fn emit_bitflags(
-    writer: anytype,
+    printer: *SourcePrinter,
     comptime type_info: std.builtin.Type.Struct,
     comptime rust_name: []const u8,
     comptime skip_fields: []const []const u8,
@@ -150,7 +151,7 @@ fn emit_bitflags(
 
     const backing_type_text = resolve_rust_backing_integer(type_info.backing_integer.?);
 
-    try writer.print(
+    try printer.print(
         \\#[derive(Copy, Clone, Debug, Default)]
         \\#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
         \\#[repr(transparent)]
@@ -158,7 +159,8 @@ fn emit_bitflags(
         \\
     , .{ .rust_name = rust_name, .backing_type_text = backing_type_text });
 
-    try writer.print("impl {s} {{\n", .{rust_name});
+    try printer.print_indented("impl {s} {{", .{rust_name});
+    printer.indent();
     {
         inline for (type_info.fields, 0..) |field, bit_index| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
@@ -169,20 +171,22 @@ fn emit_bitflags(
             if (skip) continue;
 
             assert(field.type == bool);
-            const field_name = stdx.SourcePrinter.to_case(field.name, .pascal_case);
-            try writer.print("    pub const {s}: {s} = {s}(1 << {});\n", .{
+            const field_name = SourcePrinter.to_case(field.name, .pascal_case);
+            try printer.print_indented("pub const {s}: {s} = {s}(1 << {});", .{
                 field_name,
                 rust_name,
                 rust_name,
                 bit_index,
             });
         }
-        try writer.print("\n", .{});
-        try writer.print("    pub fn empty() -> Self {{ {s}(0) }}\n", .{rust_name});
+        try printer.write_empty_line();
+        try printer.print_indented("pub fn empty() -> Self {{ {s}(0) }}", .{rust_name});
     }
-    try writer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 
-    try writer.print(
+    try printer.print(
         \\impl std::ops::BitOr for {[rust_name]s} {{
         \\    type Output = {[rust_name]s};
         \\    fn bitor(self, rhs: Self) -> Self::Output {{
@@ -195,7 +199,7 @@ fn emit_bitflags(
 }
 
 fn emit_enum_direct(
-    writer: anytype,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime type_info: std.builtin.Type.Enum,
     comptime rust_name: []const u8,
@@ -203,47 +207,59 @@ fn emit_enum_direct(
     @setEvalBranchQuota(2000);
     const backing_type_text = resolve_rust_backing_integer(type_info.tag_type);
 
-    try writer.print("#[repr({s})]\n", .{backing_type_text});
-    try writer.print("#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]\n", .{});
-    try writer.print("#[non_exhaustive]\n", .{});
-    try writer.print("pub enum {s} {{\n", .{rust_name});
+    try printer.print_indented("#[repr({s})]", .{backing_type_text});
+    try printer.write_indented(
+        "#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]",
+    );
+    try printer.write_indented("#[non_exhaustive]");
+    try printer.print_indented("pub enum {s} {{", .{rust_name});
+    printer.indent();
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        const field_name = stdx.SourcePrinter.to_case(field.name, .pascal_case);
+        const field_name = SourcePrinter.to_case(field.name, .pascal_case);
         const int_value = @intFromEnum(@field(Type, field.name));
         const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
-        try writer.print("    {s} = " ++ int_fmt ++ ",\n", .{ field_name, int_value });
+        try printer.print_indented("{s} = " ++ int_fmt ++ ",", .{ field_name, int_value });
     }
-    try writer.print("}}\n\n", .{}); // enum close
+    printer.dedent();
+    try printer.write_indented("}"); // enum close
+    try printer.write_empty_line();
 
     { // convert from integer to enum
-        try writer.print("impl From<{s}> for {s} {{\n", .{ backing_type_text, rust_name });
-        try writer.print(
-            \\    fn from(value: {s}) -> {s} {{
-            \\        match value {{
-            \\
-        , .{ backing_type_text, rust_name });
+        try printer.print_indented("impl From<{s}> for {s} {{", .{ backing_type_text, rust_name });
+        printer.indent();
+        try printer.print_indented("fn from(value: {s}) -> {s} {{", .{
+            backing_type_text,
+            rust_name,
+        });
+        printer.indent();
+        try printer.write_indented("match value {");
+        printer.indent();
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.SourcePrinter.to_case(field.name, .pascal_case);
+            const field_name = SourcePrinter.to_case(field.name, .pascal_case);
             const int_value = @intFromEnum(@field(Type, field.name));
             const int_fmt = if (int_value == std.math.maxInt(@TypeOf(int_value))) "0x{X}" else "{}";
-            try writer.print("            " ++ int_fmt ++ " => {s}::{s},\n", .{
+            try printer.print_indented(int_fmt ++ " => {s}::{s},", .{
                 int_value,
                 rust_name,
                 field_name,
             });
         }
-        try writer.print(
-            \\            other_value => panic!("cannot convert {s} {{other_value}} to {s}")
-            \\        }}
-            \\    }}
-            \\
-        , .{ backing_type_text, rust_name });
-        try writer.print("}}\n\n", .{}); // impl From<int> close
+        try printer.print_indented(
+            "other_value => panic!(\"cannot convert {s} {{other_value}} to {s}\")",
+            .{ backing_type_text, rust_name },
+        );
+        printer.dedent();
+        try printer.write_indented("}");
+        printer.dedent();
+        try printer.write_indented("}");
+        printer.dedent();
+        try printer.write_indented("}"); // impl From<int> close
+        try printer.write_empty_line();
     }
     { // convert from enum to integer
-        try writer.print(
+        try printer.print(
             \\impl From<{[enum_type]s}> for {[int_type]s} {{
             \\    fn from(value: {[enum_type]s}) -> {[int_type]s} {{
             \\        value as {[int_type]s}
@@ -254,7 +270,7 @@ fn emit_enum_direct(
         , .{ .enum_type = rust_name, .int_type = backing_type_text });
     }
     { // implement display
-        try writer.print(
+        try printer.print(
             \\ impl core::fmt::Display for {[enum_name]s} {{
             \\     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {{
             \\         match self {{
@@ -262,24 +278,24 @@ fn emit_enum_direct(
         , .{ .enum_name = rust_name });
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const field_name = stdx.SourcePrinter.to_case(field.name, .pascal_case);
-            try writer.print(
+            const field_name = SourcePrinter.to_case(field.name, .pascal_case);
+            try printer.print(
                 "             Self::{[field_name]s} => f.write_str(\"{[field_name]s}\"),\n",
                 .{ .field_name = field_name },
             );
         }
-        try writer.print(
-            \\        }}
-            \\    }}
-            \\}}
+        try printer.write(
+            \\        }
+            \\    }
+            \\}
             \\
             \\
-        , .{});
+        );
     }
 }
 
 fn emit_enum_manual(
-    writer: anytype,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime type_info: std.builtin.Type.Enum,
     comptime rust_name: []const u8,
@@ -289,14 +305,14 @@ fn emit_enum_manual(
 
     const backing_type_text = resolve_rust_backing_integer(type_info.tag_type);
 
-    try writer.print("pub type {s} = {s};\n", .{ rust_name, backing_type_text });
+    try printer.print_indented("pub type {s} = {s};", .{ rust_name, backing_type_text });
 
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
 
-        const field_name = stdx.SourcePrinter.to_case(field.name, .upper_case);
+        const field_name = SourcePrinter.to_case(field.name, .upper_case);
         const int_value = @intFromEnum(@field(Type, field.name));
-        try writer.print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
+        try printer.print_indented("pub const {s}_{s}_{s}: {s} = {s};", .{
             rust_name,
             rust_name[0..suffix_pos],
             field_name,
@@ -308,11 +324,11 @@ fn emit_enum_manual(
         });
     }
 
-    try writer.print("\n", .{});
+    try printer.write_empty_line();
 }
 
 fn emit_struct(
-    writer: anytype,
+    printer: *SourcePrinter,
     comptime type_info: std.builtin.Type.Struct,
     comptime rust_name: []const u8,
     options: struct {
@@ -321,26 +337,28 @@ fn emit_struct(
 ) !void {
     assert(type_info.layout == .@"extern");
 
-    try writer.print("#[repr(C)]\n", .{});
+    try printer.write_indented("#[repr(C)]");
     if (options.derive.len > 0) {
-        try writer.print("#[derive({s})]\n", .{options.derive});
+        try printer.print_indented("#[derive({s})]", .{options.derive});
     }
-    try writer.print("pub struct {s} {{\n", .{rust_name});
+    try printer.print_indented("pub struct {s} {{", .{rust_name});
+    printer.indent();
 
     inline for (type_info.fields) |field| {
+        try printer.write_indent();
         if (std.mem.eql(u8, field.name, "reserved")) {
-            try writer.print("    pub reserved: Reserved<{d}>", .{@sizeOf(field.type)});
+            try printer.print("pub reserved: Reserved<{d}>", .{@sizeOf(field.type)});
         } else {
             switch (@typeInfo(field.type)) {
                 .array => |array| {
-                    try writer.print("    pub {s}: [{s}; {}]", .{
+                    try printer.print("pub {s}: [{s}; {}]", .{
                         field.name,
                         resolve_rust_type(field.type),
                         array.len,
                     });
                 },
                 else => {
-                    try writer.print("    pub {s}: {s}", .{
+                    try printer.print("pub {s}: {s}", .{
                         field.name,
                         resolve_rust_type(field.type),
                     });
@@ -348,14 +366,16 @@ fn emit_struct(
             }
         }
 
-        try writer.print(",\n", .{});
+        try printer.write(",\n");
     }
 
-    try writer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_operations(
-    writer: anytype,
+    printer: *SourcePrinter,
     comptime Operation: type,
     comptime type_info: std.builtin.Type.Enum,
     comptime rust_name: []const u8,
@@ -363,7 +383,7 @@ fn emit_operations(
 ) !void {
     assert(Operation == exports.tb_operation);
 
-    try writer.print(
+    try printer.print(
         \\#[doc(hidden)]
         \\pub(crate) trait {s}: Send + Sync + 'static {{
         \\    type OpSource: Send + 'static;
@@ -385,10 +405,10 @@ fn emit_operations(
         if (skip) continue;
 
         const op_enum = @field(Operation, field.name);
-        const op_name = stdx.SourcePrinter.to_case(field.name, .pascal_case);
+        const op_name = SourcePrinter.to_case(field.name, .pascal_case);
 
-        try writer.print("pub(crate) struct {s};\n", .{op_name});
-        try writer.print(
+        try printer.print_indented("pub(crate) struct {s};", .{op_name});
+        try printer.print(
             \\impl {[rust_name]s} for {[op_name]s} {{
             \\    type OpSource = {[source_type]s};
             \\    type OutputItem = {[output_type]s};
@@ -424,20 +444,24 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     var buffer: std.Io.Writer.Allocating = .init(allocator);
-    const writer = &buffer.writer;
-    try writer.print(
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = 4,
+        .indent_char = ' ',
+        .comment_marker = "//",
+    });
+    try printer.write(
         \\ ///////////////////////////////////////////////////////
         \\ // This file was auto-generated by rust_bindings.zig //
         \\ //              Do not manually modify.              //
         \\ ///////////////////////////////////////////////////////
         \\
         \\
-    , .{});
+    );
 
     inline for (type_mappings) |type_mapping| {
         if (type_mapping.comment) |comment| {
-            try writer.print(comment, .{});
-            try writer.print("\n", .{});
+            try printer.write(comment);
+            try printer.write("\n");
         }
 
         const rust_name = type_mapping.name;
@@ -445,21 +469,21 @@ pub fn main(init: std.process.Init) !void {
 
         switch (type_mapping.target) {
             .enum_manual => {
-                try emit_enum_manual(writer, type_mapping.source, type_info.@"enum", rust_name);
+                try emit_enum_manual(&printer, type_mapping.source, type_info.@"enum", rust_name);
             },
             .struct_default => {
-                try emit_struct(writer, type_info.@"struct", rust_name, .{
+                try emit_struct(&printer, type_info.@"struct", rust_name, .{
                     .derive = "Debug, Copy, Clone, Default",
                 });
             },
             .struct_default_eq => {
-                try emit_struct(writer, type_info.@"struct", rust_name, .{
+                try emit_struct(&printer, type_info.@"struct", rust_name, .{
                     .derive = "Debug, Copy, Clone, Default, PartialEq, Eq",
                 });
             },
             .operation => {
                 // try writer.print("pub mod op {{\n\n", .{});
-                try emit_operations(writer, type_mapping.source, type_info.@"enum", rust_name, &.{
+                try emit_operations(&printer, type_mapping.source, type_info.@"enum", rust_name, &.{
                     "get_change_events", "pulse",
                 });
                 // try writer.print("}} // mod op\n\n", .{});
@@ -467,34 +491,37 @@ pub fn main(init: std.process.Init) !void {
             .auto => switch (type_info) {
                 .@"struct" => |info| switch (info.layout) {
                     .auto => @compileError("Invalid C struct layout: " ++ info.layout),
-                    .@"packed" => try emit_bitflags(writer, info, rust_name, &.{"padding"}),
-                    .@"extern" => try emit_struct(writer, info, rust_name, .{
+                    .@"packed" => try emit_bitflags(&printer, info, rust_name, &.{"padding"}),
+                    .@"extern" => try emit_struct(&printer, info, rust_name, .{
                         .derive = "Debug, Copy, Clone",
                     }),
                 },
                 .@"enum" => |info| {
-                    try emit_enum_direct(writer, type_mapping.source, info, rust_name);
+                    try emit_enum_direct(&printer, type_mapping.source, info, rust_name);
                 },
-                else => try writer.print("pub type {s} = {s};\n\n", .{
-                    rust_name,
-                    resolve_rust_type(type_mapping.source),
-                }),
+                else => {
+                    try printer.print_indented("pub type {s} = {s};", .{
+                        rust_name,
+                        resolve_rust_type(type_mapping.source),
+                    });
+                    try printer.write_empty_line();
+                },
             },
         }
     }
 
-    try writer.print(
+    try printer.write(
         \\#[repr(transparent)]
         \\#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
         \\pub struct Reserved<const N: usize>([u8; N]);
         \\
-        \\impl<const N: usize> Default for Reserved<N> {{
-        \\    fn default() -> Reserved<N> {{
+        \\impl<const N: usize> Default for Reserved<N> {
+        \\    fn default() -> Reserved<N> {
         \\        Reserved([0; N])
-        \\    }}
-        \\}}
+        \\    }
+        \\}
         \\
-        \\extern "C" {{
+        \\extern "C" {
         \\    // Initialize a new TigerBeetle client which connects to the addresses provided and
         \\    // completes submitted batches by invoking the callback with the given context.
         \\    pub fn tb_client_init(
@@ -535,8 +562,8 @@ pub fn main(init: std.process.Init) !void {
         \\    pub fn tb_client_deinit(
         \\        client: *mut tb_client_t,
         \\    ) -> TB_CLIENT_STATUS;
-        \\}}
-    , .{});
+        \\}
+    );
 
     try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }

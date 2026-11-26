@@ -1,5 +1,7 @@
 const std = @import("std");
 const vsr = @import("vsr");
+const stdx = vsr.stdx;
+const SourcePrinter = stdx.SourcePrinter;
 
 const assert = std.debug.assert;
 const tb = vsr.tigerbeetle;
@@ -121,22 +123,23 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn emit_enum(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime Type: type,
     comptime mapping: TypeMapping,
 ) !void {
-    try emit_docs(buffer, mapping, 0, null);
+    try emit_docs(printer, mapping, null);
 
-    try buffer.print("export enum {s} {{\n", .{mapping.name});
+    try printer.print_indented("export enum {s} {{", .{mapping.name});
+    printer.indent();
 
     inline for (@typeInfo(Type).@"enum".fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime mapping.hidden(field.name)) continue;
 
-        try emit_docs(buffer, mapping, 1, field.name);
+        try emit_docs(printer, mapping, field.name);
 
         const int_value = @intFromEnum(@field(Type, field.name));
-        try buffer.print("  {s} = {s},\n", .{
+        try printer.print_indented("{s} = {s},", .{
             field.name,
             if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
@@ -145,103 +148,96 @@ fn emit_enum(
         });
     }
 
-    try buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_packed_struct(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
 ) !void {
     assert(type_info.layout == .@"packed");
-    try emit_docs(buffer, mapping, 0, null);
+    try emit_docs(printer, mapping, null);
 
-    try buffer.print(
-        \\export enum {s} {{
-        \\  none = 0,
-        \\
-    , .{mapping.name});
+    try printer.print_indented("export enum {s} {{", .{mapping.name});
+    printer.indent();
+    try printer.write_indented("none = 0,");
 
     inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.hidden(field.name)) continue;
 
-        try emit_docs(buffer, mapping, 1, field.name);
+        try emit_docs(printer, mapping, field.name);
 
-        try buffer.print("  {s} = (1 << {d}),\n", .{
+        try printer.print_indented("{s} = (1 << {d}),", .{
             field.name,
             i,
         });
     }
 
-    try buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_struct(
-    buffer: *std.Io.Writer,
+    printer: *SourcePrinter,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
 ) !void {
-    try emit_docs(buffer, mapping, 0, null);
+    try emit_docs(printer, mapping, null);
 
-    try buffer.print("export type {s} = {{\n", .{
-        mapping.name,
-    });
+    try printer.print_indented("export type {s} = {{", .{mapping.name});
+    printer.indent();
 
     inline for (type_info.fields) |field| {
         if (comptime mapping.hidden(field.name)) continue;
 
-        try emit_docs(buffer, mapping, 1, field.name);
+        try emit_docs(printer, mapping, field.name);
 
         switch (@typeInfo(field.type)) {
-            .array => try buffer.print("  {s}: Buffer\n", .{
+            .array => try printer.print_indented("{s}: Buffer", .{field.name}),
+            else => try printer.print_indented("{s}: {s}", .{
                 field.name,
+                typescript_type(field.type),
             }),
-            else => try buffer.print(
-                "  {s}: {s}\n",
-                .{
-                    field.name,
-                    typescript_type(field.type),
-                },
-            ),
         }
     }
 
-    try buffer.print("}}\n\n", .{});
+    printer.dedent();
+    try printer.write_indented("}");
+    try printer.write_empty_line();
 }
 
 fn emit_docs(
-    buffer: anytype,
+    printer: *SourcePrinter,
     comptime mapping: TypeMapping,
-    comptime indent: comptime_int,
     comptime field: ?[]const u8,
 ) !void {
     if (mapping.docs_link) |docs_link| {
-        try buffer.print(
-            \\
-            \\{[indent]s}/**
-            \\{[indent]s} * See [{[name]s}](https://docs.tigerbeetle.com/{[docs_link]s}{[field]s})
-            \\{[indent]s} */
-            \\
-        , .{
-            .indent = "  " ** indent,
-            .name = field orelse mapping.name,
-            .docs_link = docs_link,
-            .field = field orelse "",
+        try printer.write_empty_line();
+        try printer.write_indented("/**");
+        try printer.print_indented(" * See [{s}](https://docs.tigerbeetle.com/{s}{s})", .{
+            field orelse mapping.name,
+            docs_link,
+            field orelse "",
         });
+        try printer.write_indented(" */");
     }
 }
 
-pub fn generate_bindings(buffer: *std.Io.Writer) !void {
+pub fn generate_bindings(printer: *SourcePrinter) !void {
     @setEvalBranchQuota(100_000);
 
-    try buffer.print(
+    try printer.write(
         \\///////////////////////////////////////////////////////
         \\// This file was auto-generated by node_bindings.zig //
         \\//              Do not manually modify.              //
         \\///////////////////////////////////////////////////////
         \\
         \\
-    , .{});
+    );
 
     // Emit JS declarations.
     inline for (type_mappings) |type_mapping| {
@@ -253,10 +249,10 @@ pub fn generate_bindings(buffer: *std.Io.Writer) !void {
                 .auto => @compileError(
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
-                .@"packed" => try emit_packed_struct(buffer, info, mapping),
-                .@"extern" => try emit_struct(buffer, info, mapping),
+                .@"packed" => try emit_packed_struct(printer, info, mapping),
+                .@"extern" => try emit_struct(printer, info, mapping),
             },
-            .@"enum" => try emit_enum(buffer, ZigType, mapping),
+            .@"enum" => try emit_enum(printer, ZigType, mapping),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }
@@ -268,6 +264,11 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     var buffer: std.Io.Writer.Allocating = .init(allocator);
-    try generate_bindings(&buffer.writer);
+    var printer = SourcePrinter.init(allocator, &buffer.writer, .{
+        .indent_width = 2,
+        .indent_char = ' ',
+        .comment_marker = "//",
+    });
+    try generate_bindings(&printer);
     try std.Io.File.stdout().writeStreamingAll(init.io, buffer.written());
 }
