@@ -348,6 +348,7 @@ src/clients/rust/build.rs
 src/clients/rust/ci.zig
 src/clients/rust/docs.zig
 src/clients/rust/rust_bindings.zig
+src/clients/rust/rust_conformance.zig
 src/clients/rust/samples/basic/Cargo.toml
 src/clients/rust/samples/basic/README.md
 src/clients/rust/samples/basic/src/main.rs
@@ -367,6 +368,7 @@ src/clients/rust/src/op.rs
 src/clients/rust/src/tb_client.rs
 src/clients/rust/src/time_based_id.rs
 src/clients/rust/tests/allocation.rs
+src/clients/rust/tests/conformance.rs
 src/clients/rust/tests/executor/mod.rs
 src/clients/rust/tests/status_codes_and_flags.rs
 src/clients/rust/tests/test_db/mod.rs
