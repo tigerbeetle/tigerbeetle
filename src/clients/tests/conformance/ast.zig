@@ -14,6 +14,7 @@ pub const Case = struct {
     steps: []const Step,
     requirement: ?Requirement = null,
     isolated_client: bool = false,
+    exclusive: bool = false,
 
     pub const Requirement = stdx.EnumType(api_decl_names_matching(is_requirement));
 };
