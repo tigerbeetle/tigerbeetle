@@ -121,6 +121,9 @@ pub const Terminal = struct {
                             '1' => {
                                 const fourth_byte = try stdin.takeByte();
                                 switch (fourth_byte) {
+                                    // This is just one of multiple non-standard escape codes
+                                    // for Home.
+                                    '~' => return .home,
                                     ';' => {
                                         const fifth_byte = try stdin.takeByte();
                                         switch (fifth_byte) {
@@ -150,6 +153,46 @@ pub const Terminal = struct {
                                     else => return .unhandled,
                                 }
                             },
+                            '4' => {
+                                const fourth_byte = try stdin.takeByte();
+                                switch (fourth_byte) {
+                                    // This is just one of multiple non-standard escape codes
+                                    // for End.
+                                    '~' => return .end,
+                                    else => return .unhandled,
+                                }
+                            },
+                            '7' => {
+                                const fourth_byte = try stdin.takeByte();
+                                switch (fourth_byte) {
+                                    // This is just one of multiple non-standard escape codes
+                                    // for Home.
+                                    '~' => return .home,
+                                    else => return .unhandled,
+                                }
+                            },
+                            '8' => {
+                                const fourth_byte = try stdin.takeByte();
+                                switch (fourth_byte) {
+                                    // This is just one of multiple non-standard escape codes
+                                    // for End.
+                                    '~' => return .end,
+                                    else => return .unhandled,
+                                }
+                            },
+                            else => return .unhandled,
+                        }
+                    },
+                    // SS3 (application cursor keys).
+                    'O' => {
+                        const third_byte = try stdin.takeByte();
+                        switch (third_byte) {
+                            'A' => return .up,
+                            'B' => return .down,
+                            'C' => return .right,
+                            'D' => return .left,
+                            'H' => return .home,
+                            'F' => return .end,
                             else => return .unhandled,
                         }
                     },
@@ -501,5 +544,49 @@ test "terminal.zig: Terminal cursor position change is valid" {
         screen.update_cursor_position(t.delta);
         try std.testing.expectEqual(screen.cursor_row, t.row_destination);
         try std.testing.expectEqual(screen.cursor_column, t.column_destination);
+    }
+}
+
+test "terminal.zig: Home/End and SS3 cursor keys" {
+    const cases = [_]struct {
+        sequence: []const u8,
+        expected: UserInput,
+    }{
+        .{ .sequence = "\x1b[H", .expected = .home },
+        .{ .sequence = "\x1b[F", .expected = .end },
+        .{ .sequence = "\x1b[1~", .expected = .home },
+        .{ .sequence = "\x1b[4~", .expected = .end },
+        .{ .sequence = "\x1b[7~", .expected = .home },
+        .{ .sequence = "\x1b[8~", .expected = .end },
+        .{ .sequence = "\x1bOA", .expected = .up },
+        .{ .sequence = "\x1bOB", .expected = .down },
+        .{ .sequence = "\x1bOC", .expected = .right },
+        .{ .sequence = "\x1bOD", .expected = .left },
+        .{ .sequence = "\x1bOH", .expected = .home },
+        .{ .sequence = "\x1bOF", .expected = .end },
+    };
+
+    for (cases) |case| {
+        var tmp_dir = std.testing.tmpDir(.{});
+        defer tmp_dir.cleanup();
+
+        const file = try tmp_dir.dir.createFile(std.testing.io, "input", .{ .read = true });
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, case.sequence);
+        // The trailing byte must remain unread: escape sequence parsers must not leak it
+        // into the input buffer.
+        try file.writeStreamingAll(std.testing.io, "X");
+
+        var terminal: Terminal = undefined;
+        // `read_user_input` asserts that the terminal is in prompt mode, but the input parser
+        // itself does not use `mode_start`.
+        terminal.mode_start = std.mem.zeroes(Terminal.ModeStart);
+        terminal.stdin = file.reader(std.testing.io, &terminal.stdin_buffer);
+
+        try std.testing.expectEqual(case.expected, (try terminal.read_user_input()).?);
+        try std.testing.expectEqual(
+            UserInput{ .printable = 'X' },
+            (try terminal.read_user_input()).?,
+        );
     }
 }
