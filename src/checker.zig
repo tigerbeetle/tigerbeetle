@@ -23,6 +23,7 @@ pub fn main(init: std.process.Init) !void {
 
     try FRNG.Driver.main(gpa, io, sut, .{
         // .search = .{},
-        .replay = .{ .size = 64_536, .seed = 92 },
+        // .replay = .{ .size = 64_536, .seed = 92 },
+        .replay = .{ .size = 2540, .seed = 14990887676096544454 },
     });
 }

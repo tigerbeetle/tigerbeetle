@@ -2,6 +2,10 @@ const std = @import("std");
 const FRNG = @import("./FRNG.zig");
 const assert = std.debug.assert;
 
+fn maybe(ok: bool) void {
+    assert(ok or !ok);
+}
+
 const MiB = 1 << 20;
 
 const log = std.log;
@@ -135,7 +139,13 @@ const World = struct {
             .request => {
                 try world.request();
             },
-            .message => {},
+            .message => {
+                const source = try world.frng.index(world.replicas);
+                const target = try world.frng.index(world.replicas);
+
+                const message = world.replicas[source].send();
+                world.replicas[target].on_message(message);
+            },
             .kill => try world.kill(),
             .view_change => try world.view_change(),
             .persist => try world.persist(),
@@ -225,7 +235,7 @@ const Pipeline = struct {
         assert(pipeline.get(entry.op).?.checksum == entry.checksum);
     }
 
-    fn op_to_index(pipeline: *Pipeline, op: u64) ?u64 {
+    fn op_to_index(pipeline: *const Pipeline, op: u64) ?u64 {
         if (op < pipeline.op_base) return null;
         const index = op - pipeline.op_base;
         return if (index < pipeline.entry.len) index else null;
@@ -238,7 +248,7 @@ const Pipeline = struct {
         }
     }
 
-    fn is_ok(pipeline: *Pipeline, op: u64) bool {
+    fn is_ok(pipeline: *const Pipeline, op: u64) bool {
         const index = pipeline.op_to_index(op) orelse return false;
         return pipeline.ok[index];
     }
@@ -328,8 +338,26 @@ const Replica = struct {
     }
 
     fn on_message(replica: *Replica, message: Message) void {
-        _ = replica; // autofix
-        _ = message; // autofix
+        for (&replica.state, &message.state, 0..) |*ours, *theirs, replica_index| {
+            if (replica_index == replica.replica) {
+                assert(!theirs.is_strictly_newer(ours));
+            } else {
+                if (theirs.is_strictly_newer(ours)) {
+                    ours.* = theirs.*;
+                } else if (ours.is_strictly_newer(theirs)) {
+                    // Do nothing!
+                } else {
+                    // Fun!
+                }
+            }
+        }
+
+    }
+
+    fn send(replica: *const Replica) Message {
+        return .{
+            .state = replica.state,
+        };
     }
 
     fn view_change(replica: *Replica) void {
@@ -347,7 +375,51 @@ const LocalState = struct {
     pipeline: Pipeline = .{},
     view_min: u64 = 0,
     view_max: u64 = 1,
+
+    fn op_head(replica: *const LocalState) u64 {
+        return replica.pipeline.op_head() orelse replica.committed_last.op;
+    }
+
+    // NB: a and b are the same replica.
+    fn is_strictly_newer(a: *const LocalState, b: *const LocalState) bool {
+        assert(a.view_min <= a.view_max);
+        assert(b.view_min <= b.view_max);
+
+        const a_newer_view = (a.view_min > b.view_min or
+            a.view_max > b.view_max or
+            a.committed_last.op > b.committed_last.op);
+
+        const same_view = (a.view_min == b.view_min and
+            a.view_max == b.view_max and
+            a.committed_last.op == b.committed_last.op);
+
+        const a_more_oks = same_view and for (a.committed_last.op + 1..a.op_head() + 1) |op| {
+            if (a.pipeline.is_ok(op) and !b.pipeline.is_ok(op)) break true;
+        } else false;
+
+        const a_newer = a_newer_view or a_more_oks;
+
+        if (a_newer) {
+            assert(a.view_min >= b.view_min);
+            assert(a.view_max >= b.view_max);
+            assert(a.committed_last.op >= b.committed_last.op);
+            maybe(b.op_head() > a.op_head());
+
+            const op_min = a.committed_last.op + 1;
+            const op_max = @max(a.op_head(), b.op_head());
+            for (op_min..op_max + 1) |op| {
+                if (!a.pipeline.is_ok(op)) {
+                    assert(!b.pipeline.is_ok(op));
+                }
+            }
+
+            return true;
+        }
+        return false;
+    }
 };
+
+// view_min  view_max
 
 const GlobalSate = [replica_count]LocalState;
 
