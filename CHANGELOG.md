@@ -5,7 +5,7 @@ to receive notifications about breaking changes and critical issues!
 
 ## TigerBeetle 0.18.0
 
-Released: 2026-11-02
+Released: 2026-11-27
 
 This release is larger than usual due to some major adjustments we have been
 making to our development infrastructure over the past few months. Going forward,
@@ -179,6 +179,15 @@ we will be back to our regular weekly release cadence.
   with a valid-checksum isn't in our fault model. However, we already ignore
   similar cases elsewhere, so we ignore this one as well for consistency.
 
+- [25862bc](https://github.com/tigerbeetle/tigerbeetle/commit/25862bc91b41dcfdb7eb2cd273d2c8b36ace7229)
+
+  Clean up temporary multiversion executables on Windows and MacOS.
+
+- [68958eb](https://github.com/tigerbeetle/tigerbeetle/commit/68958eb757747d0fc96a79d1f9c2fa6766b67b48),
+  [7059919](https://github.com/tigerbeetle/tigerbeetle/commit/7059919b2cac0a2b6fb6bf124d4d78cca69a468f)
+
+  Add client conformance tests.
+
 ### Features
 
 - [133c1f7](https://github.com/tigerbeetle/tigerbeetle/commit/133c1f7045367c2f2485f78d0932fb4e0247e980)
@@ -188,6 +197,10 @@ we will be back to our regular weekly release cadence.
   The rationale behind this is that some environments disable access to io_uring
   (for example Docker and containerd removed the io_uring syscalls from their
   default seccomp allowlist).
+
+- [c804e9a](https://github.com/tigerbeetle/tigerbeetle/commit/c804e9aa9102d134c1f2b35f5dcfc399f07cf30e)
+
+  `--statsd` flag is no longer experimental.
 
 - [74ea044](https://github.com/tigerbeetle/tigerbeetle/commit/74ea04438aecfb5b73a06e8bfbde26d2f2262071)
 
@@ -210,7 +223,8 @@ we will be back to our regular weekly release cadence.
   These changes make these clients' behavior consistent with the others.
 
 - [731e050](https://github.com/tigerbeetle/tigerbeetle/commit/731e050d2fa368e0509b5b67738bdfcadab22541),
-  [c95d7a5](https://github.com/tigerbeetle/tigerbeetle/commit/c95d7a53a3d044741409b03b2f334a8ed033fa3c)
+  [c95d7a5](https://github.com/tigerbeetle/tigerbeetle/commit/c95d7a53a3d044741409b03b2f334a8ed033fa3c),
+  [0aeb306](https://github.com/tigerbeetle/tigerbeetle/commit/0aeb306561365e21b97775c729bfc439f6c16d72)
 
   Decouple client eviction and deinitialization.
 
@@ -237,11 +251,16 @@ we will be back to our regular weekly release cadence.
   [65b6ffe](https://github.com/tigerbeetle/tigerbeetle/commit/65b6ffe810ac01be1b55c333d59df7a527368bec),
   [386354c](https://github.com/tigerbeetle/tigerbeetle/commit/386354c08b11667cef58e48eb6bb2a0bae622ff6),
   [5b41694](https://github.com/tigerbeetle/tigerbeetle/commit/5b41694c54ca6dace6987da77812b2139987112a),
-  [d9567ff](https://github.com/tigerbeetle/tigerbeetle/commit/d9567fff30e3ef5f58e6f65003e163d9da923cce)
+  [d9567ff](https://github.com/tigerbeetle/tigerbeetle/commit/d9567fff30e3ef5f58e6f65003e163d9da923cce),
+  [16e334a](https://github.com/tigerbeetle/tigerbeetle/commit/16e334a7fe18e771d349c137cba4131daf3d4004)
 
   Various documentation improvements and fixes.
 
 ### Internals
+
+- [152d8e2](https://github.com/tigerbeetle/tigerbeetle/commit/152d8e2d016e225db8a2e681f00f28ae9646e7e4)
+
+  Introduce statically-allocated process spawning.
 
 - [146b0ce](https://github.com/tigerbeetle/tigerbeetle/commit/146b0cec80d0dcc50be4b5b96eb83d07261d558f),
   [2a9a009](https://github.com/tigerbeetle/tigerbeetle/commit/2a9a0090fe89c004874319f54e478c4a9cd496c9)
