@@ -6,6 +6,7 @@ documents every single aspect of TigerBeetle. Any answer can be found here, but 
 digging!
 
 - [Client Sessions](./sessions.md)
+- [Configuration](./configuration.md)
 - [Account](./account.md)
 - [Transfer](./transfer.md)
 - [AccountBalance](./account-balance.md)
